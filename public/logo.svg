@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 128" fill="none">
+  <!-- Icon -->
+  <rect width="128" height="128" rx="28" fill="#2563eb"/>
+  <text x="64" y="82" font-family="'Geist', system-ui, -apple-system, sans-serif" font-size="52" font-weight="700" fill="white" text-anchor="middle" letter-spacing="-2">FLS</text>
+  <!-- Wordmark -->
+  <text x="152" y="58" font-family="'Geist', system-ui, -apple-system, sans-serif" font-size="32" font-weight="600" fill="currentColor" letter-spacing="-0.5">Free Leads</text>
+  <text x="152" y="84" font-family="'Geist', system-ui, -apple-system, sans-serif" font-size="15" font-weight="400" fill="currentColor" opacity="0.45" letter-spacing="2">SCRAPER</text>
+</svg>

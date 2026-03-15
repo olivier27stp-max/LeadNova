@@ -1,0 +1,404 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProspectStatus {
+  NEW
+  ENRICHED
+  CONTACTED
+  REPLIED
+  QUALIFIED
+  NOT_INTERESTED
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+}
+
+enum ScheduledEmailStatus {
+  PENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members         WorkspaceMember[]
+  prospects       Prospect[]
+  campaigns       Campaign[]
+  blacklist       Blacklist[]
+  scheduledEmails ScheduledEmail[]
+  settings        AppSettings[]
+  emailTemplates  EmailTemplate[]
+  activityLogs    ActivityLog[]
+  scrapeWorkflows ScrapeWorkflow[]
+  keywordGenerations KeywordGeneration[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model Prospect {
+  id              String          @id @default(cuid())
+  workspaceId     String?
+  companyName     String
+  industry        String?
+  city            String?
+  address         String?
+  phone           String?
+  website         String?
+  email           String?
+  secondaryEmail  String?
+  contactPageUrl  String?
+  linkedinUrl     String?
+  googleMapsUrl   String?
+  emailGuessed    Boolean         @default(false)
+  source          String?
+  dateDiscovered  DateTime        @default(now())
+  status          ProspectStatus  @default(NEW)
+  leadScore       Int             @default(0)
+  notes           String?
+  contactType     String          @default("prospect")
+  importBatchId   String?
+  archivedAt      DateTime?
+
+  workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
+  emailActivities  EmailActivity[]
+  campaignContacts CampaignContact[]
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([companyName, city])
+  @@index([workspaceId])
+  @@index([status])
+  @@index([leadScore(sort: Desc)])
+  @@index([city])
+  @@index([source])
+  @@index([contactType])
+  @@index([email])
+  @@index([createdAt])
+  @@index([companyName])
+  @@index([importBatchId])
+  @@index([archivedAt])
+  @@map("prospects")
+}
+
+model EmailActivity {
+  id             String    @id @default(cuid())
+  prospectId     String
+  emailSubject   String
+  emailBody      String
+  sentAt         DateTime  @default(now())
+  openedAt       DateTime?
+  replyReceived  Boolean   @default(false)
+  bounce         Boolean   @default(false)
+
+  prospect       Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId])
+  @@index([sentAt])
+  @@map("email_activity")
+}
+
+model Blacklist {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  email       String?
+  domain      String?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+
+  @@unique([workspaceId, email])
+  @@unique([workspaceId, domain])
+  @@index([workspaceId])
+  @@map("blacklist")
+}
+
+model Campaign {
+  id                  String         @id @default(cuid())
+  workspaceId         String?
+  name                String
+  status              CampaignStatus @default(DRAFT)
+  emailSubject        String?
+  emailBody           String?
+  followUpSubject     String?
+  followUpBody        String?
+  maxPerDay           Int            @default(30)
+  delayMinSeconds     Int            @default(120)
+  delayMaxSeconds     Int            @default(300)
+  sentToday           Int            @default(0)
+  lastSentAt          DateTime?
+  requireApproval     Boolean        @default(true)
+
+  workspace           Workspace?      @relation(fields: [workspaceId], references: [id])
+  contacts            CampaignContact[]
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([workspaceId])
+  @@map("campaigns")
+}
+
+model CampaignContact {
+  id          String   @id @default(cuid())
+  campaignId  String
+  prospectId  String
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  prospect    Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+
+  @@unique([campaignId, prospectId])
+  @@index([campaignId])
+  @@index([prospectId])
+  @@map("campaign_contacts")
+}
+
+model AppSettings {
+  id          String    @id @default(cuid())
+  workspaceId String?   @unique
+  data        Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("app_settings")
+}
+
+model User {
+  id                String   @id @default(cuid())
+  name              String
+  email             String   @unique
+  passwordHash      String?
+  role              UserRole @default(USER)
+  active            Boolean  @default(true)
+  twoFactorEnabled  Boolean  @default(false)
+  twoFactorSecret   String?
+  lastActiveAt      DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("users")
+}
+
+model EmailTemplate {
+  id          String    @id @default(cuid())
+  workspaceId String?
+  name        String
+  type        String    @default("custom")
+  subject     String    @default("")
+  body        String    @default("")
+  isDefault   Boolean   @default(false)
+  archived    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("email_templates")
+}
+
+model ActivityLog {
+  id                  String   @id @default(cuid())
+  workspaceId         String?
+  action              String
+  type                String   @default("info")    // info, success, warning, error
+  title               String   @default("")
+  details             String?
+  userId              String?
+  relatedEntityType   String?                       // campaign, prospect, import, scrape, enrichment
+  relatedEntityId     String?
+  importBatchId       String?                       // links to prospects imported in this activity
+  metadata            Json     @default("{}")
+  isRead              Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  workspace           Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@index([isRead])
+  @@index([importBatchId])
+  @@index([action])
+  @@map("activity_logs")
+}
+
+// ═══════════════════════════════════════════════════════════
+// SCRAPE WORKFLOW (Step 1: finding leads via Google Maps)
+// ═══════════════════════════════════════════════════════════
+
+enum ScrapeWorkflowStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  STOPPED
+}
+
+enum ScrapeCityStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  IMPORTED
+  SKIPPED
+  STOPPED
+}
+
+model KeywordGeneration {
+  id              String   @id @default(cuid())
+  workspaceId     String?
+  prompt          String
+  language        String   @default("bilingual") // fr, en, bilingual
+  depth           String   @default("standard")  // simple, standard, deep
+  angle           String   @default("commercial") // local, commercial, technical, general
+  maxKeywords     Int      @default(50)
+
+  // Generated results (JSON)
+  result          Json     @default("{}")
+
+  // Metadata
+  insertedCount   Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace       Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@map("keyword_generations")
+}
+
+model ScrapeWorkflow {
+  id                    String               @id @default(cuid())
+  workspaceId           String?
+  name                  String
+  keyword               String
+  country               String               @default("Canada")
+  province              String?
+  region                String?
+  status                ScrapeWorkflowStatus @default(ACTIVE)
+
+  // Settings
+  minResultsThreshold   Int                  @default(20)
+  maxConsecutiveLow     Int                  @default(3)
+  consecutiveLowCities  Int                  @default(0)
+  cityLimit             Int?
+  dedupMode             String               @default("gmaps_url")
+
+  // Stats
+  totalCities           Int                  @default(0)
+  completedCities       Int                  @default(0)
+  totalProspectsImported Int                  @default(0)
+  duplicatesSkipped     Int                  @default(0)
+
+  cities                ScrapeCity[]
+
+  workspace             Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("scrape_workflows")
+}
+
+model ScrapeCity {
+  id              String           @id @default(cuid())
+  workflowId      String
+  cityName        String
+  province        String?
+  population      Int?
+  sortOrder       Int              @default(0)
+  status          ScrapeCityStatus @default(PENDING)
+
+  searchUrl       String?
+  resultsCount    Int?
+  importedCount   Int?
+  duplicatesCount Int?
+  scrapedAt       DateTime?
+
+  workflow        ScrapeWorkflow   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([workflowId, cityName])
+  @@index([workflowId])
+  @@index([status])
+  @@index([sortOrder])
+  @@map("scrape_cities")
+}
+
+model ScheduledEmail {
+  id           String               @id @default(cuid())
+  workspaceId  String?
+  campaignId   String?
+  prospectId   String?
+  subject      String?
+  body         String?
+  scheduledFor DateTime
+  timezone     String               @default("America/Toronto")
+  status       ScheduledEmailStatus @default(PENDING)
+  sentAt       DateTime?
+  sentCount    Int?
+  failedCount  Int?
+  error        String?
+
+  workspace    Workspace?           @relation(fields: [workspaceId], references: [id])
+
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([workspaceId])
+  @@index([status, scheduledFor])
+  @@index([campaignId])
+  @@index([prospectId])
+  @@map("scheduled_emails")
+}
