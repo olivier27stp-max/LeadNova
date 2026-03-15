@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ invitation, inviteUrl }, { status: 201 });
   } catch (error) {
+    console.error("POST /api/workspaces/invite error:", error);
     return handleWorkspaceError(error);
   }
 }

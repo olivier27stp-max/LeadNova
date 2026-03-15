@@ -603,13 +603,14 @@ export default function SettingsPage() {
     setBulkKeywords("");
     setShowBulkKeywords(false);
     if (toAdd.length < parsed.length) {
+      const dupes = parsed.length - toAdd.length;
       setToast({
-        message: `${toAdd.length} ajouté${toAdd.length > 1 ? "s" : ""}, ${parsed.length - toAdd.length} doublon${parsed.length - toAdd.length > 1 ? "s" : ""} ignoré${parsed.length - toAdd.length > 1 ? "s" : ""}`,
+        message: `${toAdd.length} ${toAdd.length > 1 ? t("settings", "addedCountPlural") : t("settings", "addedCount")}, ${dupes} ${dupes > 1 ? t("settings", "duplicateIgnoredPlural") : t("settings", "duplicateIgnored")}`,
         type: "success",
       });
     } else {
       setToast({
-        message: `${toAdd.length} mot${toAdd.length > 1 ? "s" : ""}-clé${toAdd.length > 1 ? "s" : ""} ajouté${toAdd.length > 1 ? "s" : ""}`,
+        message: `${toAdd.length} ${toAdd.length > 1 ? t("settings", "addedKeywordsPlural") : t("settings", "addedKeywords")}`,
         type: "success",
       });
     }
@@ -634,13 +635,14 @@ export default function SettingsPage() {
     setBulkCities("");
     setShowBulkCities(false);
     if (toAdd.length < parsed.length) {
+      const dupes = parsed.length - toAdd.length;
       setToast({
-        message: `${toAdd.length} ajoutée${toAdd.length > 1 ? "s" : ""}, ${parsed.length - toAdd.length} doublon${parsed.length - toAdd.length > 1 ? "s" : ""} ignoré${parsed.length - toAdd.length > 1 ? "s" : ""}`,
+        message: `${toAdd.length} ${toAdd.length > 1 ? t("settings", "addedFemCountPlural") : t("settings", "addedFemCount")}, ${dupes} ${dupes > 1 ? t("settings", "duplicateIgnoredPlural") : t("settings", "duplicateIgnored")}`,
         type: "success",
       });
     } else {
       setToast({
-        message: `${toAdd.length} ville${toAdd.length > 1 ? "s" : ""} ajoutée${toAdd.length > 1 ? "s" : ""}`,
+        message: `${toAdd.length} ${toAdd.length > 1 ? t("settings", "addedCitiesPlural") : t("settings", "addedCities")}`,
         type: "success",
       });
     }
@@ -688,17 +690,17 @@ export default function SettingsPage() {
 
   async function handleChangePassword() {
     if (!newPassword || newPassword.length < 8) {
-      showToast("Le mot de passe doit contenir au moins 8 caractères", "error");
+      showToast(t("settings", "passwordMinLength"), "error");
       return;
     }
     if (newPassword !== confirmPassword) {
-      showToast("Les mots de passe ne correspondent pas", "error");
+      showToast(t("settings", "passwordMismatch"), "error");
       return;
     }
     // Use first user as current user (no auth system yet)
     const userId = users[0]?.id;
     if (!userId) {
-      showToast("Aucun utilisateur trouvé", "error");
+      showToast(t("settings", "noUserFound"), "error");
       return;
     }
     setPasswordSaving(true);
@@ -714,14 +716,14 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Erreur");
-      showToast("Mot de passe modifié avec succès", "success");
+      showToast(t("settings", "passwordChanged"), "success");
       setShowChangePassword(false);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : "Erreur lors du changement",
+        err instanceof Error ? err.message : t("settings", "errorGeneric"),
         "error"
       );
     } finally {
@@ -732,7 +734,7 @@ export default function SettingsPage() {
   async function handleSetup2FA() {
     const userId = users[0]?.id;
     if (!userId) {
-      showToast("Aucun utilisateur trouvé", "error");
+      showToast(t("settings", "noUserFound"), "error");
       return;
     }
     setTwoFactorSaving(true);
@@ -749,7 +751,7 @@ export default function SettingsPage() {
       setShow2FASetup(true);
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : "Erreur 2FA",
+        err instanceof Error ? err.message : t("settings", "errorGeneric"),
         "error"
       );
     } finally {
@@ -774,7 +776,7 @@ export default function SettingsPage() {
       setTwoFactorCode("");
       setTwoFactorSecret("");
       setTwoFactorQrUrl("");
-      showToast("Authentification 2FA activée", "success");
+      showToast(t("settings", "twoFAEnabled"), "success");
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Code invalide",
@@ -798,7 +800,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Erreur");
       setCurrentUser2FA(false);
-      showToast("Authentification 2FA désactivée", "success");
+      showToast(t("settings", "twoFADisabled"), "success");
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Erreur",
@@ -819,13 +821,14 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "MEMBER" }),
       });
-      if (!res.ok) throw new Error("Erreur");
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur");
       setInviteLink(data.inviteUrl);
       loadInvites();
-      showToast("Lien d'invitation créé", "success");
-    } catch {
-      showToast("Erreur lors de la création du lien", "error");
+      showToast(t("settings", "inviteCreated"), "success");
+    } catch (err) {
+      console.error("Invite error:", err);
+      showToast(t("settings", "inviteCreateError"), "error");
     } finally {
       setGeneratingInvite(false);
     }
@@ -843,9 +846,9 @@ export default function SettingsPage() {
       await fetch(`/api/workspaces/invite?id=${id}`, { method: "DELETE" });
       loadInvites();
       setInviteLink("");
-      showToast("Invitation révoquée", "success");
+      showToast(t("settings", "inviteRevoked"), "success");
     } catch {
-      showToast("Erreur", "error");
+      showToast(t("settings", "errorGeneric"), "error");
     }
   }
 
@@ -865,7 +868,7 @@ export default function SettingsPage() {
       });
       loadUsers();
     } catch {
-      showToast("Erreur", "error");
+      showToast(t("settings", "errorGeneric"), "error");
     }
   }
 
@@ -873,9 +876,9 @@ export default function SettingsPage() {
     try {
       await fetch(`/api/users?id=${id}`, { method: "DELETE" });
       loadUsers();
-      showToast("Membre retiré", "success");
+      showToast(t("settings", "memberRemoved"), "success");
     } catch {
-      showToast("Erreur", "error");
+      showToast(t("settings", "errorGeneric"), "error");
     }
   }
 
@@ -901,9 +904,9 @@ export default function SettingsPage() {
       setNewTemplateBody("");
       setShowNewTemplate(false);
       loadTemplates();
-      showToast("Template créé", "success");
+      showToast(t("settings", "templateCreated"), "success");
     } catch {
-      showToast("Erreur", "error");
+      showToast(t("settings", "errorGeneric"), "error");
     }
   }
 
@@ -923,9 +926,9 @@ export default function SettingsPage() {
       });
       setEditingTemplate(null);
       loadTemplates();
-      showToast("Template modifié", "success");
+      showToast(t("settings", "templateUpdated"), "success");
     } catch {
-      showToast("Erreur", "error");
+      showToast(t("settings", "errorGeneric"), "error");
     }
   }
 
@@ -933,9 +936,9 @@ export default function SettingsPage() {
     try {
       await fetch(`/api/templates?id=${id}`, { method: "DELETE" });
       loadTemplates();
-      showToast("Template archivé", "success");
+      showToast(t("settings", "templateArchived"), "success");
     } catch {
-      showToast("Erreur", "error");
+      showToast(t("settings", "errorGeneric"), "error");
     }
   }
 
@@ -964,7 +967,7 @@ export default function SettingsPage() {
     return (
       <div className="text-center py-12">
         <p className="text-foreground-muted">
-          Impossible de charger les param&egrave;tres.
+          {t("settings", "cannotLoadSettings")}
         </p>
       </div>
     );
@@ -987,102 +990,105 @@ export default function SettingsPage() {
           >
             {/* ── Informations de l'entreprise ── */}
             <SectionCard
-              title="Informations de l'entreprise"
-              description="Ces donn&eacute;es sont utilis&eacute;es dans les emails, campagnes et templates."
+              title={t("settings", "companyTitle")}
+              description={t("settings", "companyDesc")}
               onSave={() => saveSection("company", settings.company)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FieldGroup label="Nom de l'entreprise">
+                <FieldGroup label={t("settings", "companyName")}>
                   <Input
                     value={settings.company.name}
                     onChange={(e) => updateField("company", "name", e.target.value)}
-                    placeholder="Mon entreprise inc."
+                    placeholder={t("settings", "companyNamePlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Nom commercial">
+                <FieldGroup label={t("settings", "brandName")}>
                   <Input
                     value={settings.company.brandName}
                     onChange={(e) => updateField("company", "brandName", e.target.value)}
                     placeholder="Free Leads"
                   />
                 </FieldGroup>
-                <FieldGroup label="Email de contact">
+                <FieldGroup label={t("settings", "contactEmail")}>
                   <Input
                     value={settings.company.email}
                     onChange={(e) => updateField("company", "email", e.target.value)}
                     type="email"
-                    placeholder="info@monentreprise.com"
+                    placeholder={t("settings", "contactEmailPlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="T&eacute;l&eacute;phone">
+                <FieldGroup label={t("settings", "phone")}>
                   <Input
                     value={settings.company.phone}
                     onChange={(e) => updateField("company", "phone", e.target.value)}
-                    placeholder="(514) 555-0000"
+                    placeholder={t("settings", "phonePlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Site web">
+                <FieldGroup label={t("settings", "website")}>
                   <Input
                     value={settings.company.website}
                     onChange={(e) => updateField("company", "website", e.target.value)}
-                    placeholder="https://monentreprise.com"
+                    placeholder={t("settings", "websitePlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Adresse">
+                <FieldGroup label={t("settings", "addressLabel")}>
                   <Input
                     value={settings.company.address}
                     onChange={(e) => updateField("company", "address", e.target.value)}
-                    placeholder="123 Rue Principale"
+                    placeholder={t("settings", "addressPlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Ville">
+                <FieldGroup label={t("settings", "city")}>
                   <Input
                     value={settings.company.city}
                     onChange={(e) => updateField("company", "city", e.target.value)}
-                    placeholder="Montr&eacute;al"
+                    placeholder={t("settings", "cityPlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Province">
+                <FieldGroup label={t("settings", "province")}>
                   <Input
                     value={settings.company.province}
                     onChange={(e) => updateField("company", "province", e.target.value)}
-                    placeholder="Qu&eacute;bec"
+                    placeholder={t("settings", "provincePlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Code postal">
+                <FieldGroup label={t("settings", "postalCode")}>
                   <Input
                     value={settings.company.postalCode}
                     onChange={(e) => updateField("company", "postalCode", e.target.value)}
-                    placeholder="H1A 1A1"
+                    placeholder={t("settings", "postalCodePlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label="Pays">
+                <FieldGroup label={t("settings", "country")}>
                   <Input
                     value={settings.company.country}
                     onChange={(e) => updateField("company", "country", e.target.value)}
                   />
                 </FieldGroup>
               </div>
-              <FieldGroup label="Description">
+              <FieldGroup label={t("settings", "description")}>
                 <TextArea
                   value={settings.company.description}
                   onChange={(v) => updateField("company", "description", v)}
-                  placeholder="Description courte de votre entreprise..."
+                  placeholder={t("settings", "descriptionPlaceholder")}
                 />
               </FieldGroup>
-              <FieldGroup label="Signature email par d&eacute;faut">
+              <FieldGroup label={t("settings", "emailSignature")}>
                 <TextArea
                   value={settings.company.emailSignature}
                   onChange={(v) => updateField("company", "emailSignature", v)}
-                  placeholder={"Cordialement,\nOlivier\nMon Entreprise"}
+                  placeholder={t("settings", "emailSignaturePlaceholder")}
                   rows={4}
                 />
               </FieldGroup>
               <div className="bg-background-subtle rounded-lg p-3 mt-2">
                 <p className="text-xs font-medium text-foreground-muted mb-1">
-                  Variables disponibles dans les emails
+                  {t("settings", "availableVariables")}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {["{{company_name}}", "{{company_email}}", "{{company_phone}}", "{{company_website}}"].map((v) => (
@@ -1098,8 +1104,7 @@ export default function SettingsPage() {
             <div className="flex items-start gap-2.5 p-3 rounded-lg bg-background-subtle border border-border text-xs text-foreground-muted">
               <Mail className="size-3.5 mt-0.5 shrink-0" />
               <span>
-                Les emails de campagne sont envoy&eacute;s au nom de votre entreprise.
-                Les r&eacute;ponses des prospects arrivent &agrave; l&apos;adresse <span className="font-medium text-foreground">{settings.company.email || "email de contact"}</span> ci-dessus.
+                {t("settings", "emailInfoNote")} <span className="font-medium text-foreground">{settings.company.email || t("settings", "emailInfoContact")}</span> {t("settings", "emailInfoSuffix")}
               </span>
             </div>
           </motion.div>
@@ -1118,8 +1123,8 @@ export default function SettingsPage() {
           >
             {/* Invite link section */}
             <SectionCard
-              title="Inviter des membres"
-              description="Partagez un lien d'invitation pour ajouter des membres à votre espace de travail."
+              title={t("settings", "inviteMembers")}
+              description={t("settings", "inviteMembersDesc")}
             >
               <div className="space-y-3">
                 {inviteLink ? (
@@ -1131,31 +1136,31 @@ export default function SettingsPage() {
                     />
                     <Button onClick={handleCopyInvite} size="sm" variant={inviteCopied ? "success" : "secondary"}>
                       {inviteCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                      {inviteCopied ? "Copié" : "Copier"}
+                      {inviteCopied ? t("settings", "copied") : t("settings", "copy")}
                     </Button>
                   </div>
                 ) : (
                   <Button onClick={handleGenerateInvite} size="sm" disabled={generatingInvite}>
                     <Link2 className="size-4" />
-                    {generatingInvite ? "Génération…" : "Générer un lien d'invitation"}
+                    {generatingInvite ? t("settings", "generating") : t("settings", "generateInviteLink")}
                   </Button>
                 )}
                 {invites.length > 0 && (
                   <div className="space-y-1.5 pt-2 border-t border-border">
-                    <p className="text-xs text-foreground-muted font-medium">Invitations actives</p>
+                    <p className="text-xs text-foreground-muted font-medium">{t("settings", "activeInvites")}</p>
                     {invites.map((inv) => (
                       <div key={inv.id} className="flex items-center justify-between text-xs p-2 rounded bg-background-subtle">
                         <div className="flex items-center gap-2 text-foreground-secondary">
                           <Link2 className="size-3" />
-                          <span>Rôle: {inv.role === "ADMIN" ? "Admin" : "Membre"}</span>
+                          <span>{t("settings", "roleLabel")}: {inv.role === "ADMIN" ? t("settings", "roleAdmin") : t("settings", "roleMember")}</span>
                           <span className="text-foreground-muted">
-                            — expire le {new Date(inv.expiresAt).toLocaleDateString("fr-CA")}
+                            — {t("settings", "expiresOn")} {new Date(inv.expiresAt).toLocaleDateString("fr-CA")}
                           </span>
                         </div>
                         <button
                           onClick={() => handleRevokeInvite(inv.id)}
                           className="text-danger hover:text-danger/80 p-1"
-                          title="Révoquer"
+                          title={t("settings", "revoke")}
                         >
                           <Trash2 className="size-3" />
                         </button>
@@ -1168,12 +1173,12 @@ export default function SettingsPage() {
 
             {/* Members list */}
             <SectionCard
-              title="Membres de l'espace de travail"
-              description="Les utilisateurs qui ont accès à cet espace de travail."
+              title={t("settings", "workspaceMembers")}
+              description={t("settings", "workspaceMembersDesc")}
             >
               {users.length === 0 ? (
                 <p className="text-foreground-muted text-sm py-4">
-                  Aucun membre. Invitez quelqu&apos;un avec un lien d&apos;invitation.
+                  {t("settings", "noMembers")}
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -1192,7 +1197,7 @@ export default function SettingsPage() {
                           <p className="text-sm font-medium text-foreground">
                             {u.name}{" "}
                             {u.workspaceRole === "OWNER" && (
-                              <span className="text-xs text-primary font-normal">(propriétaire)</span>
+                              <span className="text-xs text-primary font-normal">({t("settings", "owner")})</span>
                             )}
                           </p>
                           <p className="text-xs text-foreground-muted">
@@ -1210,15 +1215,15 @@ export default function SettingsPage() {
                               }
                               className="text-xs h-7 px-2 py-1"
                             >
-                              <option value="ADMIN">Admin</option>
-                              <option value="MEMBER">Membre</option>
+                              <option value="ADMIN">{t("settings", "roleAdmin")}</option>
+                              <option value="MEMBER">{t("settings", "roleMember")}</option>
                             </Select>
                             <Button
                               onClick={() => handleDeleteUser(u.id)}
                               variant="danger-ghost"
                               size="sm"
                             >
-                              Retirer
+                              {t("settings", "removeBtn")}
                             </Button>
                           </>
                         )}
@@ -1241,14 +1246,17 @@ export default function SettingsPage() {
             className="space-y-6"
           >
             <SectionCard
-              title="Prospects et contacts"
-              description="Comportements par défaut pour les prospects et contacts."
+              title={t("settings", "prospectsTitle")}
+              description={t("settings", "prospectsDesc")}
               onSave={() => saveSection("prospects", settings.prospects)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FieldGroup label="Type de contact par défaut">
+                <FieldGroup label={t("settings", "defaultContactType")}>
                   <Select
                     value={settings.prospects.defaultContactType}
                     onChange={(e) =>
@@ -1259,12 +1267,12 @@ export default function SettingsPage() {
                       )
                     }
                   >
-                    <option value="prospect">Prospect</option>
-                    <option value="client">Client</option>
-                    <option value="nouveau_client">Nouveau client</option>
+                    <option value="prospect">{t("settings", "optionProspect")}</option>
+                    <option value="client">{t("settings", "optionClient")}</option>
+                    <option value="nouveau_client">{t("settings", "optionNewClient")}</option>
                   </Select>
                 </FieldGroup>
-                <FieldGroup label="Source par défaut">
+                <FieldGroup label={t("settings", "defaultSource")}>
                   <Select
                     value={settings.prospects.defaultSource}
                     onChange={(e) =>
@@ -1276,44 +1284,44 @@ export default function SettingsPage() {
                     }
                   >
                     <option value="google_search">Google Search</option>
-                    <option value="manual">Manuel</option>
-                    <option value="import">Import</option>
-                    <option value="referral">Référence</option>
+                    <option value="manual">{t("settings", "optionManual")}</option>
+                    <option value="import">{t("settings", "optionImport")}</option>
+                    <option value="referral">{t("settings", "optionReferral")}</option>
                   </Select>
                 </FieldGroup>
               </div>
               <div className="border-t border-border pt-4 mt-2">
                 <p className="text-sm font-medium text-foreground-secondary mb-2">
-                  Déduplication
+                  {t("settings", "deduplication")}
                 </p>
                 <Toggle
                   checked={settings.prospects.blockDuplicateEmail}
                   onChange={(v) =>
                     updateField("prospects", "blockDuplicateEmail", v)
                   }
-                  label="Bloquer les doublons par email"
+                  label={t("settings", "blockDuplicateEmail")}
                 />
                 <Toggle
                   checked={settings.prospects.blockDuplicatePhone}
                   onChange={(v) =>
                     updateField("prospects", "blockDuplicatePhone", v)
                   }
-                  label="Bloquer les doublons par téléphone"
+                  label={t("settings", "blockDuplicatePhone")}
                 />
                 <Toggle
                   checked={settings.prospects.autoMerge}
                   onChange={(v) =>
                     updateField("prospects", "autoMerge", v)
                   }
-                  label="Fusionner automatiquement les doublons"
+                  label={t("settings", "autoMerge")}
                 />
               </div>
             </SectionCard>
 
             {/* Garbage city cleaner */}
             <SectionCard
-              title="Nettoyage des villes"
-              description="Détecte et supprime les valeurs de ville invalides captées par erreur lors du scraping."
+              title={t("settings", "cityCleaner")}
+              description={t("settings", "cityCleanerDesc")}
             >
               <div className="flex items-center gap-3 mb-4">
                 <Button
@@ -1327,16 +1335,16 @@ export default function SettingsPage() {
                   ) : (
                     <MapPin className="size-4" />
                   )}
-                  {garbageLoading ? "Analyse en cours…" : "Scanner les villes"}
+                  {garbageLoading ? t("settings", "scanning") : t("settings", "scanCities")}
                 </Button>
                 {garbageScanned && garbageCities.length === 0 && (
                   <span className="text-sm text-success flex items-center gap-1.5">
-                    <Check className="size-4" /> Aucune ville invalide détectée
+                    <Check className="size-4" /> {t("settings", "noInvalidCities")}
                   </span>
                 )}
                 {garbageScanned && garbageCities.length > 0 && (
                   <span className="text-sm text-warning flex items-center gap-1.5">
-                    <AlertTriangle className="size-4" /> {garbageCities.length} ville{garbageCities.length > 1 ? "s" : ""} suspecte{garbageCities.length > 1 ? "s" : ""} détectée{garbageCities.length > 1 ? "s" : ""}
+                    <AlertTriangle className="size-4" /> {garbageCities.length} {garbageCities.length > 1 ? t("settings", "suspectCityPlural") : t("settings", "suspectCitySingular")}
                   </span>
                 )}
               </div>
@@ -1364,9 +1372,9 @@ export default function SettingsPage() {
                             }
                             className="rounded"
                           />
-                          Tout sélectionner
+                          {t("settings", "selectAll")}
                         </label>
-                        <span className="text-xs text-foreground-muted">{garbageSelected.size} sélectionné{garbageSelected.size > 1 ? "s" : ""}</span>
+                        <span className="text-xs text-foreground-muted">{garbageSelected.size} {garbageSelected.size > 1 ? t("settings", "selectedCountPlural") : t("settings", "selectedCount")}</span>
                       </div>
                       <div className="divide-y divide-border max-h-64 overflow-y-auto">
                         {garbageCities.map(({ city, count }) => (
@@ -1399,8 +1407,8 @@ export default function SettingsPage() {
                         <Trash2 className="size-4" />
                       )}
                       {garbageClearing
-                        ? "Suppression…"
-                        : `Effacer la ville pour ${garbageSelected.size} entrée${garbageSelected.size > 1 ? "s" : ""}`}
+                        ? t("settings", "deleting")
+                        : `${t("settings", "clearCityFor")} ${garbageSelected.size} ${garbageSelected.size > 1 ? t("settings", "entryPlural") : t("settings", "entry")}`}
                     </Button>
                   </motion.div>
                 )}
@@ -1418,14 +1426,17 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Campagnes"
-              description="Paramètres par défaut pour les nouvelles campagnes."
+              title={t("settings", "campaignsTitle")}
+              description={t("settings", "campaignsDesc")}
               onSave={() => saveSection("campaigns", settings.campaigns)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FieldGroup label="Limite d'envois par jour">
+                <FieldGroup label={t("settings", "dailyLimit")}>
                   <Input
                     type="number"
                     value={settings.campaigns.dailyLimit}
@@ -1440,7 +1451,7 @@ export default function SettingsPage() {
                     max={500}
                   />
                 </FieldGroup>
-                <FieldGroup label="Max contacts par batch">
+                <FieldGroup label={t("settings", "maxContactsPerBatch")}>
                   <Input
                     type="number"
                     value={settings.campaigns.maxContactsPerBatch}
@@ -1455,7 +1466,7 @@ export default function SettingsPage() {
                     max={200}
                   />
                 </FieldGroup>
-                <FieldGroup label="Délai min (secondes)">
+                <FieldGroup label={t("settings", "delayMin")}>
                   <Input
                     type="number"
                     value={settings.campaigns.defaultDelayMin}
@@ -1469,7 +1480,7 @@ export default function SettingsPage() {
                     min={30}
                   />
                 </FieldGroup>
-                <FieldGroup label="Délai max (secondes)">
+                <FieldGroup label={t("settings", "delayMax")}>
                   <Input
                     type="number"
                     value={settings.campaigns.defaultDelayMax}
@@ -1483,7 +1494,7 @@ export default function SettingsPage() {
                     min={60}
                   />
                 </FieldGroup>
-                <FieldGroup label="Heure de début">
+                <FieldGroup label={t("settings", "sendStartHour")}>
                   <Input
                     type="number"
                     value={settings.campaigns.sendStartHour}
@@ -1498,7 +1509,7 @@ export default function SettingsPage() {
                     max={23}
                   />
                 </FieldGroup>
-                <FieldGroup label="Heure de fin">
+                <FieldGroup label={t("settings", "sendEndHour")}>
                   <Input
                     type="number"
                     value={settings.campaigns.sendEndHour}
@@ -1513,7 +1524,7 @@ export default function SettingsPage() {
                     max={23}
                   />
                 </FieldGroup>
-                <FieldGroup label="Fuseau horaire">
+                <FieldGroup label={t("settings", "timezoneLabel")}>
                   <Select
                     value={settings.campaigns.timezone}
                     onChange={(e) =>
@@ -1530,7 +1541,7 @@ export default function SettingsPage() {
                     <option value="Europe/Paris">Paris (CET)</option>
                   </Select>
                 </FieldGroup>
-                <FieldGroup label="Statut par défaut">
+                <FieldGroup label={t("settings", "defaultStatus")}>
                   <Select
                     value={settings.campaigns.defaultStatus}
                     onChange={(e) =>
@@ -1541,9 +1552,9 @@ export default function SettingsPage() {
                       )
                     }
                   >
-                    <option value="DRAFT">Brouillon</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="PAUSED">En pause</option>
+                    <option value="DRAFT">{t("settings", "optionDraft")}</option>
+                    <option value="ACTIVE">{t("settings", "optionActive")}</option>
+                    <option value="PAUSED">{t("settings", "optionPaused")}</option>
                   </Select>
                 </FieldGroup>
               </div>
@@ -1553,7 +1564,7 @@ export default function SettingsPage() {
                   onChange={(v) =>
                     updateField("campaigns", "pauseOnError", v)
                   }
-                  label="Pause automatique en cas d'erreur"
+                  label={t("settings", "pauseOnError")}
                 />
               </div>
             </SectionCard>
@@ -1569,11 +1580,14 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Automatisation"
-              description="Configurez les automatismes de la plateforme."
+              title={t("settings", "automationTitle")}
+              description={t("settings", "automationDesc")}
               onSave={() => saveSection("automation", settings.automation)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <div className="space-y-1">
                 <Toggle
@@ -1581,43 +1595,43 @@ export default function SettingsPage() {
                   onChange={(v) =>
                     updateField("automation", "autoSend", v)
                   }
-                  label="Envois automatiques"
+                  label={t("settings", "autoSend")}
                 />
                 <Toggle
                   checked={settings.automation.autoFollowUp}
                   onChange={(v) =>
                     updateField("automation", "autoFollowUp", v)
                   }
-                  label="Follow-ups automatiques"
+                  label={t("settings", "autoFollowUp")}
                 />
                 <Toggle
                   checked={settings.automation.autoReminder}
                   onChange={(v) =>
                     updateField("automation", "autoReminder", v)
                   }
-                  label="Relances automatiques"
+                  label={t("settings", "autoReminder")}
                 />
                 <Toggle
                   checked={settings.automation.internalNotifications}
                   onChange={(v) =>
                     updateField("automation", "internalNotifications", v)
                   }
-                  label="Notifications internes"
+                  label={t("settings", "internalNotifications")}
                 />
                 <Toggle
                   checked={settings.automation.errorAlerts}
                   onChange={(v) =>
                     updateField("automation", "errorAlerts", v)
                   }
-                  label="Alertes d'erreur"
+                  label={t("settings", "errorAlerts")}
                 />
               </div>
               <div className="border-t border-border pt-4 mt-2">
                 <p className="text-sm font-medium text-foreground-secondary mb-3">
-                  Paramètres de relance
+                  {t("settings", "followUpSettings")}
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <FieldGroup label="Délai avant follow-up (jours)">
+                  <FieldGroup label={t("settings", "followUpDelayDays")}>
                     <Input
                       type="number"
                       value={settings.automation.followUpDelayDays}
@@ -1632,7 +1646,7 @@ export default function SettingsPage() {
                       max={30}
                     />
                   </FieldGroup>
-                  <FieldGroup label="Nombre max de relances">
+                  <FieldGroup label={t("settings", "maxFollowUps")}>
                     <Input
                       type="number"
                       value={settings.automation.maxFollowUps}
@@ -1647,7 +1661,7 @@ export default function SettingsPage() {
                       max={10}
                     />
                   </FieldGroup>
-                  <FieldGroup label="Intervalle entre relances (jours)">
+                  <FieldGroup label={t("settings", "followUpIntervalDays")}>
                     <Input
                       type="number"
                       value={settings.automation.followUpIntervalDays}
@@ -1669,14 +1683,14 @@ export default function SettingsPage() {
                     onChange={(v) =>
                       updateField("automation", "stopOnReply", v)
                     }
-                    label="Arrêter les relances si réponse reçue"
+                    label={t("settings", "stopOnReply")}
                   />
                   <Toggle
                     checked={settings.automation.stopOnExcluded}
                     onChange={(v) =>
                       updateField("automation", "stopOnExcluded", v)
                     }
-                    label="Arrêter si contact exclu"
+                    label={t("settings", "stopOnExcluded")}
                   />
                 </div>
               </div>
@@ -1693,8 +1707,11 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Ciblage de recherche"
-              description="Définissez les mots-clés et les villes utilisés pour la découverte de prospects."
+              title={t("settings", "targetingTitle")}
+              description={t("settings", "targetingDesc")}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
               onSave={() =>
                 saveSection(
                   "targeting",
@@ -1707,13 +1724,10 @@ export default function SettingsPage() {
               {/* Mots-cles */}
               <div>
                 <p className="text-sm font-medium text-foreground-secondary mb-2">
-                  Mots-clés de recherche
+                  {t("settings", "searchKeywords")}
                 </p>
                 <p className="text-xs text-muted mb-3">
-                  Ces mots-clés seront utilisés pour trouver des
-                  prospects sur Google. Exemple : &quot;gestion
-                  immobilière&quot;, &quot;property management&quot;,
-                  &quot;condo management&quot;
+                  {t("settings", "searchKeywordsDesc")}
                 </p>
                 <div className="flex gap-2 mb-3">
                   <Input
@@ -1743,7 +1757,7 @@ export default function SettingsPage() {
                         setNewKeyword("");
                       }
                     }}
-                    placeholder="Ajouter un mot-clé et appuyer Entrée..."
+                    placeholder={t("settings", "addKeywordPlaceholder")}
                     className="flex-1"
                   />
                   <Button
@@ -1771,7 +1785,7 @@ export default function SettingsPage() {
                     }}
                     size="sm"
                   >
-                    Ajouter
+                    {t("settings", "addBtn")}
                   </Button>
                   <Button
                     onClick={() =>
@@ -1784,9 +1798,9 @@ export default function SettingsPage() {
                         ? "border-primary text-primary"
                         : ""
                     }
-                    title="Coller plusieurs mots-clés d'un coup"
+                    title={t("settings", "pasteBulkKeywordsTitle")}
                   >
-                    Coller en lot
+                    {t("settings", "pasteBulk")}
                   </Button>
                   <AiAssistButton
                     type="keywords"
@@ -1821,10 +1835,7 @@ export default function SettingsPage() {
                     >
                       <div className="mb-3 p-3 bg-primary-subtle border border-border rounded-lg">
                         <p className="text-xs text-primary mb-2">
-                          Collez vos mots-clés ci-dessous. Ils seront
-                          automatiquement séparés par virgules,
-                          retours de ligne, points-virgules ou tabulations.
-                          Les doublons seront ignorés.
+                          {t("settings", "pasteBulkKeywordsDesc")}
                         </p>
                         <textarea
                           value={bulkKeywords}
@@ -1840,8 +1851,8 @@ export default function SettingsPage() {
                         <div className="flex items-center justify-between">
                           <p className="text-xs text-muted">
                             {parseBulkInput(bulkKeywords).length > 0
-                              ? `${parseBulkInput(bulkKeywords).length} mot(s)-clé(s) détecté(s)`
-                              : "Aucun élément détecté"}
+                              ? `${parseBulkInput(bulkKeywords).length} ${t("settings", "keywordsDetected")}`
+                              : t("settings", "noItemDetected")}
                           </p>
                           <div className="flex gap-2">
                             <Button
@@ -1852,7 +1863,7 @@ export default function SettingsPage() {
                               variant="ghost"
                               size="sm"
                             >
-                              Annuler
+                              {t("settings", "cancelBtn")}
                             </Button>
                             <Button
                               onClick={handleBulkAddKeywords}
@@ -1861,7 +1872,7 @@ export default function SettingsPage() {
                               }
                               size="sm"
                             >
-                              Ajouter{" "}
+                              {t("settings", "addBtn")}{" "}
                               {parseBulkInput(bulkKeywords).length > 0
                                 ? `(${parseBulkInput(bulkKeywords).length})`
                                 : ""}
@@ -1875,7 +1886,7 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-2">
                   {settings.targeting.keywords.length === 0 ? (
                     <p className="text-sm text-muted italic">
-                      Aucun mot-clé configuré
+                      {t("settings", "noKeywordsConfigured")}
                     </p>
                   ) : (
                     settings.targeting.keywords.map((kw, i) => (
@@ -1914,12 +1925,10 @@ export default function SettingsPage() {
               {/* Villes */}
               <div>
                 <p className="text-sm font-medium text-foreground-secondary mb-2">
-                  Villes à cibler
+                  {t("settings", "targetCities")}
                 </p>
                 <p className="text-xs text-muted mb-3">
-                  Les recherches seront effectuées dans chacune de ces
-                  villes. Chaque mot-clé sera combiné avec chaque
-                  ville.
+                  {t("settings", "targetCitiesDesc")}
                 </p>
                 <div className="flex gap-2 mb-3">
                   <Input
@@ -1949,7 +1958,7 @@ export default function SettingsPage() {
                         setNewCity("");
                       }
                     }}
-                    placeholder="Ajouter une ville et appuyer Entrée..."
+                    placeholder={t("settings", "addCityPlaceholder")}
                     className="flex-1"
                   />
                   <Button
@@ -1977,7 +1986,7 @@ export default function SettingsPage() {
                     }}
                     size="sm"
                   >
-                    Ajouter
+                    {t("settings", "addBtn")}
                   </Button>
                   <Button
                     onClick={() => setShowBulkCities(!showBulkCities)}
@@ -1988,9 +1997,9 @@ export default function SettingsPage() {
                         ? "border-success text-success"
                         : ""
                     }
-                    title="Coller plusieurs villes d'un coup"
+                    title={t("settings", "pasteBulkCitiesTitle")}
                   >
-                    Coller en lot
+                    {t("settings", "pasteBulk")}
                   </Button>
                   <AiAssistButton
                     type="cities"
@@ -2025,10 +2034,7 @@ export default function SettingsPage() {
                     >
                       <div className="mb-3 p-3 bg-success-subtle border border-border rounded-lg">
                         <p className="text-xs text-success mb-2">
-                          Collez vos villes ci-dessous. Elles seront
-                          automatiquement séparées par virgules,
-                          retours de ligne, points-virgules ou tabulations.
-                          Les doublons seront ignorés.
+                          {t("settings", "pasteBulkCitiesDesc")}
                         </p>
                         <textarea
                           value={bulkCities}
@@ -2044,8 +2050,8 @@ export default function SettingsPage() {
                         <div className="flex items-center justify-between">
                           <p className="text-xs text-muted">
                             {parseBulkInput(bulkCities).length > 0
-                              ? `${parseBulkInput(bulkCities).length} ville(s) détectée(s)`
-                              : "Aucun élément détecté"}
+                              ? `${parseBulkInput(bulkCities).length} ${t("settings", "citiesDetected")}`
+                              : t("settings", "noItemDetected")}
                           </p>
                           <div className="flex gap-2">
                             <Button
@@ -2056,7 +2062,7 @@ export default function SettingsPage() {
                               variant="ghost"
                               size="sm"
                             >
-                              Annuler
+                              {t("settings", "cancelBtn")}
                             </Button>
                             <Button
                               onClick={handleBulkAddCities}
@@ -2066,7 +2072,7 @@ export default function SettingsPage() {
                               variant="success"
                               size="sm"
                             >
-                              Ajouter{" "}
+                              {t("settings", "addBtn")}{" "}
                               {parseBulkInput(bulkCities).length > 0
                                 ? `(${parseBulkInput(bulkCities).length})`
                                 : ""}
@@ -2080,7 +2086,7 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-2">
                   {settings.targeting.cities.length === 0 ? (
                     <p className="text-sm text-muted italic">
-                      Aucune ville configurée
+                      {t("settings", "noCitiesConfigured")}
                     </p>
                   ) : (
                     settings.targeting.cities.map((city, i) => (
@@ -2119,15 +2125,14 @@ export default function SettingsPage() {
               {/* Requetes de recherche */}
               <div>
                 <p className="text-sm font-medium text-foreground-secondary mb-2">
-                  Requêtes de recherche
+                  {t("settings", "searchQueries")}
                 </p>
                 <p className="text-xs text-muted mb-3">
-                  Requêtes envoyées à Google. Utilisez{" "}
+                  {t("settings", "searchQueriesDesc")}{" "}
                   <span className="font-mono bg-background-subtle px-1 rounded">
                     {"{city}"}
                   </span>{" "}
-                  comme placeholder -- il sera remplacé par chaque
-                  ville ci-dessus.
+                  {t("settings", "searchQueriesDescSuffix")}
                 </p>
                 <div className="flex gap-2 mb-3">
                   <Input
@@ -2157,7 +2162,7 @@ export default function SettingsPage() {
                         setNewQuery("");
                       }
                     }}
-                    placeholder="Ex: property management {city}"
+                    placeholder={t("settings", "addQueryPlaceholder")}
                     className="flex-1"
                   />
                   <Button
@@ -2185,7 +2190,7 @@ export default function SettingsPage() {
                     }}
                     size="sm"
                   >
-                    Ajouter
+                    {t("settings", "addBtn")}
                   </Button>
                   <AiAssistButton
                     type="queries"
@@ -2214,7 +2219,7 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-2">
                   {settings.targeting.searchQueries.length === 0 ? (
                     <p className="text-sm text-muted italic">
-                      Aucune requête configurée
+                      {t("settings", "noQueriesConfigured")}
                     </p>
                   ) : (
                     settings.targeting.searchQueries.map((q, i) => (
@@ -2251,24 +2256,21 @@ export default function SettingsPage() {
               {/* Resume */}
               <div className="bg-background-subtle rounded-lg p-4 mt-2">
                 <p className="text-sm font-medium text-foreground-secondary mb-1">
-                  Résumé du ciblage
+                  {t("settings", "targetingSummary")}
                 </p>
                 <p className="text-xs text-foreground-muted">
-                  {settings.targeting.searchQueries.length} requête
-                  {settings.targeting.searchQueries.length !== 1
-                    ? "s"
-                    : ""}{" "}
-                  x {settings.targeting.cities.length} ville
-                  {settings.targeting.cities.length !== 1 ? "s" : ""} ={" "}
+                  {settings.targeting.searchQueries.length} {settings.targeting.searchQueries.length !== 1
+                    ? t("settings", "queryLabelPlural")
+                    : t("settings", "queryLabel")}{" "}
+                  x {settings.targeting.cities.length} {settings.targeting.cities.length !== 1 ? t("settings", "cityLabelPlural") : t("settings", "cityLabelSingular")} ={" "}
                   {settings.targeting.searchQueries.length *
                     settings.targeting.cities.length}{" "}
-                  combinaison
                   {settings.targeting.searchQueries.length *
                     settings.targeting.cities.length !==
                   1
-                    ? "s"
-                    : ""}{" "}
-                  de recherche
+                    ? t("settings", "combinationLabelPlural")
+                    : t("settings", "combinationLabel")}{" "}
+                  {t("settings", "ofSearch")}
                 </p>
               </div>
             </SectionCard>
@@ -2284,16 +2286,19 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Apparence"
-              description="Personnalisez l'affichage de l'application."
+              title={t("settings", "appearanceTitle")}
+              description={t("settings", "appearanceDesc")}
               onSave={() =>
                 saveSection("appearance", settings.appearance)
               }
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FieldGroup label="Format de date">
+                <FieldGroup label={t("settings", "dateFormat")}>
                   <Select
                     value={settings.appearance.dateFormat}
                     onChange={(e) =>
@@ -2309,7 +2314,7 @@ export default function SettingsPage() {
                     <option value="MM/DD/YYYY">03/10/2026</option>
                   </Select>
                 </FieldGroup>
-                <FieldGroup label="Format d'heure">
+                <FieldGroup label={t("settings", "timeFormat")}>
                   <Select
                     value={settings.appearance.timeFormat}
                     onChange={(e) =>
@@ -2324,7 +2329,7 @@ export default function SettingsPage() {
                     <option value="12h">12h (AM/PM)</option>
                   </Select>
                 </FieldGroup>
-                <FieldGroup label="Fuseau horaire">
+                <FieldGroup label={t("settings", "timezoneLabel")}>
                   <Select
                     value={settings.appearance.timezone}
                     onChange={(e) =>
@@ -2350,16 +2355,16 @@ export default function SettingsPage() {
               {/* Theme selector */}
               <div className="border-t border-border pt-4 mt-4">
                 <p className="text-sm font-medium text-foreground-secondary mb-3">
-                  Thème de l&apos;application
+                  {t("settings", "themeLabel")}
                 </p>
                 <div className="flex gap-3">
                   {(
                     [
-                      { value: "light", label: "Clair", Icon: Sun },
-                      { value: "dark", label: "Sombre", Icon: Moon },
+                      { value: "light", labelKey: "themeLight", Icon: Sun },
+                      { value: "dark", labelKey: "themeDark", Icon: Moon },
                       {
                         value: "system",
-                        label: "Système",
+                        labelKey: "themeSystem",
                         Icon: Monitor,
                       },
                     ] as const
@@ -2374,7 +2379,7 @@ export default function SettingsPage() {
                       }`}
                     >
                       <opt.Icon className="size-5" />
-                      <span>{opt.label}</span>
+                      <span>{t("settings", opt.labelKey)}</span>
                     </button>
                   ))}
                 </div>
@@ -2392,15 +2397,18 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Langue"
-              description="Choisissez la langue de l'interface."
+              title={t("settings", "languageTitle")}
+              description={t("settings", "languageDesc")}
               onSave={() =>
                 saveSection("appearance", settings.appearance)
               }
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
-              <FieldGroup label="Langue de l'interface">
+              <FieldGroup label={t("settings", "languageLabel")}>
                 <Select
                   value={settings.appearance.language}
                   onChange={(e) => {
@@ -2420,9 +2428,7 @@ export default function SettingsPage() {
                 </Select>
               </FieldGroup>
               <p className="text-xs text-foreground-muted mt-2">
-                {settings.appearance.language === "en"
-                  ? "The language change takes effect immediately across the entire application."
-                  : "Le changement de langue prend effet immédiatement dans toute l'application."}
+                {t("settings", "languageChangeNote")}
               </p>
             </SectionCard>
           </motion.div>
@@ -2439,22 +2445,25 @@ export default function SettingsPage() {
           >
             {/* ── Authentification ── */}
             <SectionCard
-              title="Authentification"
-              description="Contrôlez comment les utilisateurs se connectent à l'application."
+              title={t("settings", "securityAuth")}
+              description={t("settings", "securityAuthDesc")}
               onSave={() => saveSection("security", settings.security)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <Toggle
                 checked={settings.security.enforceStrongPasswords}
                 onChange={(v) =>
                   updateField("security", "enforceStrongPasswords", v)
                 }
-                label="Exiger des mots de passe forts (min. 8 car., majuscule, chiffre)"
+                label={t("settings", "enforceStrongPasswords")}
               />
               <FieldGroup
-                label="Tentatives de connexion max"
-                description="Nombre de tentatives avant le verrouillage temporaire du compte."
+                label={t("settings", "maxLoginAttempts")}
+                description={t("settings", "maxLoginAttemptsDesc")}
               >
                 <Input
                   type="number"
@@ -2471,8 +2480,8 @@ export default function SettingsPage() {
                 />
               </FieldGroup>
               <FieldGroup
-                label="Expiration de session (minutes)"
-                description="Durée d'inactivité avant déconnexion automatique."
+                label={t("settings", "sessionTimeout")}
+                description={t("settings", "sessionTimeoutDesc")}
               >
                 <Select
                   value={String(settings.security.sessionTimeoutMinutes)}
@@ -2484,12 +2493,12 @@ export default function SettingsPage() {
                     )
                   }
                 >
-                  <option value="30">30 minutes</option>
-                  <option value="60">1 heure</option>
-                  <option value="120">2 heures</option>
-                  <option value="240">4 heures</option>
-                  <option value="480">8 heures (défaut)</option>
-                  <option value="1440">24 heures</option>
+                  <option value="30">{t("settings", "minutes30")}</option>
+                  <option value="60">{t("settings", "hour1")}</option>
+                  <option value="120">{t("settings", "hours2")}</option>
+                  <option value="240">{t("settings", "hours4")}</option>
+                  <option value="480">{t("settings", "hours8")}</option>
+                  <option value="1440">{t("settings", "hours24")}</option>
                 </Select>
               </FieldGroup>
 
@@ -2497,27 +2506,27 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-3 bg-background-subtle rounded-lg">
                   <div>
                     <p className="text-sm font-medium text-foreground">
-                      Changement de mot de passe
+                      {t("settings", "changePassword")}
                     </p>
                     <p className="text-xs text-foreground-muted">
-                      Modifiez votre mot de passe régulièrement
+                      {t("settings", "changePasswordDesc")}
                     </p>
                   </div>
                   <Button disabled variant="secondary" size="sm">
-                    Bientôt
+                    {t("settings", "comingSoon")}
                   </Button>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-background-subtle rounded-lg">
                   <div>
                     <p className="text-sm font-medium text-foreground">
-                      Authentification à deux facteurs (2FA)
+                      {t("settings", "twoFactorAuth")}
                     </p>
                     <p className="text-xs text-foreground-muted">
-                      Ajoutez une couche de sécurité supplémentaire avec une app TOTP
+                      {t("settings", "twoFactorAuthDesc")}
                     </p>
                   </div>
                   <Button disabled variant="secondary" size="sm">
-                    Bientôt
+                    {t("settings", "comingSoon")}
                   </Button>
                 </div>
               </div>
@@ -2525,37 +2534,40 @@ export default function SettingsPage() {
 
             {/* ── Accès & Permissions ── */}
             <SectionCard
-              title="Accès et permissions"
-              description="Gérez les contrôles d'accès et les restrictions."
+              title={t("settings", "accessPermissions")}
+              description={t("settings", "accessPermissionsDesc")}
               onSave={() => saveSection("security", settings.security)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <Toggle
                 checked={settings.security.requireConfirmation}
                 onChange={(v) =>
                   updateField("security", "requireConfirmation", v)
                 }
-                label="Demander confirmation sur les actions sensibles"
+                label={t("settings", "requireConfirmation")}
               />
               <Toggle
                 checked={settings.security.exportRequirePassword}
                 onChange={(v) =>
                   updateField("security", "exportRequirePassword", v)
                 }
-                label="Exiger le mot de passe pour exporter les données"
+                label={t("settings", "exportRequirePassword")}
               />
               <Toggle
                 checked={settings.security.ipWhitelistEnabled}
                 onChange={(v) =>
                   updateField("security", "ipWhitelistEnabled", v)
                 }
-                label="Activer la liste blanche d'adresses IP"
+                label={t("settings", "ipWhitelist")}
               />
               {settings.security.ipWhitelistEnabled && (
                 <FieldGroup
-                  label="Adresses IP autorisées"
-                  description="Entrez les adresses IP séparées par des virgules. Seules ces IP pourront accéder à l'application."
+                  label={t("settings", "allowedIPs")}
+                  description={t("settings", "allowedIPsDesc")}
                 >
                   <TextArea
                     value={(settings.security.ipWhitelist || []).join(", ")}
@@ -2578,22 +2590,25 @@ export default function SettingsPage() {
 
             {/* ── Clé API ── */}
             <SectionCard
-              title="Clé API"
-              description="Gérez l'accès programmatique à votre compte."
+              title={t("settings", "apiKeyTitle")}
+              description={t("settings", "apiKeyDesc")}
               onSave={() => saveSection("security", settings.security)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <Toggle
                 checked={settings.security.apiKeyEnabled}
                 onChange={(v) =>
                   updateField("security", "apiKeyEnabled", v)
                 }
-                label="Activer l'accès API"
+                label={t("settings", "enableApiAccess")}
               />
               {settings.security.apiKeyEnabled && (
                 <>
-                  <FieldGroup label="Clé API">
+                  <FieldGroup label={t("settings", "apiKeyLabel")}>
                     <div className="flex gap-2">
                       <Input
                         type="text"
@@ -2601,7 +2616,7 @@ export default function SettingsPage() {
                         value={
                           settings.security.apiKey
                             ? `${settings.security.apiKey.slice(0, 8)}${"•".repeat(24)}${settings.security.apiKey.slice(-4)}`
-                            : "Aucune clé générée"
+                            : t("settings", "noKeyGenerated")
                         }
                         className="font-mono text-xs"
                       />
@@ -2614,14 +2629,14 @@ export default function SettingsPage() {
                         }}
                       >
                         <RefreshCw className="size-3.5" />
-                        {settings.security.apiKey ? "Régénérer" : "Générer"}
+                        {settings.security.apiKey ? t("settings", "regenerate") : t("settings", "generate")}
                       </Button>
                     </div>
                   </FieldGroup>
                   {settings.security.apiKey && (
                     <p className="text-xs text-warning flex items-center gap-1.5">
                       <Shield className="size-3.5" />
-                      Sauvegardez pour appliquer. La clé ne sera plus visible en entier après rechargement.
+                      {t("settings", "apiKeySaveWarning")}
                     </p>
                   )}
                 </>
@@ -2630,15 +2645,18 @@ export default function SettingsPage() {
 
             {/* ── Rétention des données ── */}
             <SectionCard
-              title="Rétention des données"
-              description="Configurez la durée de conservation des données."
+              title={t("settings", "dataRetention")}
+              description={t("settings", "dataRetentionDesc")}
               onSave={() => saveSection("security", settings.security)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <FieldGroup
-                label="Conservation des données (jours)"
-                description="Les prospects et emails plus anciens que cette durée pourront être purgés."
+                label={t("settings", "retentionPeriod")}
+                description={t("settings", "retentionPeriodDesc")}
               >
                 <Select
                   value={String(settings.security.dataRetentionDays)}
@@ -2650,11 +2668,11 @@ export default function SettingsPage() {
                     )
                   }
                 >
-                  <option value="90">90 jours</option>
-                  <option value="180">6 mois</option>
-                  <option value="365">1 an (défaut)</option>
-                  <option value="730">2 ans</option>
-                  <option value="0">Indéfiniment</option>
+                  <option value="90">{t("settings", "days90")}</option>
+                  <option value="180">{t("settings", "months6")}</option>
+                  <option value="365">{t("settings", "year1")}</option>
+                  <option value="730">{t("settings", "years2")}</option>
+                  <option value="0">{t("settings", "retentionIndefinite")}</option>
                 </Select>
               </FieldGroup>
               <Toggle
@@ -2662,12 +2680,12 @@ export default function SettingsPage() {
                 onChange={(v) =>
                   updateField("security", "autoDeleteArchived", v)
                 }
-                label="Supprimer automatiquement les prospects archivés"
+                label={t("settings", "autoDeleteArchived")}
               />
               {settings.security.autoDeleteArchived && (
                 <FieldGroup
-                  label="Délai avant suppression définitive (jours)"
-                  description="Les prospects archivés seront supprimés définitivement après ce délai."
+                  label={t("settings", "autoDeleteDelay")}
+                  description={t("settings", "autoDeleteDelayDesc")}
                 >
                   <Input
                     type="number"
@@ -2688,23 +2706,26 @@ export default function SettingsPage() {
 
             {/* ── Journal d'audit ── */}
             <SectionCard
-              title="Journal d'audit"
-              description="Suivi des actions effectuées dans l'application."
+              title={t("settings", "auditLog")}
+              description={t("settings", "auditLogDesc")}
               onSave={() => saveSection("security", settings.security)}
               saving={saving}
               hasUnsaved={hasUnsaved}
+              unsavedLabel={t("settings", "unsaved")}
+              savingLabel={t("settings", "savingBtn")}
+              saveLabel={t("settings", "saveBtn")}
             >
               <Toggle
                 checked={settings.security.auditLogEnabled}
                 onChange={(v) =>
                   updateField("security", "auditLogEnabled", v)
                 }
-                label="Activer le journal d'audit"
+                label={t("settings", "enableAuditLog")}
               />
               {settings.security.auditLogEnabled && (
                 <FieldGroup
-                  label="Conservation du journal (jours)"
-                  description="Les entrées plus anciennes seront automatiquement supprimées."
+                  label={t("settings", "auditRetention")}
+                  description={t("settings", "auditRetentionDesc")}
                 >
                   <Select
                     value={String(settings.security.auditLogRetentionDays)}
@@ -2716,11 +2737,11 @@ export default function SettingsPage() {
                       )
                     }
                   >
-                    <option value="30">30 jours</option>
-                    <option value="60">60 jours</option>
-                    <option value="90">90 jours (défaut)</option>
-                    <option value="180">6 mois</option>
-                    <option value="365">1 an</option>
+                    <option value="30">{t("settings", "auditDays30")}</option>
+                    <option value="60">{t("settings", "auditDays60")}</option>
+                    <option value="90">{t("settings", "auditDays90")}</option>
+                    <option value="180">{t("settings", "auditMonths6")}</option>
+                    <option value="365">{t("settings", "auditYear1")}</option>
                   </Select>
                 </FieldGroup>
               )}
@@ -2728,14 +2749,14 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-3 bg-background-subtle rounded-lg">
                   <div>
                     <p className="text-sm font-medium text-foreground">
-                      Sessions actives
+                      {t("settings", "activeSessions")}
                     </p>
                     <p className="text-xs text-foreground-muted">
-                      Visualisez et révoquez les sessions de connexion
+                      {t("settings", "activeSessionsDesc")}
                     </p>
                   </div>
                   <Button disabled variant="secondary" size="sm">
-                    Bientôt
+                    {t("settings", "comingSoon")}
                   </Button>
                 </div>
               </div>
@@ -2745,9 +2766,9 @@ export default function SettingsPage() {
             <Card className="border-danger/30">
               <CardHeader>
                 <div>
-                  <CardTitle className="text-lg text-danger">Zone dangereuse</CardTitle>
+                  <CardTitle className="text-lg text-danger">{t("settings", "dangerZone")}</CardTitle>
                   <p className="text-sm text-foreground-muted mt-1">
-                    Actions irréversibles. Procédez avec prudence.
+                    {t("settings", "dangerZoneDesc")}
                   </p>
                 </div>
               </CardHeader>
@@ -2756,40 +2777,40 @@ export default function SettingsPage() {
                   <div className="flex items-center justify-between p-3 bg-danger-subtle rounded-lg">
                     <div>
                       <p className="text-sm font-medium text-foreground">
-                        Exporter toutes les données
+                        {t("settings", "exportAllData")}
                       </p>
                       <p className="text-xs text-foreground-muted">
-                        Téléchargez une copie complète de vos données (prospects, emails, campagnes)
+                        {t("settings", "exportAllDataDesc")}
                       </p>
                     </div>
                     <Button disabled variant="secondary" size="sm">
-                      Exporter
+                      {t("settings", "exportBtn")}
                     </Button>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-danger-subtle rounded-lg">
                     <div>
                       <p className="text-sm font-medium text-foreground">
-                        Supprimer toutes les données
+                        {t("settings", "deleteAllData")}
                       </p>
                       <p className="text-xs text-foreground-muted">
-                        Efface définitivement tous les prospects, emails et campagnes
+                        {t("settings", "deleteAllDataDesc")}
                       </p>
                     </div>
                     <Button disabled variant="danger" size="sm">
-                      Supprimer tout
+                      {t("settings", "deleteAllBtn")}
                     </Button>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-danger-subtle rounded-lg">
                     <div>
                       <p className="text-sm font-medium text-foreground">
-                        Supprimer le compte
+                        {t("settings", "deleteAccount")}
                       </p>
                       <p className="text-xs text-foreground-muted">
-                        Supprime définitivement votre compte et toutes les données associées
+                        {t("settings", "deleteAccountDesc")}
                       </p>
                     </div>
                     <Button disabled variant="danger" size="sm">
-                      Supprimer le compte
+                      {t("settings", "deleteAccountBtn")}
                     </Button>
                   </div>
                 </div>
@@ -2807,14 +2828,12 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Prospects archivés"
-              description="Prospects supprimés récemment. Ils seront définitivement supprimés après 15 jours."
+              title={t("settings", "archiveTitle")}
+              description={t("settings", "archiveDesc")}
             >
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm text-foreground-muted">
-                  {archiveTotal} prospect
-                  {archiveTotal !== 1 ? "s" : ""} archivé
-                  {archiveTotal !== 1 ? "s" : ""}
+                  {archiveTotal} prospect{archiveTotal !== 1 ? "s" : ""} {archiveTotal !== 1 ? t("settings", "archivedCountPlural") : t("settings", "archivedCount")}
                 </p>
                 <div className="flex gap-2">
                   {selectedArchived.size > 0 && (
@@ -2833,7 +2852,7 @@ export default function SettingsPage() {
                             }),
                           });
                           showToast(
-                            `${ids.length} prospect${ids.length > 1 ? "s" : ""} restauré${ids.length > 1 ? "s" : ""}`,
+                            `${ids.length} prospect${ids.length > 1 ? "s" : ""} ${ids.length > 1 ? t("settings", "restoredPlural") : t("settings", "restored")}`,
                             "success"
                           );
                           loadArchive(archivePage);
@@ -2842,13 +2861,13 @@ export default function SettingsPage() {
                         size="sm"
                       >
                         <RotateCcw className="size-3.5" />
-                        Restaurer ({selectedArchived.size})
+                        {t("settings", "restoreBtn")} ({selectedArchived.size})
                       </Button>
                       <Button
                         onClick={async () => {
                           if (
                             !confirm(
-                              `Supprimer définitivement ${selectedArchived.size} prospect${selectedArchived.size > 1 ? "s" : ""} ?`
+                              `${t("settings", "confirmPermanentDelete")} ${selectedArchived.size} prospect${selectedArchived.size > 1 ? "s" : ""} ?`
                             )
                           )
                             return;
@@ -2864,7 +2883,7 @@ export default function SettingsPage() {
                             }),
                           });
                           showToast(
-                            `${ids.length} prospect${ids.length > 1 ? "s" : ""} supprimé${ids.length > 1 ? "s" : ""} définitivement`,
+                            `${ids.length} prospect${ids.length > 1 ? "s" : ""} ${ids.length > 1 ? t("settings", "deletedPermanentlyPlural") : t("settings", "deletedPermanently")}`,
                             "success"
                           );
                           loadArchive(archivePage);
@@ -2873,7 +2892,7 @@ export default function SettingsPage() {
                         size="sm"
                       >
                         <Trash2 className="size-3.5" />
-                        Supprimer ({selectedArchived.size})
+                        {t("settings", "deleteBtn")} ({selectedArchived.size})
                       </Button>
                     </>
                   )}
@@ -2891,7 +2910,7 @@ export default function SettingsPage() {
                       );
                       const data = await res.json();
                       showToast(
-                        `${data.deleted || 0} ancien${(data.deleted || 0) > 1 ? "s" : ""} prospect${(data.deleted || 0) > 1 ? "s" : ""} nettoyé${(data.deleted || 0) > 1 ? "s" : ""}`,
+                        `${data.deleted || 0} ${(data.deleted || 0) > 1 ? t("settings", "oldCleanedPlural") : t("settings", "oldCleaned")} prospect${(data.deleted || 0) > 1 ? "s" : ""} ${(data.deleted || 0) > 1 ? t("settings", "cleanedPlural") : t("settings", "cleaned")}`,
                         "success"
                       );
                       loadArchive(archivePage);
@@ -2899,7 +2918,7 @@ export default function SettingsPage() {
                     variant="secondary"
                     size="sm"
                   >
-                    Nettoyer (+15 jours)
+                    {t("settings", "cleanupBtn")}
                   </Button>
                 </div>
               </div>
@@ -2915,7 +2934,7 @@ export default function SettingsPage() {
                 </div>
               ) : archivedProspects.length === 0 ? (
                 <p className="text-muted text-sm py-8 text-center">
-                  Aucun prospect archivé
+                  {t("settings", "noArchivedProspects")}
                 </p>
               ) : (
                 <>
@@ -2946,22 +2965,22 @@ export default function SettingsPage() {
                             />
                           </th>
                           <th className="text-left px-3 py-2.5 text-xs font-medium text-foreground-muted">
-                            Entreprise
+                            {t("settings", "archiveCompany")}
                           </th>
                           <th className="text-left px-3 py-2.5 text-xs font-medium text-foreground-muted">
-                            Ville
+                            {t("settings", "archiveCity")}
                           </th>
                           <th className="text-left px-3 py-2.5 text-xs font-medium text-foreground-muted">
-                            Email
+                            {t("settings", "archiveEmail")}
                           </th>
                           <th className="text-left px-3 py-2.5 text-xs font-medium text-foreground-muted">
-                            Tél.
+                            {t("settings", "archivePhone")}
                           </th>
                           <th className="text-left px-3 py-2.5 text-xs font-medium text-foreground-muted">
-                            Score
+                            {t("settings", "archiveScore")}
                           </th>
                           <th className="text-left px-3 py-2.5 text-xs font-medium text-foreground-muted">
-                            Supprimé le
+                            {t("settings", "archiveDeletedAt")}
                           </th>
                         </tr>
                       </thead>
@@ -3022,8 +3041,7 @@ export default function SettingsPage() {
                                 <span
                                   className={`ml-1.5 ${daysLeft <= 3 ? "text-danger" : "text-muted"}`}
                                 >
-                                  ({daysLeft}j restant
-                                  {daysLeft !== 1 ? "s" : ""})
+                                  ({daysLeft}{daysLeft !== 1 ? t("settings", "daysRemainingPlural") : t("settings", "daysRemaining")})
                                 </span>
                               </td>
                             </tr>
@@ -3037,7 +3055,7 @@ export default function SettingsPage() {
                   {archiveTotalPages > 1 && (
                     <div className="flex items-center justify-between mt-3">
                       <p className="text-xs text-muted">
-                        Page {archivePage} / {archiveTotalPages}
+                        {t("settings", "pageOf")} {archivePage} / {archiveTotalPages}
                       </p>
                       <div className="flex gap-1">
                         <Button
@@ -3047,7 +3065,7 @@ export default function SettingsPage() {
                           size="sm"
                         >
                           <ChevronLeft className="size-3.5" />
-                          Préc.
+                          {t("settings", "prevPage")}
                         </Button>
                         <Button
                           disabled={archivePage >= archiveTotalPages}
@@ -3055,7 +3073,7 @@ export default function SettingsPage() {
                           variant="secondary"
                           size="sm"
                         >
-                          Suiv.
+                          {t("settings", "nextPage")}
                           <ChevronRight className="size-3.5" />
                         </Button>
                       </div>
@@ -3076,14 +3094,14 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Abonnement"
-              description="Votre plan et vos limites d'utilisation."
+              title={t("settings", "subscriptionTitle")}
+              description={t("settings", "subscriptionDesc")}
             >
               <div className="bg-primary-subtle rounded-lg p-6 mb-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-foreground-muted uppercase font-medium">
-                      Plan actuel
+                      {t("settings", "currentPlan")}
                     </p>
                     <p className="text-2xl font-bold text-primary mt-1 capitalize">
                       {settings.subscription.plan}
@@ -3097,7 +3115,7 @@ export default function SettingsPage() {
                     }
                   >
                     {settings.subscription.status === "active"
-                      ? "Actif"
+                      ? t("settings", "statusActive")
                       : settings.subscription.status}
                   </Badge>
                 </div>
@@ -3105,7 +3123,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 border border-border rounded-lg">
                   <p className="text-sm text-foreground-muted">
-                    Utilisateurs permis
+                    {t("settings", "allowedUsers")}
                   </p>
                   <p className="text-xl font-bold text-foreground">
                     {settings.subscription.maxUsers}
@@ -3113,7 +3131,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="p-4 border border-border rounded-lg">
                   <p className="text-sm text-foreground-muted">
-                    Emails par mois
+                    {t("settings", "emailsPerMonth")}
                   </p>
                   <p className="text-xl font-bold text-foreground">
                     {settings.subscription.maxEmailsPerMonth.toLocaleString()}
@@ -3122,8 +3140,7 @@ export default function SettingsPage() {
               </div>
               <div className="mt-4 p-3 bg-primary-subtle rounded-lg">
                 <p className="text-xs text-primary">
-                  La gestion des abonnements et la facturation seront
-                  disponibles prochainement.
+                  {t("settings", "subscriptionComingSoon")}
                 </p>
               </div>
             </SectionCard>
@@ -3139,19 +3156,19 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Centre des activités"
-              description="Historique des actions récentes sur la plateforme."
+              title={t("settings", "activityTitle")}
+              description={t("settings", "activityDesc")}
             >
               <div className="border border-border rounded-lg overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background-subtle">
                   <span className="text-sm font-medium text-foreground">
-                    {logs.length} activité{logs.length !== 1 ? "s" : ""}
+                    {logs.length} {logs.length !== 1 ? t("settings", "activityCountPlural") : t("settings", "activityCount")}
                   </span>
                   <button
                     onClick={loadLogs}
                     className="p-1.5 rounded-md text-foreground-muted hover:text-foreground hover:bg-card transition-colors"
-                    title="Rafraîchir"
+                    title={t("settings", "refresh")}
                   >
                     <RefreshCw className="size-3.5" />
                   </button>
@@ -3160,7 +3177,7 @@ export default function SettingsPage() {
                 {/* List */}
                 {logs.length === 0 ? (
                   <p className="text-foreground-muted text-sm text-center py-10">
-                    Aucune activité enregistrée.
+                    {t("settings", "noActivity")}
                   </p>
                 ) : (
                   <div>
@@ -3172,7 +3189,7 @@ export default function SettingsPage() {
                         <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-foreground">
-                            {log.title && !log.title.includes("_") ? log.title : formatAction(log.action)}
+                            {log.title && !log.title.includes("_") ? log.title : formatAction(log.action, t as (section: string, key: string) => string)}
                           </p>
                           {log.details && (
                             <p className="text-xs text-foreground-muted">
@@ -3200,8 +3217,8 @@ export default function SettingsPage() {
       <ToastContainer toast={toast} onClose={() => setToast(null)} />
 
       <PageHeader
-        title="Paramètres"
-        description="Configurez votre plateforme de prospection"
+        title={t("settings", "pageTitle")}
+        description={t("settings", "pageDesc")}
       />
 
       <div className="flex gap-6">
@@ -3210,46 +3227,44 @@ export default function SettingsPage() {
           <div className="sticky top-24 space-y-4">
             {([
               {
-                label: "Compte",
+                labelKey: "groupAccount",
                 ids: ["company", "team"],
               },
               {
-                label: "Prospection",
+                labelKey: "groupProspecting",
                 ids: ["prospects", "targeting", "archive"],
               },
               {
-                label: "Campagnes",
+                labelKey: "groupCampaigns",
                 ids: ["campaigns", "automation"],
               },
               {
-                label: "Plateforme",
+                labelKey: "groupPlatform",
                 ids: ["appearance", "language", "security", "subscription", "activity"],
               },
             ] as const).map((group) => (
-              <div key={group.label}>
+              <div key={group.labelKey}>
                 <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-widest text-foreground-muted/60">
-                  {group.label}
+                  {t("settings", group.labelKey)}
                 </p>
                 <div className="space-y-0.5">
                   {group.ids.map((id) => {
-                    const s = SECTIONS.find((sec) => sec.id === id);
-                    if (!s) return null;
-                    const Icon = s.icon;
+                    const Icon = SECTION_ICONS[id as SectionId];
                     return (
                       <button
-                        key={s.id}
+                        key={id}
                         onClick={() => {
-                          setActiveSection(s.id);
+                          setActiveSection(id as SectionId);
                           setHasUnsaved(false);
                         }}
                         className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2.5 ${
-                          activeSection === s.id
+                          activeSection === id
                             ? "bg-primary-subtle text-primary font-medium"
                             : "text-foreground-muted hover:bg-card-hover"
                         }`}
                       >
                         <Icon className="size-4 shrink-0" />
-                        {s.label}
+                        {t("settings", id as any)}
                       </button>
                     );
                   })}
@@ -3268,31 +3283,32 @@ export default function SettingsPage() {
 
 // ─── Helpers ──────────────────────────────────────────────
 
-function formatAction(action: string): string {
+function formatAction(action: string, t: (section: string, key: string) => string): string {
   const map: Record<string, string> = {
-    import_csv: "Import CSV",
-    import_text: "Import texte",
-    scrape_import: "Import scrape",
-    discovery_started: "Découverte démarrée",
-    discovery_completed: "Découverte terminée",
-    discovery_error: "Erreur de découverte",
-    enrichment_started: "Enrichissement démarré",
-    enrichment_completed: "Enrichissement terminé",
-    enrichment_error: "Erreur d'enrichissement",
-    campaign_created: "Campagne créée",
-    campaign_updated: "Campagne modifiée",
-    campaign_paused: "Campagne en pause",
-    campaign_activated: "Campagne activée",
-    prospect_created: "Prospect créé",
-    prospect_deleted: "Prospect supprimé",
-    prospect_deduplicated: "Doublons supprimés",
-    blacklist_added: "Blacklist ajouté",
-    email_sent: "Email envoyé",
-    keywords_generated: "Mots-clés générés",
-    settings_updated: "Paramètres modifiés",
-    user_created: "Utilisateur créé",
-    user_updated: "Utilisateur modifié",
-    user_deleted: "Utilisateur supprimé",
+    import_csv: "actionImportCsv",
+    import_text: "actionImportText",
+    scrape_import: "actionScrapeImport",
+    discovery_started: "actionDiscoveryStarted",
+    discovery_completed: "actionDiscoveryCompleted",
+    discovery_error: "actionDiscoveryError",
+    enrichment_started: "actionEnrichmentStarted",
+    enrichment_completed: "actionEnrichmentCompleted",
+    enrichment_error: "actionEnrichmentError",
+    campaign_created: "actionCampaignCreated",
+    campaign_updated: "actionCampaignUpdated",
+    campaign_paused: "actionCampaignPaused",
+    campaign_activated: "actionCampaignActivated",
+    prospect_created: "actionProspectCreated",
+    prospect_deleted: "actionProspectDeleted",
+    prospect_deduplicated: "actionProspectDeduplicated",
+    blacklist_added: "actionBlacklistAdded",
+    email_sent: "actionEmailSent",
+    keywords_generated: "actionKeywordsGenerated",
+    settings_updated: "actionSettingsUpdated",
+    user_created: "actionUserCreated",
+    user_updated: "actionUserUpdated",
+    user_deleted: "actionUserDeleted",
   };
-  return map[action] || action;
+  const key = map[action];
+  return key ? t("settings", key) : action;
 }
