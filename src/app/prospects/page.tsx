@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, memo, useMemo, useTransition 
 import { ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import JobProgressBar from "@/components/prospects/JobProgressBar";
 import { useEnrichment } from "@/components/EnrichmentProvider";
+import { useTranslation } from "@/components/LanguageProvider";
 
 // ---------- Types ----------
 interface ProspectListItem {
@@ -67,6 +68,7 @@ const LOAD_ALL_LIMIT = 5000;
 
 // ---------- Sub-components ----------
 const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const styles: Record<string, string> = {
     NEW: "bg-primary-subtle text-primary border border-primary/20",
     ENRICHED: "bg-background-muted text-foreground-secondary border border-border",
@@ -77,7 +79,7 @@ const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
   };
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[status] || "bg-background-muted text-foreground-muted border border-border"}`}>
-      {STATUS_LABELS[status] || status}
+      {t("status", status as "NEW") || status}
     </span>
   );
 });
@@ -117,6 +119,7 @@ const ProspectRow = memo(function ProspectRow({
   onEmail: (p: ProspectListItem) => void;
   onDragStart: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <tr
       data-row-idx={rowIndex - 1}
@@ -145,7 +148,7 @@ const ProspectRow = memo(function ProspectRow({
         {prospect.email ? (
           <span className="flex items-center gap-1">
             <span className={prospect.emailGuessed ? "text-warning" : "text-foreground-secondary"}>{prospect.email}</span>
-            {prospect.emailGuessed && <span className="text-[10px] bg-warning-subtle text-warning px-1 rounded">deviné</span>}
+            {prospect.emailGuessed && <span className="text-[10px] bg-warning-subtle text-warning px-1 rounded">{t("common", "guessed")}</span>}
           </span>
         ) : "—"}
       </td>
@@ -165,7 +168,7 @@ const ProspectRow = memo(function ProspectRow({
               disabled={actionLoading === prospect.id}
               className="text-xs border border-border bg-card text-foreground-secondary px-2 py-1 rounded hover:bg-card-hover disabled:opacity-50"
             >
-              Enrichir
+              {t("prospects", "enrich")}
             </button>
           )}
           {prospect.email && prospect.status !== "CONTACTED" && (
@@ -198,6 +201,7 @@ export default function ProspectsPage() {
   const [cityFilter, setCityFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const { t, locale } = useTranslation();
   const [sortBy, setSortBy] = useState("leadScore");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
@@ -349,7 +353,7 @@ export default function ProspectsPage() {
     for (const p of prospects) {
       if (p.city) cities.add(p.city);
     }
-    return Array.from(cities).sort((a, b) => a.localeCompare(b, "fr"));
+    return Array.from(cities).sort((a, b) => a.localeCompare(b, locale));
   }, [prospects]);
 
   // Client-side filtered prospects: instant filter using searchQuery + cityFilter (no debounce wait)
@@ -515,14 +519,14 @@ export default function ProspectsPage() {
     } catch (error) {
       stopProgressPolling();
       setDiscoverProgress(null);
-      alert(error instanceof Error ? error.message : "Erreur lors de la découverte");
+      alert(error instanceof Error ? error.message : t("prospects", "errorDiscovery"));
     } finally {
       setActionLoading(null);
     }
   }
 
   async function handleDeduplicate() {
-    if (!confirm("Supprimer les prospects en double (même nom d'entreprise) ? Le prospect avec le meilleur score sera conservé.")) return;
+    if (!confirm(t("prospects", "confirmDeduplicate"))) return;
     setActionLoading("deduplicate");
     try {
       const res = await fetch("/api/prospects", {
@@ -531,10 +535,10 @@ export default function ProspectsPage() {
         body: JSON.stringify({ _action: "deduplicate" }),
       });
       const data = await res.json();
-      alert(`${data.deleted} doublon${data.deleted !== 1 ? "s" : ""} supprimé${data.deleted !== 1 ? "s" : ""}`);
+      alert(`${data.deleted} ${data.deleted !== 1 ? t("prospects", "duplicatesRemovedPlural") : t("prospects", "duplicatesRemoved")} ${data.deleted !== 1 ? t("prospects", "removedPlural") : t("prospects", "removed")}`);
       fetchProspects();
     } catch {
-      alert("Erreur lors de la suppression des doublons");
+      alert(t("prospects", "errorDeduplicate"));
     } finally {
       setActionLoading(null);
     }
@@ -542,7 +546,7 @@ export default function ProspectsPage() {
 
   async function handleEnrichBatch() {
     setShowEnrichConfirm(false);
-    setEnrichProgress({ status: "running", target: enrichTarget, enriched: 0, failed: 0, noData: 0, currentProspect: "Démarrage...", startedAt: Date.now() });
+    setEnrichProgress({ status: "running", target: enrichTarget, enriched: 0, failed: 0, noData: 0, currentProspect: t("prospects", "starting"), startedAt: Date.now() });
     startEnrichPolling();
     try {
       const res = await fetch("/api/prospects/enrich", {
@@ -552,13 +556,13 @@ export default function ProspectsPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || "Erreur lors du démarrage de l'enrichissement");
+        alert(data.error || t("prospects", "errorStartEnrichment"));
         dismissEnrich();
       }
       // Server returns immediately — polling handles progress tracking
     } catch {
       dismissEnrich();
-      alert("Erreur réseau lors du démarrage de l'enrichissement");
+      alert(t("prospects", "networkError"));
     }
   }
 
@@ -573,15 +577,15 @@ export default function ProspectsPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || "Erreur lors de l'enrichissement");
+        alert(data.error || t("prospects", "errorEnrichment"));
         dismissEnrich();
       }
       // Server returns immediately — polling handles progress tracking
     } catch {
       dismissEnrich();
-      alert("Erreur lors de l'enrichissement");
+      alert(t("prospects", "errorEnrichment"));
     }
-  }, [setEnrichProgress, startEnrichPolling, dismissEnrich]);
+  }, [setEnrichProgress, startEnrichPolling, dismissEnrich, t]);
 
   const handleEmailClick = useCallback((p: ProspectListItem) => {
     handleSelectProspect(p);
@@ -598,7 +602,7 @@ export default function ProspectsPage() {
       const data = await res.json();
       setGeneratedEmail({ subject: data.subject, body: data.body });
     } catch {
-      alert("Erreur lors de la génération");
+      alert(t("prospects", "errorGenerate"));
     } finally {
       setActionLoading(null);
     }
@@ -619,14 +623,14 @@ export default function ProspectsPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert("Email envoyé!");
+        alert(t("prospects", "emailSent"));
         setGeneratedEmail(null);
         fetchProspects();
       } else {
-        alert(`Erreur: ${data.error}`);
+        alert(`${t("common", "error")}: ${data.error}`);
       }
     } catch {
-      alert("Erreur lors de l'envoi");
+      alert(t("prospects", "errorSend"));
     } finally {
       setActionLoading(null);
     }
@@ -768,16 +772,16 @@ export default function ProspectsPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Erreur lors du démarrage de l'enrichissement");
+        alert(data.error || t("prospects", "errorStartEnrichment"));
         return;
       }
 
       // Server started background processing — polling will track progress
-      setEnrichProgress({ status: "running", target: allIds.length, enriched: 0, failed: 0, noData: 0, currentProspect: "Démarrage...", startedAt: Date.now() });
+      setEnrichProgress({ status: "running", target: allIds.length, enriched: 0, failed: 0, noData: 0, currentProspect: t("prospects", "starting"), startedAt: Date.now() });
       startEnrichPolling();
     } catch (err) {
       console.error("Failed to start enrichment:", err);
-      alert("Erreur réseau lors du démarrage de l'enrichissement");
+      alert(t("prospects", "networkError"));
     } finally {
       setActionLoading(null);
     }
@@ -786,17 +790,17 @@ export default function ProspectsPage() {
   // Bulk delete
   async function handleBulkDelete() {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Supprimer ${selectedIds.size} prospect${selectedIds.size > 1 ? "s" : ""} ? Cette action est irréversible.`)) return;
+    if (!confirm(`${t("common", "delete")} ${selectedIds.size} prospect${selectedIds.size > 1 ? "s" : ""} ? ${t("prospects", "confirmDelete")}`)) return;
     setActionLoading("bulk-delete");
     try {
       const res = await fetch(`/api/prospects?ids=${Array.from(selectedIds).join(",")}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
       const data = await res.json();
-      alert(`${data.deleted} prospect${data.deleted > 1 ? "s" : ""} supprimé${data.deleted > 1 ? "s" : ""}`);
+      alert(`${data.deleted} prospect${data.deleted > 1 ? "s" : ""} ${data.deleted > 1 ? t("prospects", "removedPlural") : t("prospects", "removed")}`);
       setSelectedIds(new Set());
       fetchProspects();
     } catch {
-      alert("Erreur lors de la suppression");
+      alert(t("prospects", "errorDelete"));
     } finally {
       setActionLoading(null);
     }
@@ -837,7 +841,7 @@ export default function ProspectsPage() {
       setEditing(false);
       fetchProspects();
     } catch {
-      alert("Erreur lors de la modification");
+      alert(t("prospects", "errorEdit"));
     } finally {
       setActionLoading(null);
     }
@@ -845,16 +849,16 @@ export default function ProspectsPage() {
 
   // Import handlers
   const IMPORT_FIELDS = [
-    { key: "companyName", label: "Entreprise" },
-    { key: "industry", label: "Industrie" },
-    { key: "city", label: "Ville" },
-    { key: "address", label: "Adresse" },
-    { key: "googleMapsUrl", label: "URL Google Maps" },
-    { key: "phone", label: "Téléphone" },
-    { key: "email", label: "Email" },
-    { key: "website", label: "Site web" },
-    { key: "contactType", label: "Type de contact" },
-    { key: "notes", label: "Notes" },
+    { key: "companyName", label: t("prospects", "fieldCompany") },
+    { key: "industry", label: t("prospects", "fieldIndustry") },
+    { key: "city", label: t("prospects", "fieldCity") },
+    { key: "address", label: t("prospects", "fieldAddress") },
+    { key: "googleMapsUrl", label: t("prospects", "fieldGmapsUrl") },
+    { key: "phone", label: t("prospects", "fieldPhone") },
+    { key: "email", label: t("prospects", "fieldEmail") },
+    { key: "website", label: t("prospects", "fieldWebsite") },
+    { key: "contactType", label: t("prospects", "fieldContactType") },
+    { key: "notes", label: t("prospects", "fieldNotes") },
   ];
 
   function deduplicateColumns(cols: string[]): string[] {
@@ -878,7 +882,7 @@ export default function ProspectsPage() {
         const result = Papa.parse(text, { header: false, skipEmptyLines: true });
         const rows = result.data as string[][];
         if (rows.length < 2) {
-          setImportError("Le fichier doit contenir au moins un en-tête et une ligne de données");
+          setImportError(t("prospects", "fileError"));
           return;
         }
         const columns = deduplicateColumns(rows[0].map((c) => c.trim()));
@@ -893,7 +897,7 @@ export default function ProspectsPage() {
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "" });
         if (rows.length < 2) {
-          setImportError("Le fichier doit contenir au moins un en-tête et une ligne de données");
+          setImportError(t("prospects", "fileError"));
           return;
         }
         const columns = deduplicateColumns((rows[0] as string[]).map((c) => String(c).trim()));
@@ -902,10 +906,10 @@ export default function ProspectsPage() {
         autoMapColumns(columns);
         setImportStep("mapping");
       } else {
-        setImportError("Format non supporté. Utilisez CSV, TSV, XLS ou XLSX.");
+        setImportError(t("prospects", "unsupportedFormat"));
       }
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Erreur de lecture du fichier");
+      setImportError(error instanceof Error ? error.message : t("prospects", "errorFileRead"));
     }
   }
 
@@ -1021,7 +1025,7 @@ export default function ProspectsPage() {
       .filter((p) => p.companyName);
 
     if (mapped.length === 0) {
-      setImportError("Aucun prospect trouvé. Vérifiez que la colonne \"Entreprise\" est bien assignée.");
+      setImportError(t("prospects", "noProspectFoundImport"));
       return;
     }
     setImportParsed(mapped as typeof importParsed);
@@ -1046,7 +1050,7 @@ export default function ProspectsPage() {
       setImportParsed(data.prospects.map((p: Record<string, unknown>) => ({ ...p, _selected: true })));
       setImportStep("preview");
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Erreur lors de l'analyse");
+      setImportError(error instanceof Error ? error.message : t("prospects", "errorImportParse"));
     } finally {
       setImportParsing(false);
     }
@@ -1070,7 +1074,7 @@ export default function ProspectsPage() {
       setImportStep("done");
       fetchProspects();
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Erreur lors de l'import");
+      setImportError(error instanceof Error ? error.message : t("prospects", "errorImportSave"));
     } finally {
       setImportSaving(false);
     }
@@ -1239,9 +1243,9 @@ export default function ProspectsPage() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div>
-            <h1 className="text-lg font-semibold text-foreground">Prospects</h1>
+            <h1 className="text-lg font-semibold text-foreground">{t("prospects", "title")}</h1>
             <p className="text-sm text-foreground-muted mt-0.5">
-              {total} prospect{total !== 1 ? "s" : ""} au total
+              {total} {total !== 1 ? t("prospects", "totalCountPlural") : t("prospects", "totalCount")} {t("common", "total")}
             </p>
           </div>
           <button
@@ -1249,24 +1253,24 @@ export default function ProspectsPage() {
             className="border border-border bg-card text-foreground px-3 py-2 rounded-md text-sm font-medium hover:bg-card-hover flex items-center gap-1.5"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-            Importer
+            {t("prospects", "importBtn")}
           </button>
           <button
             onClick={() => { setShowFindBar(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
             className="border border-border bg-card text-foreground-secondary px-3 py-2 rounded-md text-sm font-medium hover:bg-card-hover flex items-center gap-1.5"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            Recherche rapide
+            {t("prospects", "quickSearch")}
           </button>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex gap-2 mr-2">
             <div className="rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs">
-              <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">Découvertes du jour</p>
+              <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "discoveriesToday")}</p>
               <p className="text-sm font-semibold text-foreground tabular-nums">{scrapedToday}</p>
             </div>
             <div className="rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs">
-              <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">Enrichis du jour</p>
+              <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "enrichedToday")}</p>
               <p className="text-sm font-semibold text-foreground tabular-nums">{enrichedToday}</p>
             </div>
           </div>
@@ -1276,21 +1280,21 @@ export default function ProspectsPage() {
               disabled={actionLoading === "discover"}
               className="bg-primary text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
             >
-              {actionLoading === "discover" ? "Recherche..." : "Découvrir"}
+              {actionLoading === "discover" ? t("prospects", "discovering") : t("prospects", "discover")}
             </button>
             <button
               onClick={() => setShowEnrichConfirm(true)}
               disabled={actionLoading === "enrich"}
               className="border border-border bg-card text-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
             >
-              {actionLoading === "enrich" ? "Enrichissement..." : "Enrichir"}
+              {actionLoading === "enrich" ? t("prospects", "enriching") : t("prospects", "enrich")}
             </button>
             <button
               onClick={handleDeduplicate}
               disabled={actionLoading === "deduplicate"}
               className="border border-border bg-card text-foreground-secondary px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
             >
-              {actionLoading === "deduplicate" ? "Suppression..." : "Supprimer doublons"}
+              {actionLoading === "deduplicate" ? t("prospects", "removingDuplicates") : t("prospects", "removeDuplicates")}
             </button>
           </div>
         </div>
@@ -1301,13 +1305,13 @@ export default function ProspectsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowDiscoverConfirm(false)}>
           <div className="bg-card border border-border rounded-lg shadow-lg w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b border-border">
-              <h2 className="text-base font-semibold text-foreground">Confirmer la découverte</h2>
-              <p className="text-sm text-foreground-muted mt-1">Voici les paramètres de ciblage qui seront utilisés</p>
+              <h2 className="text-base font-semibold text-foreground">{t("prospects", "confirmDiscovery")}</h2>
+              <p className="text-sm text-foreground-muted mt-1">{t("prospects", "discoveryParams")}</p>
             </div>
             <div className="p-5 space-y-4">
               {/* Nombre de prospects */}
               <div>
-                <p className="text-xs font-semibold text-foreground-muted mb-2 uppercase tracking-wide">Nombre de prospects</p>
+                <p className="text-xs font-semibold text-foreground-muted mb-2 uppercase tracking-wide">{t("prospects", "prospectCount")}</p>
                 <div className="grid grid-cols-4 gap-1.5 mb-2">
                   {[10, 25, 50, 100, 150, 200, 300, 500].map((n) => (
                     <button
@@ -1324,7 +1328,7 @@ export default function ProspectsPage() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-foreground-muted shrink-0">Personnalisé:</label>
+                  <label className="text-xs text-foreground-muted shrink-0">{t("common", "custom")}:</label>
                   <input
                     type="number"
                     min={1}
@@ -1339,7 +1343,7 @@ export default function ProspectsPage() {
               {/* Villes */}
               <div>
                 <p className="text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">
-                  Villes ciblées ({targetingCities.length})
+                  {t("prospects", "targetedCities")} ({targetingCities.length})
                 </p>
                 {targetingCities.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -1348,14 +1352,14 @@ export default function ProspectsPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-warning">Aucune ville configurée. Allez dans Paramètres &gt; Ciblage.</p>
+                  <p className="text-xs text-warning">{t("prospects", "noCitiesConfigured")}</p>
                 )}
               </div>
 
               {/* Mots-clés */}
               <div>
                 <p className="text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">
-                  Mots-clés ({targetingKeywords.length})
+                  {t("prospects", "keywords")} ({targetingKeywords.length})
                 </p>
                 {targetingKeywords.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
@@ -1364,14 +1368,14 @@ export default function ProspectsPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-warning">Aucun mot-clé configuré. Allez dans Paramètres &gt; Ciblage.</p>
+                  <p className="text-xs text-warning">{t("prospects", "noKeywordsConfigured")}</p>
                 )}
               </div>
 
               {/* Requêtes */}
               <div>
                 <p className="text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">
-                  Requêtes de recherche ({targetingQueries.length})
+                  {t("prospects", "searchQueries")} ({targetingQueries.length})
                 </p>
                 {targetingQueries.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
@@ -1380,7 +1384,7 @@ export default function ProspectsPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-foreground-muted">Aucune requête personnalisée (les mots-clés seront utilisés).</p>
+                  <p className="text-xs text-foreground-muted">{t("prospects", "noCustomQueries")}</p>
                 )}
               </div>
 
@@ -1388,14 +1392,14 @@ export default function ProspectsPage() {
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="flex-1 h-px bg-border" />
-                  <span className="text-xs text-foreground-muted uppercase">ou Google Maps (manuel)</span>
+                  <span className="text-xs text-foreground-muted uppercase">{t("prospects", "orGoogleMaps")}</span>
                   <div className="flex-1 h-px bg-border" />
                 </div>
-                <p className="text-xs text-foreground-muted mb-2">Générer des liens Google Maps par province, scraper manuellement, puis importer le CSV.</p>
+                <p className="text-xs text-foreground-muted mb-2">{t("prospects", "googleMapsDesc")}</p>
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Mot-clé (ex: lavage de vitres)"
+                    placeholder={t("prospects", "keywordPlaceholder")}
                     value={discoverKeyword}
                     onChange={(e) => setDiscoverKeyword(e.target.value)}
                     className="flex-1 border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
@@ -1405,7 +1409,7 @@ export default function ProspectsPage() {
                     onChange={(e) => setDiscoverProvince(e.target.value)}
                     className="border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
                   >
-                    <option value="">Province</option>
+                    <option value="">{t("prospects", "province")}</option>
                     {provinces.map((p) => (
                       <option key={p.code} value={p.code}>{p.name}</option>
                     ))}
@@ -1427,7 +1431,7 @@ export default function ProspectsPage() {
                   className="w-full mt-2 bg-primary text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50 flex items-center justify-center gap-1.5"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                  Générer les liens Google Maps
+                  {t("prospects", "generateGmapsLinks")}
                 </button>
               </div>
             </div>
@@ -1436,7 +1440,7 @@ export default function ProspectsPage() {
                 onClick={() => setShowDiscoverConfirm(false)}
                 className="px-4 py-2 rounded-md text-sm font-medium text-foreground-secondary hover:bg-background-subtle"
               >
-                Annuler
+                {t("common", "cancel")}
               </button>
               <button
                 onClick={() => {
@@ -1446,7 +1450,7 @@ export default function ProspectsPage() {
                 disabled={targetingCities.length === 0 && targetingKeywords.length === 0}
                 className="bg-primary text-white px-5 py-2 rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
               >
-                Lancer la découverte ({discoverTarget})
+                {t("prospects", "launchDiscovery")} ({discoverTarget})
               </button>
             </div>
           </div>
@@ -1461,16 +1465,16 @@ export default function ProspectsPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowEnrichConfirm(false)}>
             <div className="bg-card border border-border rounded-lg shadow-lg w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="p-5 border-b border-border">
-                <h2 className="text-base font-semibold text-foreground">Confirmer l&apos;enrichissement</h2>
+                <h2 className="text-base font-semibold text-foreground">{t("prospects", "confirmEnrichment")}</h2>
                 <p className="text-sm text-foreground-muted mt-1">
                   {newCount > 0
-                    ? `${newCount} prospect${newCount > 1 ? "s" : ""} non enrichi${newCount > 1 ? "s" : ""} disponible${newCount > 1 ? "s" : ""}`
-                    : "Aucun prospect à enrichir (tous sont déjà enrichis)"}
+                    ? `${newCount} prospect${newCount > 1 ? "s" : ""} ${newCount > 1 ? t("prospects", "unenrichedAvailablePlural") : t("prospects", "unenrichedAvailable")} ${newCount > 1 ? t("prospects", "availablePlural") : t("prospects", "available")}`
+                    : t("prospects", "noProspectsToEnrich")}
                 </p>
               </div>
               <div className="p-5 space-y-4">
                 <div>
-                  <p className="text-xs font-semibold text-foreground-muted mb-2 uppercase tracking-wide">Nombre de prospects à enrichir</p>
+                  <p className="text-xs font-semibold text-foreground-muted mb-2 uppercase tracking-wide">{t("prospects", "prospectsToEnrichCount")}</p>
                   <div className="grid grid-cols-4 gap-1.5 mb-2">
                     {[10, 25, 50, 100, 150, 200, 300, 500].map((n) => (
                       <button
@@ -1487,7 +1491,7 @@ export default function ProspectsPage() {
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-foreground-muted shrink-0">Personnalisé:</label>
+                    <label className="text-xs text-foreground-muted shrink-0">{t("common", "custom")}:</label>
                     <input
                       type="number"
                       min={1}
@@ -1502,7 +1506,7 @@ export default function ProspectsPage() {
                 {newCount > 0 && (
                   <div>
                     <p className="text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">
-                      Prospects à enrichir ({Math.min(enrichTarget, newCount)})
+                      {t("prospects", "prospectsToEnrich")} ({Math.min(enrichTarget, newCount)})
                     </p>
                     <div className="border border-border rounded-md max-h-48 overflow-y-auto">
                       {newProspects.slice(0, enrichTarget).map((p) => (
@@ -1516,7 +1520,7 @@ export default function ProspectsPage() {
                       ))}
                       {newCount > enrichTarget && (
                         <div className="px-3 py-2 text-xs text-foreground-muted text-center">
-                          et {newCount - enrichTarget} autre{newCount - enrichTarget > 1 ? "s" : ""}...
+                          {t("common", "and")} {newCount - enrichTarget} {newCount - enrichTarget > 1 ? t("prospects", "othersPlural") : t("prospects", "others")}...
                         </div>
                       )}
                     </div>
@@ -1528,14 +1532,14 @@ export default function ProspectsPage() {
                   onClick={() => setShowEnrichConfirm(false)}
                   className="px-4 py-2 rounded-md text-sm font-medium text-foreground-secondary hover:bg-background-subtle"
                 >
-                  Annuler
+                  {t("common", "cancel")}
                 </button>
                 <button
                   onClick={handleEnrichBatch}
                   disabled={newCount === 0}
                   className="bg-primary text-white px-5 py-2 rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
                 >
-                  Lancer l&apos;enrichissement ({Math.min(enrichTarget, newCount)})
+                  {t("prospects", "launchEnrichment")} ({Math.min(enrichTarget, newCount)})
                 </button>
               </div>
             </div>
@@ -1552,7 +1556,7 @@ export default function ProspectsPage() {
                 Google Maps — &quot;{discoverKeyword}&quot; ({gmapsCities.length} villes)
               </h3>
               <p className="text-xs text-foreground-muted mt-0.5">
-                Ouvrez chaque lien, scrapez avec Instant Data Scraper, puis importez le CSV avec le bouton Importer.
+                {t("prospects", "gmapsOpenAndScrape")}
               </p>
             </div>
             <button
@@ -1573,7 +1577,7 @@ export default function ProspectsPage() {
               >
                 <svg className="w-4 h-4 text-foreground-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 <span className="text-foreground-secondary group-hover:text-foreground truncate">{city.name}</span>
-                <span className="text-xs text-foreground-muted ml-auto shrink-0">{city.population?.toLocaleString("fr-CA")} hab.</span>
+                <span className="text-xs text-foreground-muted ml-auto shrink-0">{city.population?.toLocaleString(locale === "en" ? "en-CA" : "fr-CA")} {t("prospects", "inhabitants")}</span>
               </a>
             ))}
           </div>
@@ -1590,23 +1594,23 @@ export default function ProspectsPage() {
               : discoverProgress.status === "cancelled" ? "cancelled"
               : "running",
             title: discoverProgress.status === "running"
-              ? "Recherche en cours"
+              ? t("prospects", "searchInProgress")
               : discoverProgress.status === "done"
-                ? "Recherche terminée"
+                ? t("prospects", "searchComplete")
                 : discoverProgress.status === "cancelled"
-                  ? "Recherche arrêtée"
-                  : "Recherche — Erreur",
+                  ? t("prospects", "searchStopped")
+                  : t("prospects", "searchError"),
             stepLabel: discoverProgress.currentCity
-              ? `Analyse : ${discoverProgress.currentCity}`
+              ? `${t("prospects", "analysis")} : ${discoverProgress.currentCity}`
               : "",
             processed: discoverProgress.newCount,
             total: discoverProgress.target,
             startedAt: discoverProgress.startedAt,
             currentStep: discoverProgress.completedCities + 1,
             totalSteps: discoverProgress.totalCities,
-            stepUnit: "Ville",
-            secondaryLabel: `${discoverProgress.found} trouvés, ${discoverProgress.newCount} nouveaux${discoverProgress.round > 1 ? ` (round ${discoverProgress.round})` : ""}`,
-            error: discoverProgress.status === "error" ? "Erreur lors de la recherche" : undefined,
+            stepUnit: t("prospects", "city"),
+            secondaryLabel: `${discoverProgress.found} ${t("prospects", "found")}, ${discoverProgress.newCount} ${t("prospects", "newOnes")}${discoverProgress.round > 1 ? ` (round ${discoverProgress.round})` : ""}`,
+            error: discoverProgress.status === "error" ? t("prospects", "errorDuringSearch") : undefined,
           }}
           onStop={async () => {
             try { await fetch("/api/prospects/discover", { method: "DELETE" }); } catch {}
@@ -1626,12 +1630,12 @@ export default function ProspectsPage() {
                 : enrichProgress.status === "cancelled" ? "cancelled"
                 : "running",
               title: enrichProgress.status === "running"
-                ? "Enrichissement en cours"
+                ? t("prospects", "enrichmentInProgress")
                 : enrichProgress.status === "done"
-                  ? "Enrichissement terminé"
-                  : "Enrichissement arrêté",
+                  ? t("prospects", "enrichmentComplete")
+                  : t("prospects", "enrichmentStopped"),
               stepLabel: enrichProgress.currentProspect
-                ? `Enrichissement : ${enrichProgress.currentProspect}`
+                ? `${t("prospects", "enrich")} : ${enrichProgress.currentProspect}`
                 : "",
               processed: enrichProcessed,
               total: enrichProgress.target,
@@ -1639,7 +1643,7 @@ export default function ProspectsPage() {
               currentStep: enrichProcessed + 1,
               totalSteps: enrichProgress.target,
               stepUnit: "Prospect",
-              secondaryLabel: `${enrichProgress.enriched} enrichi${enrichProgress.enriched !== 1 ? "s" : ""}${enrichProgress.noData > 0 ? `, ${enrichProgress.noData} sans données` : ""}${enrichProgress.failed > 0 ? `, ${enrichProgress.failed} échoué${enrichProgress.failed !== 1 ? "s" : ""}` : ""}`,
+              secondaryLabel: `${enrichProgress.enriched} ${enrichProgress.enriched !== 1 ? t("prospects", "enrichedPlural") : t("prospects", "enriched")}${enrichProgress.noData > 0 ? `, ${enrichProgress.noData} ${t("prospects", "noData")}` : ""}${enrichProgress.failed > 0 ? `, ${enrichProgress.failed} ${enrichProgress.failed !== 1 ? t("prospects", "failedPlural") : t("prospects", "failed")}` : ""}`,
             }}
             onStop={stopEnrichment}
             onDismiss={dismissEnrich}
@@ -1654,7 +1658,7 @@ export default function ProspectsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Rechercher par nom, email, téléphone, ville..."
+            placeholder={t("prospects", "searchPlaceholder")}
             className="w-full border border-border rounded-md px-3 py-2 text-sm pl-9 bg-background text-foreground"
           />
           <svg className="absolute left-3 top-2.5 h-4 w-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1676,9 +1680,9 @@ export default function ProspectsPage() {
           onChange={(e) => { setStatusFilter(e.target.value); }}
           className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
         >
-          <option value="">Tous les statuts</option>
+          <option value="">{t("prospects", "allStatuses")}</option>
           {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>
+            <option key={s} value={s}>{t("status", s as "NEW") || s}</option>
           ))}
         </select>
         <select
@@ -1686,9 +1690,9 @@ export default function ProspectsPage() {
           onChange={(e) => { setSourceFilter(e.target.value); }}
           className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
         >
-          <option value="">Toutes les sources</option>
+          <option value="">{t("prospects", "allSources")}</option>
           {SOURCE_OPTIONS.map((s) => (
-            <option key={s} value={s}>{SOURCE_LABELS[s] || s}</option>
+            <option key={s} value={s}>{t("source", s as "google_search") || s}</option>
           ))}
         </select>
         <select
@@ -1696,9 +1700,9 @@ export default function ProspectsPage() {
           onChange={(e) => { setContactTypeFilter(e.target.value); }}
           className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
         >
-          <option value="">Tous les types</option>
-          {CONTACT_TYPE_OPTIONS.map((t) => (
-            <option key={t} value={t}>{CONTACT_TYPE_LABELS[t] || t}</option>
+          <option value="">{t("prospects", "allTypes")}</option>
+          {CONTACT_TYPE_OPTIONS.map((ct) => (
+            <option key={ct} value={ct}>{t("contactType", ct as "prospect") || ct}</option>
           ))}
         </select>
         {hasFilters && (
@@ -1706,7 +1710,7 @@ export default function ProspectsPage() {
             onClick={resetFilters}
             className="text-sm text-danger hover:text-danger/80 px-2 py-1"
           >
-            Réinitialiser
+            {t("common", "reset")}
           </button>
         )}
       </div>
@@ -1718,13 +1722,13 @@ export default function ProspectsPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
           <span className="text-sm text-foreground-secondary">
-            {displayProspects.length} résultat{displayProspects.length > 1 ? "s" : ""}
+            {displayProspects.length} {displayProspects.length > 1 ? t("prospects", "resultsPlural") : t("prospects", "results")}
           </span>
           <button
             onClick={toggleSelectAll}
             className="text-sm font-medium text-white bg-primary px-4 py-1.5 rounded-md hover:bg-primary/90 transition-colors"
           >
-            Sélectionner tout ({displayProspects.length})
+            {t("common", "selectAll")} ({displayProspects.length})
           </button>
         </div>
       )}
@@ -1733,14 +1737,14 @@ export default function ProspectsPage() {
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 mb-3 p-3 bg-primary-subtle border border-primary/20 rounded-md">
           <span className="text-sm font-medium text-foreground">
-            {selectedIds.size} sélectionné{selectedIds.size > 1 ? "s" : ""} sur {displayProspects.length}
+            {selectedIds.size} {selectedIds.size > 1 ? t("prospects", "selectedPlural") : t("prospects", "selected")} {t("prospects", "onTotal")} {displayProspects.length}
           </span>
           {selectedIds.size < displayProspects.length && (
             <button
               onClick={toggleSelectAll}
               className="text-sm text-primary hover:text-primary/80 underline"
             >
-              Tout sélectionner ({displayProspects.length})
+              {t("common", "selectAll")} ({displayProspects.length})
             </button>
           )}
           <button
@@ -1748,20 +1752,20 @@ export default function ProspectsPage() {
             disabled={actionLoading === "bulk-enrich"}
             className="text-sm border border-border bg-card text-foreground px-3 py-1.5 rounded-md hover:bg-card-hover disabled:opacity-50"
           >
-            {actionLoading === "bulk-enrich" ? "Enrichissement..." : "Enrichir la sélection"}
+            {actionLoading === "bulk-enrich" ? t("prospects", "enriching") : t("prospects", "enrichSelection")}
           </button>
           <button
             onClick={handleBulkDelete}
             disabled={actionLoading === "bulk-delete"}
             className="text-sm bg-danger text-white px-3 py-1.5 rounded-md hover:bg-danger/90 disabled:opacity-50"
           >
-            {actionLoading === "bulk-delete" ? "Suppression..." : "Supprimer la sélection"}
+            {actionLoading === "bulk-delete" ? t("prospects", "deleting") : t("prospects", "deleteSelection")}
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}
             className="text-sm text-foreground-muted hover:text-foreground"
           >
-            Annuler
+            {t("common", "cancel")}
           </button>
         </div>
       )}
@@ -1785,12 +1789,12 @@ export default function ProspectsPage() {
               }
               if (e.key === "Escape") closeFindBar();
             }}
-            placeholder="Rechercher dans le tableau..."
+            placeholder={t("prospects", "searchInTable")}
             className="flex-1 border-none outline-none bg-transparent text-sm text-foreground"
           />
           {findQuery && (
             <span className="text-xs text-foreground-muted shrink-0">
-              {findMatchCount > 0 ? `${findMatchIndex + 1}/${findMatchCount}` : "0 résultat"}
+              {findMatchCount > 0 ? `${findMatchIndex + 1}/${findMatchCount}` : t("prospects", "noResult")}
             </span>
           )}
           <div className="flex gap-0.5 shrink-0">
@@ -1798,7 +1802,7 @@ export default function ProspectsPage() {
               onClick={() => setFindMatchIndex((prev) => (prev - 1 + findMatchCount) % findMatchCount)}
               disabled={findMatchCount === 0}
               className="p-1 rounded hover:bg-background-subtle disabled:opacity-30"
-              title="Précédent (Shift+Enter)"
+              title={`${t("common", "previous")} (Shift+Enter)`}
             >
               <svg className="w-4 h-4 text-foreground-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
             </button>
@@ -1806,12 +1810,12 @@ export default function ProspectsPage() {
               onClick={() => setFindMatchIndex((prev) => (prev + 1) % findMatchCount)}
               disabled={findMatchCount === 0}
               className="p-1 rounded hover:bg-background-subtle disabled:opacity-30"
-              title="Suivant (Enter)"
+              title={`${t("common", "next")} (Enter)`}
             >
               <svg className="w-4 h-4 text-foreground-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
             </button>
           </div>
-          <button onClick={closeFindBar} className="p-1 rounded hover:bg-background-subtle shrink-0" title="Fermer (Esc)">
+          <button onClick={closeFindBar} className="p-1 rounded hover:bg-background-subtle shrink-0" title={`${t("common", "close")} (Esc)`}>
             <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -1832,7 +1836,7 @@ export default function ProspectsPage() {
                 />
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("companyName")}>
-                Entreprise <SortIcon field="companyName" />
+                {t("prospects", "company")} <SortIcon field="companyName" />
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">
                 <select
@@ -1840,22 +1844,22 @@ export default function ProspectsPage() {
                   onChange={(e) => { setCityFilter(e.target.value); }}
                   className="bg-transparent border-none cursor-pointer font-medium text-foreground-muted text-xs uppercase tracking-wide p-0 focus:ring-0 focus:outline-none"
                 >
-                  <option value="">Ville ▾</option>
-                  {availableCities.sort((a, b) => a.localeCompare(b, "fr")).map((c) => (
+                  <option value="">{t("prospects", "city")} ▾</option>
+                  {availableCities.sort((a, b) => a.localeCompare(b, locale)).map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Email</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Téléphone</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Source</th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "phone")}</th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "source")}</th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("leadScore")}>
-                Score <SortIcon field="leadScore" />
+                {t("prospects", "score")} <SortIcon field="leadScore" />
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("status")}>
-                Statut <SortIcon field="status" />
+                {t("prospects", "status")} <SortIcon field="status" />
               </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Actions</th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1874,11 +1878,11 @@ export default function ProspectsPage() {
               <tr>
                 <td colSpan={10} className="text-center py-12 text-foreground-muted">
                   <div className="space-y-2">
-                    <p className="text-base">Aucun prospect trouvé</p>
+                    <p className="text-base">{t("prospects", "noProspectFound")}</p>
                     {hasFilters ? (
-                      <p className="text-sm">Essayez de modifier vos filtres ou <button onClick={resetFilters} className="text-primary hover:underline">réinitialiser</button></p>
+                      <p className="text-sm">{t("prospects", "tryModifyFilters")} <button onClick={resetFilters} className="text-primary hover:underline">{t("prospects", "resetFilters")}</button></p>
                     ) : (
-                      <p className="text-sm">Lancez une découverte pour commencer!</p>
+                      <p className="text-sm">{t("prospects", "startDiscovery")}</p>
                     )}
                   </div>
                 </td>
@@ -1907,7 +1911,7 @@ export default function ProspectsPage() {
       {total > 0 && (
         <div className="mt-4 text-center">
           <p className="text-sm text-foreground-muted">
-            {displayProspects.length} prospect{displayProspects.length > 1 ? "s" : ""} affichés sur {total}
+            {displayProspects.length} {displayProspects.length > 1 ? t("prospects", "totalCountPlural") : t("prospects", "totalCount")} {t("prospects", "displayed")} {total}
           </p>
         </div>
       )}
@@ -1936,7 +1940,7 @@ export default function ProspectsPage() {
                         onClick={startEditing}
                         className="text-sm border border-border bg-card text-foreground-secondary px-3 py-1.5 rounded-md hover:bg-card-hover"
                       >
-                        Modifier
+                        {t("common", "edit")}
                       </button>
                     )}
                     <button
@@ -1952,11 +1956,11 @@ export default function ProspectsPage() {
                   <div className="space-y-3 mb-6">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Entreprise</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "company")}</label>
                         <input type="text" value={editData.companyName || ""} onChange={(e) => setEditData({ ...editData, companyName: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Industrie</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "industry")}</label>
                         <input type="text" value={editData.industry || ""} onChange={(e) => setEditData({ ...editData, industry: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
@@ -1964,19 +1968,19 @@ export default function ProspectsPage() {
                         <input type="email" value={editData.email || ""} onChange={(e) => setEditData({ ...editData, email: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Téléphone</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "phone")}</label>
                         <input type="text" value={editData.phone || ""} onChange={(e) => setEditData({ ...editData, phone: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Ville</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "city")}</label>
                         <input type="text" value={editData.city || ""} onChange={(e) => setEditData({ ...editData, city: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Adresse</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "address")}</label>
                         <input type="text" value={editData.address || ""} onChange={(e) => setEditData({ ...editData, address: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Site web</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "website")}</label>
                         <input type="url" value={editData.website || ""} onChange={(e) => setEditData({ ...editData, website: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
@@ -1984,32 +1988,32 @@ export default function ProspectsPage() {
                         <input type="url" value={editData.linkedinUrl || ""} onChange={(e) => setEditData({ ...editData, linkedinUrl: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Score</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "score")}</label>
                         <input type="number" min={0} max={100} value={editData.leadScore || 0} onChange={(e) => setEditData({ ...editData, leadScore: parseInt(e.target.value) || 0 })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Statut</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "status")}</label>
                         <select value={editData.status || "NEW"} onChange={(e) => setEditData({ ...editData, status: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground">
-                          {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                          {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{t("status", s as "NEW")}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="text-xs text-foreground-muted uppercase">Type</label>
+                        <label className="text-xs text-foreground-muted uppercase">{t("prospects", "type")}</label>
                         <select value={editData.contactType || "prospect"} onChange={(e) => setEditData({ ...editData, contactType: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground">
-                          {CONTACT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CONTACT_TYPE_LABELS[t]}</option>)}
+                          {CONTACT_TYPE_OPTIONS.map((ct) => <option key={ct} value={ct}>{t("contactType", ct as "prospect")}</option>)}
                         </select>
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs text-foreground-muted uppercase">Notes</label>
+                      <label className="text-xs text-foreground-muted uppercase">{t("prospects", "notes")}</label>
                       <textarea value={editData.notes || ""} onChange={(e) => setEditData({ ...editData, notes: e.target.value })} rows={3} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
                     </div>
                     <div className="flex gap-2 justify-end">
                       <button onClick={() => setEditing(false)} className="text-sm px-4 py-2 rounded-md border border-border text-foreground-secondary hover:bg-background-subtle">
-                        Annuler
+                        {t("common", "cancel")}
                       </button>
                       <button onClick={handleSaveEdit} disabled={actionLoading === "save-edit"} className="text-sm bg-primary text-white px-4 py-2 rounded-md hover:bg-primary-hover disabled:opacity-50">
-                        {actionLoading === "save-edit" ? "Enregistrement..." : "Enregistrer"}
+                        {actionLoading === "save-edit" ? t("common", "saving") : t("common", "save")}
                       </button>
                     </div>
                   </div>
@@ -2020,11 +2024,11 @@ export default function ProspectsPage() {
                     <p className="text-sm text-foreground">{selectedProspect.email || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">Téléphone</p>
+                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "phone")}</p>
                     <p className="text-sm text-foreground">{selectedProspect.phone || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">Site web</p>
+                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "website")}</p>
                     <p className="text-sm">
                       {selectedProspect.website ? (
                         <a href={selectedProspect.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
@@ -2038,25 +2042,25 @@ export default function ProspectsPage() {
                     <p className="text-sm">
                       {selectedProspect.linkedinUrl ? (
                         <a href={selectedProspect.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                          Voir profil
+                          {t("prospects", "viewProfile")}
                         </a>
                       ) : "—"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">Score</p>
+                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "score")}</p>
                     <p className="text-sm font-mono font-semibold text-foreground tabular-nums">{selectedProspect.leadScore}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">Statut</p>
+                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "status")}</p>
                     <StatusBadge status={selectedProspect.status} />
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">Adresse</p>
+                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "address")}</p>
                     <p className="text-sm text-foreground">{selectedProspect.address || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">Source</p>
+                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "source")}</p>
                     <p className="text-sm text-foreground">{selectedProspect.source || "—"}</p>
                   </div>
                 </div>
@@ -2065,14 +2069,14 @@ export default function ProspectsPage() {
                 {/* Recent emails */}
                 {selectedProspect.emailActivities && selectedProspect.emailActivities.length > 0 && (
                   <div className="border-t border-border pt-4 mb-4">
-                    <h3 className="font-semibold mb-2 text-sm text-foreground">Emails envoyés</h3>
+                    <h3 className="font-semibold mb-2 text-sm text-foreground">{t("prospects", "emailsSent")}</h3>
                     <div className="space-y-1">
                       {selectedProspect.emailActivities.map((ea) => (
                         <div key={ea.id} className="flex items-center gap-2 text-xs text-foreground-secondary">
-                          <span>{new Date(ea.sentAt).toLocaleDateString("fr-CA")}</span>
+                          <span>{new Date(ea.sentAt).toLocaleDateString(locale === "en" ? "en-CA" : "fr-CA")}</span>
                           <span className="truncate flex-1">{ea.emailSubject}</span>
-                          {ea.replyReceived && <span className="text-success font-medium">Répondu</span>}
-                          {ea.bounce && <span className="text-danger font-medium">Rebond</span>}
+                          {ea.replyReceived && <span className="text-success font-medium">{t("status", "REPLIED")}</span>}
+                          {ea.bounce && <span className="text-danger font-medium">{t("dashboard", "bounce")}</span>}
                         </div>
                       ))}
                     </div>
@@ -2083,24 +2087,24 @@ export default function ProspectsPage() {
                 {selectedProspect.email && (
                   <div className="border-t border-border pt-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-foreground text-sm">Email de prospection</h3>
+                      <h3 className="font-semibold text-foreground text-sm">{t("prospects", "prospectingEmail")}</h3>
                       <button
                         onClick={() => handleGenerateEmail(selectedProspect.id)}
                         disabled={actionLoading === "generate-" + selectedProspect.id}
                         className="text-sm bg-primary text-white px-3 py-1.5 rounded-md hover:bg-primary-hover disabled:opacity-50"
                       >
-                        {actionLoading === "generate-" + selectedProspect.id ? "Génération..." : "Générer avec IA"}
+                        {actionLoading === "generate-" + selectedProspect.id ? t("prospects", "generating") : t("prospects", "generateWithAI")}
                       </button>
                     </div>
 
                     {generatedEmail && (
                       <div className="bg-background-subtle rounded-md p-4 space-y-3">
                         <div>
-                          <p className="text-xs text-foreground-muted uppercase mb-1">Sujet</p>
+                          <p className="text-xs text-foreground-muted uppercase mb-1">{t("prospects", "subject")}</p>
                           <p className="text-sm font-medium text-foreground">{generatedEmail.subject}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-foreground-muted uppercase mb-1">Corps</p>
+                          <p className="text-xs text-foreground-muted uppercase mb-1">{t("prospects", "body")}</p>
                           <pre className="text-sm whitespace-pre-wrap font-sans text-foreground">{generatedEmail.body}</pre>
                         </div>
                         <button
@@ -2108,7 +2112,7 @@ export default function ProspectsPage() {
                           disabled={actionLoading === "send-" + selectedProspect.id}
                           className="w-full bg-success text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-success/90 disabled:opacity-50"
                         >
-                          {actionLoading === "send-" + selectedProspect.id ? "Envoi..." : `Envoyer à ${selectedProspect.email}`}
+                          {actionLoading === "send-" + selectedProspect.id ? t("prospects", "sending") : `${t("prospects", "sendTo")} ${selectedProspect.email}`}
                         </button>
                       </div>
                     )}

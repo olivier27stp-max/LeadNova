@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -217,7 +217,15 @@ function VerifyEmailsTable({
 
 // ─── Page ────────────────────────────────────────────────
 
-export default function EmailVerifierPage() {
+export default function EmailVerifierPageWrapper() {
+  return (
+    <Suspense>
+      <EmailVerifierPage />
+    </Suspense>
+  );
+}
+
+function EmailVerifierPage() {
   const searchParams = useSearchParams();
   const fromCampaign = searchParams.get("from") === "campaign";
   const campaignName = searchParams.get("campaign");
