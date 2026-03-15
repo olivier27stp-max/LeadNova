@@ -36,6 +36,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import CampaignReports from "@/components/CampaignReports";
+import { useTranslation } from "@/components/LanguageProvider";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -85,12 +86,6 @@ const contactTypeVariantMap: Record<string, "primary" | "success" | "accent"> = 
   nouveau_client: "accent",
 };
 
-const contactTypeLabels: Record<string, string> = {
-  prospect: "Prospect",
-  client: "Client",
-  nouveau_client: "Nouveau client",
-};
-
 // ─── Variables Help ──────────────────────────────────────
 
 const TEMPLATE_VARIABLES = [
@@ -99,18 +94,12 @@ const TEMPLATE_VARIABLES = [
   { key: "{{contact_name}}", label: "Nom du contact" },
 ];
 
-// Display-friendly labels for variable buttons
-const VARIABLE_DISPLAY: Record<string, string> = {
-  "{{company_name}}": "Nom de l'entreprise",
-  "{{city}}": "Ville",
-  "{{contact_name}}": "Nom du contact",
-};
-
 // ─── Main Page Component ─────────────────────────────────
 
 export default function CampaignDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { t, locale } = useTranslation();
   const campaignId = params.id as string;
 
   const [campaign, setCampaign] = useState<Campaign | null>(null);
@@ -155,9 +144,9 @@ export default function CampaignDetailPage() {
       setLogoEnabled(true);
       setEditingLogo(false);
       await saveLogo(data.url, true);
-      setToast({ message: "Logo mis à jour", type: "success" });
+      setToast({ message: t("campaignDetail", "logoUpdated"), type: "success" });
     } else {
-      setToast({ message: data.error || "Erreur upload", type: "error" });
+      setToast({ message: data.error || t("campaignDetail", "errorUpload"), type: "error" });
     }
     setLogoUploading(false);
   }
@@ -331,9 +320,9 @@ export default function CampaignDetailPage() {
       const updated = await res.json();
       setCampaign((prev) => (prev ? { ...prev, ...updated } : prev));
       setHasUnsaved(false);
-      showToast("Message sauvegardé", "success");
+      showToast(t("campaignDetail", "messageSaved"), "success");
     } catch {
-      showToast("Erreur lors de la sauvegarde", "error");
+      showToast(t("campaignDetail", "errorSaving"), "error");
     } finally {
       setSaving(false);
     }
@@ -352,11 +341,11 @@ export default function CampaignDetailPage() {
       const updated = await res.json();
       setCampaign((prev) => (prev ? { ...prev, ...updated } : prev));
       showToast(
-        newStatus === "ACTIVE" ? "Campagne activée" : "Campagne en pause",
+        newStatus === "ACTIVE" ? t("campaignDetail", "campaignActivated") : t("campaignDetail", "campaignPaused"),
         "success"
       );
     } catch {
-      showToast("Erreur lors du changement de statut", "error");
+      showToast(t("campaignDetail", "errorStatus"), "error");
     }
   }
 
@@ -394,7 +383,7 @@ export default function CampaignDetailPage() {
         return next;
       });
       setSelectedCount((prev) => prev + (isSelected ? 1 : -1));
-      showToast("Erreur lors de la mise à jour", "error");
+      showToast(t("campaignDetail", "errorUpdate"), "error");
     }
   }
 
@@ -419,7 +408,7 @@ export default function CampaignDetailPage() {
         body: JSON.stringify({ prospectIds: unselectedIds }),
       });
       if (!res.ok) throw new Error("Failed");
-      showToast(`${unselectedIds.length} contacts ajoutés`, "success");
+      showToast(`${unselectedIds.length} ${t("campaignDetail", "contactsAdded")}`, "success");
     } catch {
       // Revert
       setLocalSelected((prev) => {
@@ -428,7 +417,7 @@ export default function CampaignDetailPage() {
         return next;
       });
       setSelectedCount((prev) => prev - unselectedIds.length);
-      showToast("Erreur lors de la sélection", "error");
+      showToast(t("campaignDetail", "errorSelection"), "error");
     }
   }
 
@@ -452,7 +441,7 @@ export default function CampaignDetailPage() {
         body: JSON.stringify({ prospectIds: selectedIds }),
       });
       if (!res.ok) throw new Error("Failed");
-      showToast(`${selectedIds.length} contacts retirés`, "success");
+      showToast(`${selectedIds.length} ${t("campaignDetail", "contactsRemoved")}`, "success");
     } catch {
       setLocalSelected((prev) => {
         const next = new Set(prev);
@@ -460,7 +449,7 @@ export default function CampaignDetailPage() {
         return next;
       });
       setSelectedCount((prev) => prev + selectedIds.length);
-      showToast("Erreur lors de la désélection", "error");
+      showToast(t("campaignDetail", "errorDeselection"), "error");
     }
   }
 
@@ -472,13 +461,13 @@ export default function CampaignDetailPage() {
       const res = await fetch(`/api/campaigns/${campaignId}/send`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || "Erreur lors de l'envoi", "error");
+        showToast(data.error || t("campaignDetail", "errorSaving"), "error");
       } else {
         setSendResult(data);
-        showToast(`${data.sent} email${data.sent !== 1 ? "s" : ""} envoyé${data.sent !== 1 ? "s" : ""}`, data.failed > 0 ? "error" : "success");
+        showToast(`${data.sent} ${data.sent !== 1 ? t("campaignDetail", "emailsSentPlural") : t("campaignDetail", "emailsSent")} ${data.sent !== 1 ? t("campaignDetail", "sentPlural") : t("campaignDetail", "sent")}`, data.failed > 0 ? "error" : "success");
       }
     } catch {
-      showToast("Erreur lors de l'envoi", "error");
+      showToast(t("campaignDetail", "errorSaving"), "error");
     } finally {
       setSending(false);
     }
@@ -521,14 +510,14 @@ export default function CampaignDetailPage() {
     });
     if (!res.ok) {
       const text = await res.text();
-      let msg = "Erreur lors de la planification";
+      let msg = t("campaignDetail", "errorSchedule");
       try { msg = JSON.parse(text).error || msg; } catch { if (text) msg = text; }
       throw new Error(msg);
     }
     const saved = await res.json();
     setScheduledEmail(saved);
     setShowScheduleModal(false);
-    showToast(isEdit ? "Envoi replanifié" : "Envoi planifié avec succès", "success");
+    showToast(isEdit ? t("campaignDetail", "rescheduled") : t("campaignDetail", "scheduledSuccess"), "success");
   }
 
   async function handleCancelScheduled() {
@@ -537,9 +526,9 @@ export default function CampaignDetailPage() {
       const res = await fetch(`/api/scheduled-emails/${scheduledEmail.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
       setScheduledEmail(null);
-      showToast("Envoi planifié annulé", "success");
+      showToast(t("campaignDetail", "scheduledCancelled"), "success");
     } catch {
-      showToast("Erreur lors de l'annulation", "error");
+      showToast(t("campaignDetail", "errorCancel"), "error");
     }
   }
 
@@ -579,13 +568,13 @@ export default function CampaignDetailPage() {
     return (
       <EmptyState
         icon={<AlertTriangle />}
-        title="Campagne introuvable"
-        description="La campagne que vous recherchez n'existe pas ou a été supprimée."
+        title={t("campaignDetail", "notFound")}
+        description={t("campaignDetail", "notFoundDesc")}
         action={
           <Link href="/campaigns">
             <Button variant="secondary">
               <ArrowLeft />
-              Retour aux campagnes
+              {t("campaignDetail", "backToCampaigns")}
             </Button>
           </Link>
         }
@@ -649,9 +638,9 @@ export default function CampaignDetailPage() {
     contacts.length > 0 && contacts.every((c) => localSelected.has(c.id));
 
   const tabItems = [
-    { id: "message", label: "Message" },
-    { id: "contact", label: "Contacts", count: selectedCount },
-    { id: "reports", label: "Rapports" },
+    { id: "message", label: t("campaignDetail", "message") },
+    { id: "contact", label: t("campaignDetail", "contacts"), count: selectedCount },
+    { id: "reports", label: t("campaignDetail", "reports") },
   ];
 
   return (
@@ -675,11 +664,11 @@ export default function CampaignDetailPage() {
       {showSendConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-foreground">Confirmer l&apos;envoi</h2>
+            <h2 className="text-lg font-semibold text-foreground">{t("campaignDetail", "confirmSend")}</h2>
             <p className="text-sm text-foreground-secondary">
-              Vous êtes sur le point d&apos;envoyer le message de cette campagne à{" "}
-              <span className="font-semibold text-foreground">{selectedCount} contact{selectedCount !== 1 ? "s" : ""}</span>.
-              Cette action est irréversible.
+              {t("campaignDetail", "aboutToSend")}{" "}
+              <span className="font-semibold text-foreground">{selectedCount} {selectedCount !== 1 ? t("campaignDetail", "contactPlural") : t("campaignDetail", "contact")}</span>.
+              {" "}{t("campaignDetail", "irreversible")}
             </p>
 
             {/* Unverified emails warning — smart gate */}
@@ -689,11 +678,10 @@ export default function CampaignDetailPage() {
                   <AlertTriangle className="size-4 text-warning shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm text-warning font-medium">
-                      {unverifiedStats.unverified} email{unverifiedStats.unverified !== 1 ? "s" : ""} non vérifié{unverifiedStats.unverified !== 1 ? "s" : ""}
+                      {unverifiedStats.unverified} {unverifiedStats.unverified !== 1 ? t("campaignDetail", "emailsSentPlural") : t("campaignDetail", "emailsSent")} {unverifiedStats.unverified !== 1 ? t("campaignDetail", "unverifiedEmailsPlural") : t("campaignDetail", "unverifiedEmails")}
                     </p>
                     <p className="text-xs text-foreground-muted mt-1">
-                      {unverifiedStats.unverified} sur {unverifiedStats.total} adresses de cette campagne n&apos;ont pas été vérifiées.
-                      Risque de rebonds élevé.
+                      {unverifiedStats.unverified} / {unverifiedStats.total} {t("campaignDetail", "unverifiedWarning")}
                     </p>
                   </div>
                 </div>
@@ -707,19 +695,19 @@ export default function CampaignDetailPage() {
                   }}
                 >
                   <ShieldCheck className="size-4" />
-                  Vérifier les emails maintenant
+                  {t("campaignDetail", "verifyNow")}
                 </Button>
               </div>
             )}
 
             {(!campaign.emailSubject || !campaign.emailBody) && (
               <p className="text-sm text-warning font-medium">
-                ⚠ Le message n&apos;est pas encore configuré. Renseignez le sujet et le corps dans l&apos;onglet Message.
+                {t("campaignDetail", "messageNotConfigured")}
               </p>
             )}
             <div className="flex gap-3 justify-end pt-2">
               <Button variant="secondary" onClick={() => setShowSendConfirm(false)}>
-                Annuler
+                {t("common", "cancel")}
               </Button>
               <Button
                 variant="primary"
@@ -727,7 +715,7 @@ export default function CampaignDetailPage() {
                 onClick={handleSend}
               >
                 <Send />
-                {unverifiedStats && unverifiedStats.unverified > 0 ? "Envoyer quand même" : "Confirmer l'envoi"}
+                {unverifiedStats && unverifiedStats.unverified > 0 ? t("campaignDetail", "sendAnyway") : t("campaignDetail", "confirmSendBtn")}
               </Button>
             </div>
           </div>
@@ -739,9 +727,9 @@ export default function CampaignDetailPage() {
         <div className={`mb-4 rounded-lg px-4 py-3 text-sm flex items-start justify-between gap-4 ${sendResult.failed > 0 ? "bg-warning-subtle text-warning" : "bg-success-subtle text-success"}`}>
           <div>
             <p className="font-medium">
-              {sendResult.sent} email{sendResult.sent !== 1 ? "s" : ""} envoyé{sendResult.sent !== 1 ? "s" : ""}
-              {sendResult.failed > 0 && `, ${sendResult.failed} échoué${sendResult.failed !== 1 ? "s" : ""}`}
-              {sendResult.skippedNoEmail > 0 && `, ${sendResult.skippedNoEmail} sans adresse email`}
+              {sendResult.sent} {sendResult.sent !== 1 ? t("campaignDetail", "emailsSentPlural") : t("campaignDetail", "emailsSent")} {sendResult.sent !== 1 ? t("campaignDetail", "sentPlural") : t("campaignDetail", "sent")}
+              {sendResult.failed > 0 && `, ${sendResult.failed} ${t("prospects", "failed")}`}
+              {sendResult.skippedNoEmail > 0 && `, ${sendResult.skippedNoEmail} ${t("campaignDetail", "withoutEmail")}`}
             </p>
             {sendResult.errors.length > 0 && (
               <ul className="mt-1 space-y-0.5 text-xs opacity-80">
@@ -760,9 +748,9 @@ export default function CampaignDetailPage() {
           <div className="flex items-center gap-2">
             <CalendarClock className="size-4 text-accent shrink-0" />
             <div>
-              <span className="font-medium text-foreground">Envoi planifié — </span>
+              <span className="font-medium text-foreground">{t("campaignDetail", "scheduledSend")} — </span>
               <span className="text-foreground-secondary">
-                {new Date(scheduledEmail.scheduledFor).toLocaleString("fr-CA", {
+                {new Date(scheduledEmail.scheduledFor).toLocaleString(locale === "en" ? "en-CA" : "fr-CA", {
                   timeZone: scheduledEmail.timezone,
                   weekday: "long", month: "long", day: "numeric",
                   hour: "2-digit", minute: "2-digit",
@@ -777,21 +765,21 @@ export default function CampaignDetailPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-card border border-border hover:bg-card-hover text-foreground transition-colors"
             >
               <Pencil className="size-3.5" />
-              Modifier
+              {t("common", "edit")}
             </button>
             <button
               onClick={handleSendNowFromScheduled}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Send className="size-3.5" />
-              Envoyer maintenant
+              {t("campaignDetail", "sendNow")}
             </button>
             <button
               onClick={handleCancelScheduled}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-card border border-border hover:bg-danger-subtle hover:text-danger hover:border-danger/30 text-foreground-muted transition-colors"
             >
               <X className="size-3.5" />
-              Annuler
+              {t("common", "cancel")}
             </button>
           </div>
         </div>
@@ -805,7 +793,7 @@ export default function CampaignDetailPage() {
               href="/campaigns"
               className="text-foreground-muted hover:text-foreground-secondary text-sm transition-colors"
             >
-              Campagnes
+              {t("campaigns", "campaigns")}
             </Link>
             <span className="text-muted">/</span>
           </div>
@@ -820,7 +808,7 @@ export default function CampaignDetailPage() {
           <Link href="/campaigns">
             <Button variant="secondary">
               <ArrowLeft />
-              Retour
+              {t("common", "back")}
             </Button>
           </Link>
           <Button
@@ -828,7 +816,7 @@ export default function CampaignDetailPage() {
             onClick={handleToggleStatus}
           >
             {campaign.status === "ACTIVE" ? <Pause /> : <Play />}
-            {campaign.status === "ACTIVE" ? "Mettre en pause" : "Activer"}
+            {campaign.status === "ACTIVE" ? t("campaignDetail", "putOnPause") : t("campaigns", "activate")}
           </Button>
           {/* Split send button */}
           <div ref={sendDropdownRef} className="relative flex">
@@ -836,18 +824,18 @@ export default function CampaignDetailPage() {
               variant="primary"
               disabled={sending || selectedCount === 0}
               onClick={() => setShowSendConfirm(true)}
-              title={selectedCount === 0 ? "Sélectionnez des contacts d'abord" : undefined}
+              title={selectedCount === 0 ? t("campaignDetail", "selectContactsFirst") : undefined}
               className="rounded-r-none border-r border-primary-dark/30"
             >
               <Send />
-              {sending ? "Envoi en cours…" : `Envoyer (${selectedCount})`}
+              {sending ? t("campaignDetail", "sendInProgress") : `${t("campaignDetail", "send")} (${selectedCount})`}
             </Button>
             <Button
               variant="primary"
               disabled={sending || selectedCount === 0}
               onClick={() => setShowSendDropdown((v) => !v)}
               className="rounded-l-none px-2"
-              title="Plus d'options d'envoi"
+              title={t("campaignDetail", "moreSendOptions")}
             >
               <ChevronDown className="size-4" />
             </Button>
@@ -858,14 +846,14 @@ export default function CampaignDetailPage() {
                   onClick={() => { setShowSendDropdown(false); setShowSendConfirm(true); }}
                 >
                   <Send className="size-4 text-primary" />
-                  Envoyer maintenant
+                  {t("campaignDetail", "sendNow")}
                 </button>
                 <button
                   className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-foreground hover:bg-card-hover transition-colors"
                   onClick={() => { setShowSendDropdown(false); setShowScheduleModal(true); }}
                 >
                   <CalendarClock className="size-4 text-accent" />
-                  Planifier l'envoi
+                  {t("campaignDetail", "scheduleEmail")}
                 </button>
               </div>
             )}
@@ -899,16 +887,16 @@ export default function CampaignDetailPage() {
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <Send className="size-4 text-primary" />
-                    <CardTitle className="text-lg">Message principal</CardTitle>
+                    <CardTitle className="text-lg">{t("campaignDetail", "mainMessage")}</CardTitle>
                   </div>
                   {hasUnsaved && (
-                    <Badge variant="warning">Non sauvegardé</Badge>
+                    <Badge variant="warning">{t("campaignDetail", "unsaved")}</Badge>
                   )}
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground-secondary mb-1">
-                      Sujet de l'email
+                      {t("campaignDetail", "emailSubject")}
                     </label>
                     <Input
                       type="text"
@@ -917,13 +905,13 @@ export default function CampaignDetailPage() {
                         setEmailSubject(e.target.value);
                         setHasUnsaved(true);
                       }}
-                      placeholder="Ex: Services d'entretien pour vos propriétés à [Ville]"
+                      placeholder={t("campaignDetail", "emailSubjectPlaceholder")}
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-foreground-secondary mb-1">
-                      Corps de l'email
+                      {t("campaignDetail", "emailBody")}
                     </label>
                     <textarea
                       value={emailBody}
@@ -940,7 +928,7 @@ export default function CampaignDetailPage() {
                   {/* Variables */}
                   <div className="bg-background-subtle rounded-md p-3">
                     <p className="text-xs font-medium text-foreground-muted mb-2">
-                      Cliquez pour insérer une variable
+                      {t("campaignDetail", "clickToInsertVariable")}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {TEMPLATE_VARIABLES.map((v) => (
@@ -954,7 +942,7 @@ export default function CampaignDetailPage() {
                           className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
                           title={`Insère ${v.key}`}
                         >
-                          {VARIABLE_DISPLAY[v.key] || v.key}
+                          {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : t("campaignDetail", "contactName")}
                         </button>
                       ))}
                     </div>
@@ -967,13 +955,13 @@ export default function CampaignDetailPage() {
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <RefreshCw className="size-4 text-accent" />
-                    <CardTitle className="text-lg">Message de relance (follow-up)</CardTitle>
+                    <CardTitle className="text-lg">{t("campaignDetail", "followUpMessage")}</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground-secondary mb-1">
-                      Sujet du follow-up
+                      {t("campaignDetail", "followUpSubject")}
                     </label>
                     <Input
                       type="text"
@@ -988,7 +976,7 @@ export default function CampaignDetailPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-foreground-secondary mb-1">
-                      Corps du follow-up
+                      {t("campaignDetail", "followUpBody")}
                     </label>
                     <textarea
                       value={followUpBody}
@@ -1005,7 +993,7 @@ export default function CampaignDetailPage() {
                   {/* Variables */}
                   <div className="bg-background-subtle rounded-md p-3">
                     <p className="text-xs font-medium text-foreground-muted mb-2">
-                      Cliquez pour insérer une variable
+                      {t("campaignDetail", "clickToInsertVariable")}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {TEMPLATE_VARIABLES.map((v) => (
@@ -1019,7 +1007,7 @@ export default function CampaignDetailPage() {
                           className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
                           title={`Insère ${v.key}`}
                         >
-                          {VARIABLE_DISPLAY[v.key] || v.key}
+                          {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : t("campaignDetail", "contactName")}
                         </button>
                       ))}
                     </div>
@@ -1030,18 +1018,18 @@ export default function CampaignDetailPage() {
                     <div className="bg-accent-subtle rounded-md p-3 space-y-2">
                       <div className="flex items-center gap-2">
                         <Clock className="size-3.5 text-accent" />
-                        <p className="text-xs font-medium text-accent">Automatisation de relance</p>
+                        <p className="text-xs font-medium text-accent">{t("campaignDetail", "followUpAutomation")}</p>
                       </div>
                       <div className="text-xs text-foreground-secondary space-y-1">
                         <p>
                           {automationSettings.autoFollowUp
-                            ? <>Relance automatique <span className="font-medium text-success">activée</span></>
-                            : <>Relance automatique <span className="font-medium text-foreground-muted">désactivée</span> — <a href="/settings?section=automation" className="text-primary hover:underline">activer dans les paramètres</a></>
+                            ? <>{t("campaignDetail", "autoFollowUpEnabled")} <span className="font-medium text-success">{t("campaignDetail", "enabled")}</span></>
+                            : <>{t("campaignDetail", "autoFollowUpEnabled")} <span className="font-medium text-foreground-muted">{t("campaignDetail", "disabled")}</span> — <a href="/settings?section=automation" className="text-primary hover:underline">{t("campaignDetail", "enableInSettings")}</a></>
                           }
                         </p>
-                        <p>Délai avant relance : <span className="font-medium">{automationSettings.followUpDelayDays} jour{automationSettings.followUpDelayDays > 1 ? "s" : ""}</span></p>
-                        <p>Maximum : <span className="font-medium">{automationSettings.maxFollowUps} relance{automationSettings.maxFollowUps > 1 ? "s" : ""}</span> par contact, espacées de <span className="font-medium">{automationSettings.followUpIntervalDays} jour{automationSettings.followUpIntervalDays > 1 ? "s" : ""}</span></p>
-                        {automationSettings.stopOnReply && <p>Arrêt automatique si le contact répond</p>}
+                        <p>{t("campaignDetail", "delayBeforeFollowUp")} : <span className="font-medium">{automationSettings.followUpDelayDays} {automationSettings.followUpDelayDays > 1 ? t("campaignDetail", "days") : t("campaignDetail", "day")}</span></p>
+                        <p>{t("campaignDetail", "maximum")} : <span className="font-medium">{automationSettings.maxFollowUps} {automationSettings.maxFollowUps > 1 ? t("campaignDetail", "followUps") : t("campaignDetail", "followUp")}</span> {t("campaignDetail", "perContact")} <span className="font-medium">{automationSettings.followUpIntervalDays} {automationSettings.followUpIntervalDays > 1 ? t("campaignDetail", "days") : t("campaignDetail", "day")}</span></p>
+                        {automationSettings.stopOnReply && <p>{t("campaignDetail", "stopOnReply")}</p>}
                       </div>
                     </div>
                   )}
@@ -1056,7 +1044,7 @@ export default function CampaignDetailPage() {
                 disabled={saving || !hasUnsaved}
               >
                 <Save />
-                {saving ? "Sauvegarde..." : "Enregistrer les messages"}
+                {saving ? t("campaignDetail", "savingMessages") : t("campaignDetail", "saveMessages")}
               </Button>
             </div>
 
@@ -1067,20 +1055,20 @@ export default function CampaignDetailPage() {
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <Send className="size-4 text-primary" />
-                    <CardTitle className="text-lg">Aperçu — Message principal</CardTitle>
+                    <CardTitle className="text-lg">{t("campaignDetail", "previewMain")}</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent className="p-0 overflow-hidden">
                   {!emailSubject && !emailBody ? (
                     <p className="text-muted text-sm p-4">
-                      Commencez à rédiger votre message pour voir l&apos;aperçu ici.
+                      {t("campaignDetail", "startWriting")}
                     </p>
                   ) : (
                     <>
                       <div className="px-4 pt-4 pb-3 border-b border-border">
                         <p className="text-xs text-muted uppercase mb-1">Sujet</p>
                         <p className="text-sm font-medium text-foreground">
-                          {renderPreview(emailSubject) || "(aucun sujet)"}
+                          {renderPreview(emailSubject) || t("campaignDetail", "noSubject")}
                         </p>
                       </div>
                       <iframe
@@ -1108,26 +1096,26 @@ export default function CampaignDetailPage() {
                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs rounded-md transition-colors"
                                 >
                                   <Pencil className="size-3.5" />
-                                  Modifier
+                                  {t("common", "edit")}
                                 </button>
                                 <button
                                   onClick={handleLogoDelete}
                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/80 hover:bg-red-500 text-white text-xs rounded-md transition-colors"
                                 >
                                   <Trash2 className="size-3.5" />
-                                  Supprimer
+                                  {t("common", "delete")}
                                 </button>
                               </div>
                             </div>
                           ) : (
                             <div className="flex items-center justify-center gap-3 py-4">
-                              <span className="text-xs text-white/50">Logo supprimé</span>
+                              <span className="text-xs text-white/50">{t("campaignDetail", "logoDeleted")}</span>
                               <button
                                 onClick={handleLogoRestore}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs rounded-md transition-colors"
                               >
                                 <ImageIcon className="size-3.5" />
-                                Restaurer
+                                {t("common", "restore")}
                               </button>
                             </div>
                           )}
@@ -1150,9 +1138,9 @@ export default function CampaignDetailPage() {
                                     <ImageIcon className="size-5 text-foreground-muted" />
                                   )}
                                   <span className="text-sm text-foreground-secondary">
-                                    {logoUploading ? "Upload en cours…" : "Cliquer pour choisir une image"}
+                                    {logoUploading ? t("campaignDetail", "uploading") : t("campaignDetail", "chooseImage")}
                                   </span>
-                                  <span className="text-xs text-foreground-muted">PNG, JPG, SVG, WebP — max 5 Mo</span>
+                                  <span className="text-xs text-foreground-muted">{t("campaignDetail", "imageFormats")}</span>
                                   <input
                                     type="file"
                                     accept="image/*"
@@ -1167,7 +1155,7 @@ export default function CampaignDetailPage() {
                                   onClick={() => setEditingLogo(false)}
                                   className="flex items-center gap-1.5 text-xs text-foreground-muted hover:text-foreground transition-colors"
                                 >
-                                  <X className="size-3.5" /> Annuler
+                                  <X className="size-3.5" /> {t("common", "cancel")}
                                 </button>
                               </div>
                             </motion.div>
@@ -1184,20 +1172,20 @@ export default function CampaignDetailPage() {
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <RefreshCw className="size-4 text-accent" />
-                    <CardTitle className="text-lg">Aperçu — Follow-up</CardTitle>
+                    <CardTitle className="text-lg">{t("campaignDetail", "previewFollowUp")}</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent className="p-0 overflow-hidden">
                   {!followUpSubject && !followUpBody ? (
                     <p className="text-muted text-sm p-4">
-                      Rédigez votre message de relance pour voir l&apos;aperçu ici.
+                      {t("campaignDetail", "writeFollowUp")}
                     </p>
                   ) : (
                     <>
                       <div className="px-4 pt-4 pb-3 border-b border-border">
                         <p className="text-xs text-muted uppercase mb-1">Sujet</p>
                         <p className="text-sm font-medium text-foreground">
-                          {renderPreview(followUpSubject) || "(aucun sujet)"}
+                          {renderPreview(followUpSubject) || t("campaignDetail", "noSubject")}
                         </p>
                       </div>
                       <iframe
@@ -1214,7 +1202,7 @@ export default function CampaignDetailPage() {
 
               <div className="p-3 bg-primary-subtle rounded-md">
                 <p className="text-xs text-primary">
-                  Les variables insérées seront automatiquement remplacées par les vraies données de chaque contact lors de l&apos;envoi.
+                  {t("campaignDetail", "variablesInfo")}
                 </p>
               </div>
             </div>
@@ -1244,7 +1232,7 @@ export default function CampaignDetailPage() {
                         setSearch(e.target.value);
                         setContactsPage(1);
                       }}
-                      placeholder="Rechercher par nom, entreprise, email..."
+                      placeholder={t("campaignDetail", "searchContacts")}
                       className="pl-9"
                     />
                   </div>
@@ -1257,10 +1245,10 @@ export default function CampaignDetailPage() {
                       setContactsPage(1);
                     }}
                   >
-                    <option value="">Tous les types</option>
-                    <option value="prospect">Prospects</option>
-                    <option value="client">Clients</option>
-                    <option value="nouveau_client">Nouveaux clients</option>
+                    <option value="">{t("campaignDetail", "allTypes")}</option>
+                    <option value="prospect">{t("campaignDetail", "prospects")}</option>
+                    <option value="client">{t("campaignDetail", "clients")}</option>
+                    <option value="nouveau_client">{t("campaignDetail", "newClients")}</option>
                   </Select>
 
                   {/* Selection controls */}
@@ -1271,14 +1259,14 @@ export default function CampaignDetailPage() {
                       onClick={handleSelectAll}
                       disabled={allPageSelected}
                     >
-                      Tout sélectionner
+                      {t("common", "selectAll")}
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={handleDeselectAll}
                     >
-                      Tout désélectionner
+                      {t("common", "deselectAll")}
                     </Button>
                   </div>
                 </div>
@@ -1286,12 +1274,12 @@ export default function CampaignDetailPage() {
                 {/* Selection count */}
                 <div className="mt-3 flex items-center justify-between">
                   <p className="text-sm text-foreground-muted">
-                    {contactsTotal} contact{contactsTotal !== 1 ? "s" : ""}{" "}
+                    {contactsTotal} {contactsTotal !== 1 ? t("campaignDetail", "contactPlural") : t("campaignDetail", "contact")}{" "}
                     {contactTypeFilter && `(${contactTypeFilter})`}
                   </p>
                   <p className="text-sm font-medium text-primary">
-                    {selectedCount} contact{selectedCount !== 1 ? "s" : ""}{" "}
-                    sélectionné{selectedCount !== 1 ? "s" : ""}
+                    {selectedCount} {selectedCount !== 1 ? t("campaignDetail", "contactPlural") : t("campaignDetail", "contact")}{" "}
+                    {selectedCount !== 1 ? t("prospects", "selectedPlural") : t("prospects", "selected")}
                   </p>
                 </div>
               </div>
@@ -1311,19 +1299,19 @@ export default function CampaignDetailPage() {
                       />
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
-                      Entreprise
+                      {t("prospects", "company")}
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
                       Email
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
-                      Ville
+                      {t("prospects", "city")}
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
-                      Type
+                      {t("prospects", "type")}
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
-                      Score
+                      {t("prospects", "score")}
                     </th>
                   </tr>
                 </thead>
@@ -1345,13 +1333,13 @@ export default function CampaignDetailPage() {
                           icon={<Users />}
                           title={
                             search || contactTypeFilter
-                              ? "Aucun contact trouvé pour ce filtre."
-                              : "Aucun contact dans l'application."
+                              ? t("campaignDetail", "noContactFilter")
+                              : t("campaignDetail", "noContactApp")
                           }
                           description={
                             search || contactTypeFilter
                               ? undefined
-                              : "Lancez une découverte depuis la page Prospects."
+                              : t("campaignDetail", "noContactDesc")
                           }
                         />
                       </td>
@@ -1377,7 +1365,7 @@ export default function CampaignDetailPage() {
                         <td className="px-4 py-3 font-medium text-foreground">{c.companyName}</td>
                         <td className="px-4 py-3 text-foreground-secondary">
                           {c.email || (
-                            <span className="text-muted">Aucun</span>
+                            <span className="text-muted">{t("common", "none")}</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-foreground-secondary">
@@ -1385,7 +1373,7 @@ export default function CampaignDetailPage() {
                         </td>
                         <td className="px-4 py-3">
                           <Badge variant={contactTypeVariantMap[c.contactType] || "default"}>
-                            {contactTypeLabels[c.contactType] || c.contactType}
+                            {c.contactType === "prospect" ? t("contactType", "prospect") : c.contactType === "client" ? t("contactType", "client") : c.contactType === "nouveau_client" ? t("contactType", "nouveau_client") : c.contactType}
                           </Badge>
                         </td>
                         <td className="px-4 py-3">

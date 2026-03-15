@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/ui/page-header";
+import { useTranslation } from "@/components/LanguageProvider";
 
 interface DashboardStats {
   totalProspects: number;
@@ -47,24 +48,24 @@ interface DashboardStats {
   }>;
 }
 
-const STATUS_CONFIG: Record<
+const STATUS_VARIANT: Record<
   string,
-  { label: string; variant: "primary" | "default" | "warning" | "success" | "danger" }
+  "primary" | "default" | "warning" | "success" | "danger"
 > = {
-  NEW: { label: "Nouveau", variant: "primary" },
-  ENRICHED: { label: "Enrichi", variant: "default" },
-  CONTACTED: { label: "Contacté", variant: "warning" },
-  REPLIED: { label: "Répondu", variant: "success" },
-  QUALIFIED: { label: "Qualifié", variant: "success" },
-  NOT_INTERESTED: { label: "Pas intéressé", variant: "default" },
+  NEW: "primary",
+  ENRICHED: "default",
+  CONTACTED: "warning",
+  REPLIED: "success",
+  QUALIFIED: "success",
+  NOT_INTERESTED: "default",
 };
 
 const PIPELINE_STEPS = [
-  { key: "NEW", label: "Nouveaux", icon: Sparkles },
-  { key: "ENRICHED", label: "Enrichis", icon: Zap },
-  { key: "CONTACTED", label: "Contactés", icon: Phone },
-  { key: "REPLIED", label: "Répondu", icon: MessageSquare },
-  { key: "NOT_INTERESTED", label: "Non intéressé", icon: XCircle },
+  { key: "NEW", labelKey: "newProspects" as const, icon: Sparkles },
+  { key: "ENRICHED", labelKey: "enrichedProspects" as const, icon: Zap },
+  { key: "CONTACTED", labelKey: "contactedProspects" as const, icon: Phone },
+  { key: "REPLIED", labelKey: "repliedProspects" as const, icon: MessageSquare },
+  { key: "NOT_INTERESTED", labelKey: "notInterested" as const, icon: XCircle },
 ];
 
 function DashboardSkeleton() {
@@ -111,6 +112,7 @@ function DashboardSkeleton() {
 }
 
 export default function Dashboard() {
+  const { t, locale } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -133,21 +135,21 @@ export default function Dashboard() {
     return (
       <EmptyState
         icon={<Inbox />}
-        title="Impossible de charger les statistiques"
-        description="Vérifiez la connexion à la base de données."
+        title={t("dashboard", "cannotLoadStats")}
+        description={t("dashboard", "checkDbConnection")}
       />
     );
   }
 
   return (
     <div>
-      <PageHeader title="Tableau de bord" />
+      <PageHeader title={t("dashboard", "title")} />
 
       {/* ── Primary Metrics ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}>
           <StatCard
-            label="Total Prospects"
+            label={t("dashboard", "totalProspects")}
             value={stats.totalProspects}
             icon={<Users className="size-3.5" />}
             iconColor="bg-background-muted text-foreground-muted"
@@ -155,25 +157,25 @@ export default function Dashboard() {
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
           <StatCard
-            label="Emails envoyés aujourd'hui"
+            label={t("dashboard", "emailsSentToday")}
             value={stats.emailsSentToday}
-            subtitle={`${stats.totalEmailsSent} au total`}
+            subtitle={`${stats.totalEmailsSent} ${t("dashboard", "totalSent")}`}
             icon={<Mail className="size-3.5" />}
             iconColor="bg-background-muted text-foreground-muted"
           />
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
           <StatCard
-            label="Taux de réponse"
+            label={t("dashboard", "replyRate")}
             value={stats.replyRate}
-            subtitle={`${stats.totalReplies} réponses`}
+            subtitle={`${stats.totalReplies} ${t("dashboard", "replies")}`}
             icon={<MessageSquare className="size-3.5" />}
             iconColor="bg-background-muted text-foreground-muted"
           />
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
           <StatCard
-            label="Leads qualifiés"
+            label={t("dashboard", "qualifiedLeads")}
             value={stats.qualifiedLeads}
             icon={<Target className="size-3.5" />}
             iconColor="bg-background-muted text-foreground-muted"
@@ -191,7 +193,7 @@ export default function Dashboard() {
             transition={{ delay: 0.2 + i * 0.03 }}
           >
             <StatCard
-              label={step.label}
+              label={t("dashboard", step.labelKey)}
               value={stats.prospectsByStatus[step.key] || 0}
               icon={<step.icon className="size-3.5" />}
               iconColor="bg-background-muted text-foreground-muted"
@@ -213,21 +215,21 @@ export default function Dashboard() {
                 <div className="p-1.5 rounded-md bg-background-muted text-foreground-muted">
                   <Users className="size-3.5" />
                 </div>
-                <CardTitle>Prospects récents</CardTitle>
+                <CardTitle>{t("dashboard", "recentProspects")}</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
               {stats.recentProspects.length === 0 ? (
                 <EmptyState
                   icon={<Users />}
-                  title="Aucun prospect"
-                  description="Lancez une découverte depuis la page Prospects."
+                  title={t("dashboard", "noProspects")}
+                  description={t("dashboard", "noProspectsDesc")}
                   className="py-8"
                 />
               ) : (
                 <div className="-mx-5">
                   {stats.recentProspects.map((p) => {
-                    const config = STATUS_CONFIG[p.status];
+                    const variant = STATUS_VARIANT[p.status];
                     return (
                       <div
                         key={p.id}
@@ -245,8 +247,8 @@ export default function Dashboard() {
                           <span className="text-xs text-foreground-muted tabular-nums font-mono">
                             {p.leadScore}
                           </span>
-                          <Badge variant={config?.variant}>
-                            {config?.label || p.status}
+                          <Badge variant={variant}>
+                            {t("status", p.status as "NEW" | "ENRICHED" | "CONTACTED" | "REPLIED" | "QUALIFIED" | "NOT_INTERESTED")}
                           </Badge>
                         </div>
                       </div>
@@ -269,15 +271,15 @@ export default function Dashboard() {
                 <div className="p-1.5 rounded-md bg-background-muted text-foreground-muted">
                   <Mail className="size-3.5" />
                 </div>
-                <CardTitle>Emails récents</CardTitle>
+                <CardTitle>{t("dashboard", "recentEmails")}</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
               {stats.recentEmails.length === 0 ? (
                 <EmptyState
                   icon={<Mail />}
-                  title="Aucun email envoyé"
-                  description="Configurez une campagne pour commencer."
+                  title={t("dashboard", "noEmails")}
+                  description={t("dashboard", "noEmailsDesc")}
                   className="py-8"
                 />
               ) : (
@@ -296,12 +298,12 @@ export default function Dashboard() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 ml-4">
-                        {e.bounce && <Badge variant="danger">Bounce</Badge>}
+                        {e.bounce && <Badge variant="danger">{t("dashboard", "bounce")}</Badge>}
                         {e.replyReceived && (
-                          <Badge variant="success">Répondu</Badge>
+                          <Badge variant="success">{t("dashboard", "replied")}</Badge>
                         )}
                         <span className="text-xs text-foreground-muted tabular-nums">
-                          {new Date(e.sentAt).toLocaleDateString("fr-CA")}
+                          {new Date(e.sentAt).toLocaleDateString(locale === "en" ? "en-CA" : "fr-CA")}
                         </span>
                       </div>
                     </div>

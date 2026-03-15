@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "@/components/ThemeProvider";
+import { useTranslation } from "@/components/LanguageProvider";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
 import {
@@ -20,16 +21,17 @@ import ActivityBell from "@/components/ActivityBell";
 import AccountButton from "@/components/AccountButton";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
 
-const NAV_ITEMS = [
-  { href: "/", label: "Tableau de bord", icon: LayoutDashboard },
-  { href: "/prospects", label: "Prospects", icon: Users },
-  { href: "/email-verifier", label: "Email Vérificateur", icon: ShieldCheck },
-  { href: "/campaigns", label: "Campagnes", icon: Megaphone },
-  { href: "/settings", label: "Paramètres", icon: Settings },
+const NAV_KEYS = [
+  { href: "/", labelKey: "dashboard" as const, icon: LayoutDashboard },
+  { href: "/prospects", labelKey: "prospects" as const, icon: Users },
+  { href: "/email-verifier", labelKey: "emailVerifier" as const, icon: ShieldCheck },
+  { href: "/campaigns", labelKey: "campaigns" as const, icon: Megaphone },
+  { href: "/settings", labelKey: "settings" as const, icon: Settings },
 ];
 
 export default function Header() {
   const { resolvedTheme, setTheme, theme } = useTheme();
+  const { t } = useTranslation();
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [unsubscribeCount, setUnsubscribeCount] = useState(0);
@@ -80,7 +82,7 @@ export default function Header() {
           </Link>
 
           <div className="flex items-center gap-0.5">
-            {NAV_ITEMS.map(({ href, label, icon: Icon }) => (
+            {NAV_KEYS.map(({ href, labelKey, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
@@ -92,7 +94,7 @@ export default function Header() {
                 )}
               >
                 <Icon className="size-3.5" />
-                {label}
+                {t("nav", labelKey)}
                 {href === "/settings" && unsubscribeCount > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none ring-2 ring-card/80 pointer-events-none">
                     {unsubscribeCount > 99 ? "99+" : unsubscribeCount}
@@ -110,8 +112,8 @@ export default function Header() {
             className="p-2 rounded-md text-foreground-muted hover:text-foreground hover:bg-background-subtle transition-colors"
             title={
               mounted
-                ? `Thème: ${theme === "system" ? "Auto" : theme === "light" ? "Clair" : "Sombre"}`
-                : "Thème"
+                ? `${t("nav", "theme")}: ${theme === "system" ? t("nav", "themeAuto") : theme === "light" ? t("nav", "themeLight") : t("nav", "themeDark")}`
+                : t("nav", "theme")
             }
           >
             <ThemeIcon className="size-4" />

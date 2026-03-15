@@ -11,6 +11,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTranslation } from "@/components/LanguageProvider";
 
 interface Campaign {
   id: string;
@@ -39,12 +40,6 @@ const STATUS_VARIANT: Record<string, "success" | "warning" | "default"> = {
   DRAFT: "default",
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  ACTIVE: "Active",
-  PAUSED: "En pause",
-  DRAFT: "Brouillon",
-};
-
 function CampaignsSkeleton() {
   return (
     <div>
@@ -70,6 +65,7 @@ function CampaignsSkeleton() {
 }
 
 export default function CampaignsPage() {
+  const { t } = useTranslation();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
   const [showNewCampaign, setShowNewCampaign] = useState(false);
@@ -151,11 +147,11 @@ export default function CampaignsPage() {
   return (
     <div>
       <PageHeader
-        title="Campagnes & Contrôles"
+        title={t("campaigns", "title")}
         actions={
           <Button onClick={() => setShowNewCampaign(!showNewCampaign)}>
             <Plus className="size-4" />
-            Nouvelle campagne
+            {t("campaigns", "newCampaign")}
           </Button>
         }
       />
@@ -173,15 +169,15 @@ export default function CampaignsPage() {
               <Input
                 value={newCampaignName}
                 onChange={(e) => setNewCampaignName(e.target.value)}
-                placeholder="Nom de la campagne"
+                placeholder={t("campaigns", "campaignNamePlaceholder")}
                 onKeyDown={(e) => e.key === "Enter" && createCampaign()}
                 className="flex-1"
               />
               <Button onClick={createCampaign} variant="success">
-                Créer
+                {t("common", "create")}
               </Button>
               <Button variant="ghost" onClick={() => setShowNewCampaign(false)}>
-                Annuler
+                {t("common", "cancel")}
               </Button>
             </div>
           </motion.div>
@@ -198,15 +194,15 @@ export default function CampaignsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Megaphone className="size-4 text-foreground-muted" />
-              Campagnes
+              {t("campaigns", "campaigns")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {campaigns.length === 0 ? (
               <EmptyState
                 icon={<Inbox />}
-                title="Aucune campagne créée"
-                description="Créez votre première campagne pour commencer l'envoi d'emails."
+                title={t("campaigns", "noCampaigns")}
+                description={t("campaigns", "noCampaignsDesc")}
                 className="py-8"
               />
             ) : (
@@ -227,12 +223,12 @@ export default function CampaignsPage() {
                         {c.name}
                       </Link>
                       <p className="text-xs text-foreground-muted mt-0.5">
-                        Max: {c.maxPerDay}/jour — Délai: {c.delayMinSeconds}-{c.delayMaxSeconds}s — Envoyés aujourd&apos;hui: {c.sentToday}
+                        {t("campaigns", "maxPerDay")}: {c.maxPerDay}{t("campaigns", "perDay")} — {t("campaigns", "delay")}: {c.delayMinSeconds}-{c.delayMaxSeconds}s — {t("campaigns", "sentToday")}: {c.sentToday}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-4">
                       <Badge variant={STATUS_VARIANT[c.status] || "default"}>
-                        {STATUS_LABEL[c.status] || c.status}
+                        {t("status", c.status as "ACTIVE" | "PAUSED" | "DRAFT")}
                       </Badge>
                       <Button
                         variant={c.status === "ACTIVE" ? "secondary" : "ghost"}
@@ -240,9 +236,9 @@ export default function CampaignsPage() {
                         onClick={() => toggleCampaignStatus(c)}
                       >
                         {c.status === "ACTIVE" ? (
-                          <><Pause className="size-3.5" /> Pause</>
+                          <><Pause className="size-3.5" /> {t("campaigns", "pause")}</>
                         ) : (
-                          <><Play className="size-3.5" /> Activer</>
+                          <><Play className="size-3.5" /> {t("campaigns", "activate")}</>
                         )}
                       </Button>
                     </div>
@@ -264,14 +260,14 @@ export default function CampaignsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <ShieldBan className="size-4 text-foreground-muted" />
-              Liste noire
+              {t("campaigns", "blacklist")}
             </CardTitle>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowBlacklist(!showBlacklist)}
             >
-              {showBlacklist ? "Fermer" : "Ajouter"}
+              {showBlacklist ? t("common", "close") : t("common", "add")}
             </Button>
           </CardHeader>
           <CardContent>
@@ -295,11 +291,11 @@ export default function CampaignsPage() {
                       type="text"
                       value={newBlacklistDomain}
                       onChange={(e) => setNewBlacklistDomain(e.target.value)}
-                      placeholder="Domaine"
+                      placeholder={t("campaigns", "domain")}
                       className="flex-1"
                     />
                     <Button variant="danger" onClick={addToBlacklist}>
-                      Bloquer
+                      {t("campaigns", "block")}
                     </Button>
                   </div>
                 </motion.div>
@@ -309,8 +305,8 @@ export default function CampaignsPage() {
             {blacklist.length === 0 ? (
               <EmptyState
                 icon={<ShieldBan />}
-                title="Liste noire vide"
-                description="Ajoutez des emails ou domaines à bloquer."
+                title={t("campaigns", "blacklistEmpty")}
+                description={t("campaigns", "blacklistEmptyDesc")}
                 className="py-8"
               />
             ) : (
@@ -336,7 +332,7 @@ export default function CampaignsPage() {
                       onClick={() => removeFromBlacklist(b.id)}
                     >
                       <Trash2 className="size-3.5" />
-                      Retirer
+                      {t("common", "remove")}
                     </Button>
                   </div>
                 ))}

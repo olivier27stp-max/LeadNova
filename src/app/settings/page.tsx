@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTheme } from "@/components/ThemeProvider";
+import { useLanguage, useTranslation } from "@/components/LanguageProvider";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import AiAssistButton from "@/components/AiAssistButton";
@@ -48,6 +49,8 @@ import {
   Info,
   Send,
   Loader2,
+  Link2,
+  Globe,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────
@@ -156,6 +159,16 @@ interface User {
   passwordHash: string | null;
   lastActiveAt: string | null;
   createdAt: string;
+  workspaceRole?: string;
+  memberId?: string;
+}
+
+interface WorkspaceInvite {
+  id: string;
+  token: string;
+  role: string;
+  expiresAt: string;
+  createdAt: string;
 }
 
 interface EmailTemplate {
@@ -179,21 +192,40 @@ interface ActivityLogEntry {
 
 // ─── Sections config ─────────────────────────────────────
 
-const SECTIONS = [
-  { id: "company", label: "Entreprise", icon: Building2 },
-  { id: "team", label: "Équipe", icon: Users },
-  { id: "prospects", label: "Prospects", icon: UserSearch },
-  { id: "campaigns", label: "Campagnes", icon: Megaphone },
-  { id: "automation", label: "Automatisation", icon: Zap },
-  { id: "targeting", label: "Ciblage recherche", icon: Target },
-  { id: "archive", label: "Archive", icon: Archive },
-  { id: "appearance", label: "Apparence", icon: Palette },
-  { id: "security", label: "Sécurité", icon: Shield },
-  { id: "subscription", label: "Abonnement", icon: CreditCard },
-  { id: "activity", label: "Centre des activités", icon: Activity },
-] as const;
+const SECTION_IDS = ["company", "team", "prospects", "campaigns", "automation", "targeting", "archive", "appearance", "language", "security", "subscription", "activity"] as const;
 
-type SectionId = (typeof SECTIONS)[number]["id"];
+type SectionId = (typeof SECTION_IDS)[number];
+
+const SECTION_ICONS: Record<SectionId, typeof Building2> = {
+  company: Building2,
+  team: Users,
+  prospects: UserSearch,
+  campaigns: Megaphone,
+  automation: Zap,
+  targeting: Target,
+  archive: Archive,
+  appearance: Palette,
+  language: Globe,
+  security: Shield,
+  subscription: CreditCard,
+  activity: Activity,
+};
+
+// Translation keys for section labels (in "settings" section)
+const SECTION_LABEL_KEYS: Record<SectionId, string> = {
+  company: "company",
+  team: "team",
+  prospects: "prospects",
+  campaigns: "campaigns",
+  automation: "automation",
+  targeting: "targeting",
+  archive: "archive",
+  appearance: "appearance",
+  language: "language",
+  security: "security",
+  subscription: "subscription",
+  activity: "activity",
+};
 
 // ─── Shared components ───────────────────────────────────
 
@@ -277,6 +309,9 @@ function SectionCard({
   onSave,
   saving,
   hasUnsaved,
+  unsavedLabel,
+  savingLabel,
+  saveLabel,
 }: {
   title: string;
   description?: string;
@@ -284,6 +319,9 @@ function SectionCard({
   onSave?: () => void;
   saving?: boolean;
   hasUnsaved?: boolean;
+  unsavedLabel?: string;
+  savingLabel?: string;
+  saveLabel?: string;
 }) {
   return (
     <Card>
@@ -294,7 +332,7 @@ function SectionCard({
             <p className="text-sm text-foreground-muted mt-1">{description}</p>
           )}
         </div>
-        {hasUnsaved && <Badge variant="warning">Non sauvegard&eacute;</Badge>}
+        {hasUnsaved && <Badge variant="warning">{unsavedLabel || "Non sauvegardé"}</Badge>}
       </CardHeader>
       <CardContent>
         <div className="space-y-4">{children}</div>
@@ -304,7 +342,7 @@ function SectionCard({
             disabled={saving || !hasUnsaved}
             className="mt-6"
           >
-            {saving ? "Sauvegarde..." : "Enregistrer"}
+            {saving ? (savingLabel || "Sauvegarde...") : (saveLabel || "Enregistrer")}
           </Button>
         )}
       </CardContent>
@@ -312,11 +350,13 @@ function SectionCard({
   );
 }
 
-function StatusIndicator({ status }: { status: string }) {
+function StatusIndicator({ status, labels }: { status: string; labels?: { connected: string; not_configured: string; error: string } }) {
+  const defaultLabels = { connected: "Connecté", not_configured: "Non configuré", error: "Erreur" };
+  const l = labels || defaultLabels;
   const map: Record<string, { color: string; label: string }> = {
-    connected: { color: "bg-success", label: "Connecté" },
-    not_configured: { color: "bg-muted", label: "Non configuré" },
-    error: { color: "bg-danger", label: "Erreur" },
+    connected: { color: "bg-success", label: l.connected },
+    not_configured: { color: "bg-muted", label: l.not_configured },
+    error: { color: "bg-danger", label: l.error },
   };
   const s = map[status] || map.not_configured;
   return (
@@ -330,13 +370,15 @@ function StatusIndicator({ status }: { status: string }) {
 // ─── Main Page ───────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { setLocale: setAppLocale } = useLanguage();
+  const { t } = useTranslation();
   const [activeSection, setActiveSection] = useState<SectionId>("company");
 
   // Read ?section= from URL on mount to deep-link to a specific tab
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const section = params.get("section");
-    if (section && SECTIONS.some((s) => s.id === section)) {
+    if (section && SECTION_IDS.includes(section as SectionId)) {
       setActiveSection(section as SectionId);
     }
   }, []);
@@ -367,10 +409,10 @@ export default function SettingsPage() {
 
   // Team state
   const [users, setUsers] = useState<User[]>([]);
-  const [showAddUser, setShowAddUser] = useState(false);
-  const [newUserName, setNewUserName] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserRole, setNewUserRole] = useState("USER");
+  const [inviteLink, setInviteLink] = useState("");
+  const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [generatingInvite, setGeneratingInvite] = useState(false);
 
 
   // Email templates state
@@ -431,7 +473,7 @@ export default function SettingsPage() {
       body: JSON.stringify({ _action: "clearGarbageCities", cities: [...garbageSelected] }),
     });
     const data = await res.json();
-    setToast({ message: `${data.cleared} prospects mis à jour`, type: "success" });
+    setToast({ message: `${data.cleared} ${t("settings", "prospectsUpdated")}`, type: "success" });
     setGarbageCities([]);
     setGarbageSelected(new Set());
     setGarbageScanned(false);
@@ -527,7 +569,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (activeSection === "team") loadUsers();
+    if (activeSection === "team") { loadUsers(); loadInvites(); }
     if (activeSection === "security") loadUsers();
     if (activeSection === "activity") loadLogs();
     if (activeSection === "archive") loadArchive();
@@ -621,9 +663,9 @@ export default function SettingsPage() {
       const updated = await res.json();
       setSettings(updated as Settings);
       setHasUnsaved(false);
-      showToast("Paramètres enregistrés", "success");
+      showToast(t("settings", "settingsSaved"), "success");
     } catch {
-      showToast("Erreur lors de la sauvegarde", "error");
+      showToast(t("settings", "saveError"), "error");
     } finally {
       setSaving(false);
     }
@@ -769,52 +811,57 @@ export default function SettingsPage() {
 
   // ─── User handlers ─────────────────────────────────
 
-  async function handleAddUser() {
-    if (!newUserName.trim() || !newUserEmail.trim()) return;
+  async function handleGenerateInvite() {
+    setGeneratingInvite(true);
     try {
-      const res = await fetch("/api/users", {
+      const res = await fetch("/api/workspaces/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newUserName,
-          email: newUserEmail,
-          role: newUserRole,
-        }),
+        body: JSON.stringify({ role: "MEMBER" }),
       });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error);
-      }
-      setNewUserName("");
-      setNewUserEmail("");
-      setNewUserRole("USER");
-      setShowAddUser(false);
-      loadUsers();
-      showToast("Utilisateur ajouté", "success");
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Erreur", "error");
+      if (!res.ok) throw new Error("Erreur");
+      const data = await res.json();
+      setInviteLink(data.inviteUrl);
+      loadInvites();
+      showToast("Lien d'invitation créé", "success");
+    } catch {
+      showToast("Erreur lors de la création du lien", "error");
+    } finally {
+      setGeneratingInvite(false);
     }
   }
 
-  async function handleToggleUser(user: User) {
+  async function handleCopyInvite() {
+    if (!inviteLink) return;
+    await navigator.clipboard.writeText(inviteLink);
+    setInviteCopied(true);
+    setTimeout(() => setInviteCopied(false), 2000);
+  }
+
+  async function handleRevokeInvite(id: string) {
     try {
-      await fetch("/api/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: user.id, active: !user.active }),
-      });
-      loadUsers();
+      await fetch(`/api/workspaces/invite?id=${id}`, { method: "DELETE" });
+      loadInvites();
+      setInviteLink("");
+      showToast("Invitation révoquée", "success");
     } catch {
       showToast("Erreur", "error");
     }
   }
 
-  async function handleChangeRole(userId: string, role: string) {
+  function loadInvites() {
+    fetch("/api/workspaces/invite")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (Array.isArray(d)) setInvites(d); })
+      .catch(() => {});
+  }
+
+  async function handleChangeRole(userId: string, workspaceRole: string) {
     try {
       await fetch("/api/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: userId, role }),
+        body: JSON.stringify({ id: userId, workspaceRole }),
       });
       loadUsers();
     } catch {
@@ -826,7 +873,7 @@ export default function SettingsPage() {
     try {
       await fetch(`/api/users?id=${id}`, { method: "DELETE" });
       loadUsers();
-      showToast("Utilisateur supprimé", "success");
+      showToast("Membre retiré", "success");
     } catch {
       showToast("Erreur", "error");
     }
@@ -1067,65 +1114,66 @@ export default function SettingsPage() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
+            className="space-y-6"
           >
+            {/* Invite link section */}
             <SectionCard
-              title="&Eacute;quipe et utilisateurs"
-              description="G&eacute;rez les membres de votre &eacute;quipe et leurs r&ocirc;les."
+              title="Inviter des membres"
+              description="Partagez un lien d'invitation pour ajouter des membres à votre espace de travail."
             >
-              <div className="flex justify-end mb-2">
-                <Button
-                  onClick={() => setShowAddUser(!showAddUser)}
-                  size="sm"
-                >
-                  <Plus className="size-4" />
-                  Ajouter un utilisateur
-                </Button>
-              </div>
-              <AnimatePresence>
-                {showAddUser && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="bg-background-subtle rounded-lg p-4 mb-4 space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <Input
-                          value={newUserName}
-                          onChange={(e) => setNewUserName(e.target.value)}
-                          placeholder="Nom"
-                        />
-                        <Input
-                          value={newUserEmail}
-                          onChange={(e) => setNewUserEmail(e.target.value)}
-                          placeholder="Email"
-                          type="email"
-                        />
-                        <Select
-                          value={newUserRole}
-                          onChange={(e) => setNewUserRole(e.target.value)}
-                        >
-                          <option value="ADMIN">Admin</option>
-                          <option value="MANAGER">Manager</option>
-                          <option value="USER">Utilisateur</option>
-                        </Select>
-                      </div>
-                      <Button
-                        onClick={handleAddUser}
-                        variant="success"
-                        size="sm"
-                      >
-                        Cr&eacute;er
-                      </Button>
-                    </div>
-                  </motion.div>
+              <div className="space-y-3">
+                {inviteLink ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={inviteLink}
+                      readOnly
+                      className="text-xs font-mono flex-1"
+                    />
+                    <Button onClick={handleCopyInvite} size="sm" variant={inviteCopied ? "success" : "secondary"}>
+                      {inviteCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                      {inviteCopied ? "Copié" : "Copier"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button onClick={handleGenerateInvite} size="sm" disabled={generatingInvite}>
+                    <Link2 className="size-4" />
+                    {generatingInvite ? "Génération…" : "Générer un lien d'invitation"}
+                  </Button>
                 )}
-              </AnimatePresence>
+                {invites.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-border">
+                    <p className="text-xs text-foreground-muted font-medium">Invitations actives</p>
+                    {invites.map((inv) => (
+                      <div key={inv.id} className="flex items-center justify-between text-xs p-2 rounded bg-background-subtle">
+                        <div className="flex items-center gap-2 text-foreground-secondary">
+                          <Link2 className="size-3" />
+                          <span>Rôle: {inv.role === "ADMIN" ? "Admin" : "Membre"}</span>
+                          <span className="text-foreground-muted">
+                            — expire le {new Date(inv.expiresAt).toLocaleDateString("fr-CA")}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleRevokeInvite(inv.id)}
+                          className="text-danger hover:text-danger/80 p-1"
+                          title="Révoquer"
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </SectionCard>
+
+            {/* Members list */}
+            <SectionCard
+              title="Membres de l'espace de travail"
+              description="Les utilisateurs qui ont accès à cet espace de travail."
+            >
               {users.length === 0 ? (
                 <p className="text-foreground-muted text-sm py-4">
-                  Aucun utilisateur. Ajoutez votre premier membre
-                  d&apos;&eacute;quipe.
+                  Aucun membre. Invitez quelqu&apos;un avec un lien d&apos;invitation.
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -1143,8 +1191,8 @@ export default function SettingsPage() {
                         <div>
                           <p className="text-sm font-medium text-foreground">
                             {u.name}{" "}
-                            {!u.active && (
-                              <span className="text-muted">(inactif)</span>
+                            {u.workspaceRole === "OWNER" && (
+                              <span className="text-xs text-primary font-normal">(propriétaire)</span>
                             )}
                           </p>
                           <p className="text-xs text-foreground-muted">
@@ -1153,34 +1201,27 @@ export default function SettingsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Select
-                          value={u.role}
-                          onChange={(e) =>
-                            handleChangeRole(u.id, e.target.value)
-                          }
-                          className="text-xs h-7 px-2 py-1"
-                        >
-                          <option value="ADMIN">Admin</option>
-                          <option value="MANAGER">Manager</option>
-                          <option value="USER">Utilisateur</option>
-                        </Select>
-                        <Button
-                          onClick={() => handleToggleUser(u)}
-                          variant="ghost"
-                          size="sm"
-                          className={
-                            u.active ? "text-warning" : "text-success"
-                          }
-                        >
-                          {u.active ? "Désactiver" : "Activer"}
-                        </Button>
-                        <Button
-                          onClick={() => handleDeleteUser(u.id)}
-                          variant="danger-ghost"
-                          size="sm"
-                        >
-                          Supprimer
-                        </Button>
+                        {u.workspaceRole !== "OWNER" && (
+                          <>
+                            <Select
+                              value={u.workspaceRole || "MEMBER"}
+                              onChange={(e) =>
+                                handleChangeRole(u.id, e.target.value)
+                              }
+                              className="text-xs h-7 px-2 py-1"
+                            >
+                              <option value="ADMIN">Admin</option>
+                              <option value="MEMBER">Membre</option>
+                            </Select>
+                            <Button
+                              onClick={() => handleDeleteUser(u.id)}
+                              variant="danger-ghost"
+                              size="sm"
+                            >
+                              Retirer
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2243,7 +2284,7 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
           >
             <SectionCard
-              title="Apparence et langue"
+              title="Apparence"
               description="Personnalisez l'affichage de l'application."
               onSave={() =>
                 saveSection("appearance", settings.appearance)
@@ -2252,21 +2293,6 @@ export default function SettingsPage() {
               hasUnsaved={hasUnsaved}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FieldGroup label="Langue">
-                  <Select
-                    value={settings.appearance.language}
-                    onChange={(e) =>
-                      updateField(
-                        "appearance",
-                        "language",
-                        e.target.value
-                      )
-                    }
-                  >
-                    <option value="fr">Français</option>
-                    <option value="en">English</option>
-                  </Select>
-                </FieldGroup>
                 <FieldGroup label="Format de date">
                   <Select
                     value={settings.appearance.dateFormat}
@@ -2353,6 +2379,51 @@ export default function SettingsPage() {
                   ))}
                 </div>
               </div>
+            </SectionCard>
+          </motion.div>
+        );
+
+      // === LANGUE ===
+      case "language":
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <SectionCard
+              title="Langue"
+              description="Choisissez la langue de l'interface."
+              onSave={() =>
+                saveSection("appearance", settings.appearance)
+              }
+              saving={saving}
+              hasUnsaved={hasUnsaved}
+            >
+              <FieldGroup label="Langue de l'interface">
+                <Select
+                  value={settings.appearance.language}
+                  onChange={(e) => {
+                    updateField(
+                      "appearance",
+                      "language",
+                      e.target.value
+                    );
+                    // Also update the language provider immediately
+                    if (typeof window !== "undefined") {
+                      setAppLocale(e.target.value as "fr" | "en");
+                    }
+                  }}
+                >
+                  <option value="fr">Français</option>
+                  <option value="en">English</option>
+                </Select>
+              </FieldGroup>
+              <p className="text-xs text-foreground-muted mt-2">
+                {settings.appearance.language === "en"
+                  ? "The language change takes effect immediately across the entire application."
+                  : "Le changement de langue prend effet immédiatement dans toute l'application."}
+              </p>
             </SectionCard>
           </motion.div>
         );
@@ -3152,7 +3223,7 @@ export default function SettingsPage() {
               },
               {
                 label: "Plateforme",
-                ids: ["appearance", "security", "subscription", "activity"],
+                ids: ["appearance", "language", "security", "subscription", "activity"],
               },
             ] as const).map((group) => (
               <div key={group.label}>

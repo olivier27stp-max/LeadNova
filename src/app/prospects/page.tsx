@@ -1046,7 +1046,7 @@ export default function ProspectsPage() {
         body: JSON.stringify({ _action: "parse", rawText: importText }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erreur");
+      if (!res.ok) throw new Error(data.error || t("common", "error"));
       setImportParsed(data.prospects.map((p: Record<string, unknown>) => ({ ...p, _selected: true })));
       setImportStep("preview");
     } catch (error) {
@@ -1069,7 +1069,7 @@ export default function ProspectsPage() {
         body: JSON.stringify({ _action: "save", prospects: toSave, dedupMode: importDedupMode }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erreur");
+      if (!res.ok) throw new Error(data.error || t("common", "error"));
       setImportResult({ created: data.created, skipped: data.skipped });
       setImportStep("done");
       fetchProspects();
@@ -2129,7 +2129,7 @@ export default function ProspectsPage() {
           <div className="bg-card border border-border rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-semibold text-foreground">Importer des prospects</h2>
+                <h2 className="text-base font-semibold text-foreground">{t("prospects", "importProspects")}</h2>
                 <button onClick={closeImportModal} className="text-foreground-muted hover:text-foreground">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
@@ -2139,9 +2139,9 @@ export default function ProspectsPage() {
               {importStep !== "done" && (
                 <div className="flex items-center gap-2 mb-5 text-xs">
                   {[
-                    { key: "input", label: "1. Source" },
-                    { key: "mapping", label: "2. Colonnes" },
-                    { key: "preview", label: "3. Aperçu" },
+                    { key: "input", label: t("prospects", "stepSource") },
+                    { key: "mapping", label: t("prospects", "stepColumns") },
+                    { key: "preview", label: t("prospects", "stepPreview") },
                   ].map((s, i) => (
                     <div key={s.key} className="flex items-center gap-2">
                       {i > 0 && <div className="w-6 h-px bg-border" />}
@@ -2163,13 +2163,13 @@ export default function ProspectsPage() {
                   <div className="w-16 h-16 bg-success-subtle rounded-full flex items-center justify-center mx-auto mb-4">
                     <svg className="w-8 h-8 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                   </div>
-                  <p className="text-base font-medium text-foreground mb-2">Import terminé</p>
+                  <p className="text-base font-medium text-foreground mb-2">{t("prospects", "importComplete")}</p>
                   <p className="text-foreground-muted">
-                    {importResult.created} prospect{importResult.created !== 1 ? "s" : ""} importé{importResult.created !== 1 ? "s" : ""}
-                    {importResult.skipped > 0 && `, ${importResult.skipped} ignoré${importResult.skipped !== 1 ? "s" : ""} (doublons)`}
+                    {importResult.created} prospect{importResult.created !== 1 ? "s" : ""} {importResult.created !== 1 ? t("prospects", "importedPlural") : t("prospects", "imported")}
+                    {importResult.skipped > 0 && `, ${importResult.skipped} ${importResult.skipped !== 1 ? t("prospects", "skippedPlural") : t("prospects", "skipped")} (${t("prospects", "duplicates")})`}
                   </p>
                   <button onClick={closeImportModal} className="mt-4 bg-primary text-white px-6 py-2 rounded-md text-sm font-medium hover:bg-primary-hover">
-                    Fermer
+                    {t("common", "close")}
                   </button>
                 </div>
               )}
@@ -2193,20 +2193,20 @@ export default function ProspectsPage() {
                     onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove("border-primary", "bg-primary-subtle"); const f = e.dataTransfer.files[0]; if (f) handleFileUpload(f); }}
                   >
                     <svg className="w-10 h-10 text-foreground-muted mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    <p className="font-medium text-foreground mb-1">Glissez un fichier ici ou cliquez pour parcourir</p>
-                    <p className="text-xs text-foreground-muted">CSV, TSV, Excel (.xlsx, .xls)</p>
+                    <p className="font-medium text-foreground mb-1">{t("prospects", "dragFileOrClick")}</p>
+                    <p className="text-xs text-foreground-muted">{t("prospects", "fileFormats")}</p>
                   </div>
 
                   <div className="flex items-center gap-3 mb-4">
                     <div className="flex-1 h-px bg-border" />
-                    <span className="text-xs text-foreground-muted uppercase">ou collez du texte</span>
+                    <span className="text-xs text-foreground-muted uppercase">{t("prospects", "orPasteText")}</span>
                     <div className="flex-1 h-px bg-border" />
                   </div>
 
                   <textarea
                     value={importText}
                     onChange={(e) => setImportText(e.target.value)}
-                    placeholder={"Ex:\nABC Gestion, Montreal, info@abc.com, (514) 555-1234\nXYZ Immobilier, Quebec, contact@xyz.ca\n\nOu collez un tableau Excel, un CSV, du texte libre..."}
+                    placeholder={t("prospects", "importTextPlaceholder")}
                     rows={6}
                     className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground font-mono resize-y"
                   />
@@ -2215,7 +2215,7 @@ export default function ProspectsPage() {
                   )}
                   <div className="flex justify-end gap-2 mt-4">
                     <button onClick={closeImportModal} className="text-sm px-4 py-2 rounded-md border border-border text-foreground-secondary hover:bg-background-subtle">
-                      Annuler
+                      {t("common", "cancel")}
                     </button>
                     <button
                       onClick={handleImportParse}
@@ -2225,10 +2225,10 @@ export default function ProspectsPage() {
                       {importParsing ? (
                         <>
                           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                          Analyse IA en cours...
+                          {t("prospects", "aiAnalyzing")}
                         </>
                       ) : (
-                        <>Analyser avec l&apos;IA</>
+                        <>{t("prospects", "analyzeWithAI")}</>
                       )}
                     </button>
                   </div>
@@ -2239,7 +2239,7 @@ export default function ProspectsPage() {
               {importStep === "mapping" && (
                 <div>
                   <p className="text-sm text-foreground-muted mb-4">
-                    {importFileRows.length} ligne{importFileRows.length !== 1 ? "s" : ""} détectée{importFileRows.length !== 1 ? "s" : ""}. Associez chaque colonne du fichier au champ correspondant.
+                    {importFileRows.length} {importFileRows.length !== 1 ? t("prospects", "linesDetectedPlural") : t("prospects", "linesDetected")} {importFileRows.length !== 1 ? t("prospects", "detectedPlural") : t("prospects", "detected")}. {t("prospects", "mapColumns")}
                   </p>
 
                   <div className="grid grid-cols-1 gap-2 mb-4">
@@ -2254,7 +2254,7 @@ export default function ProspectsPage() {
                           onChange={(e) => setImportColumnMap({ ...importColumnMap, [field.key]: e.target.value })}
                           className="flex-1 border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
                         >
-                          <option value="">— Ignorer —</option>
+                          <option value="">{t("prospects", "ignore")}</option>
                           {importFileColumns.filter(Boolean).map((col, ci) => (
                             <option key={ci} value={col}>{col}</option>
                           ))}
@@ -2271,7 +2271,7 @@ export default function ProspectsPage() {
                   {/* Preview of raw file data */}
                   <details className="mb-4">
                     <summary className="text-xs text-foreground-muted cursor-pointer hover:text-foreground">
-                      Aperçu du fichier ({Math.min(5, importFileRows.length)} premières lignes)
+                      {t("prospects", "filePreview")} ({Math.min(5, importFileRows.length)} {t("prospects", "firstLines")})
                     </summary>
                     <div className="mt-2 border border-border rounded-md overflow-x-auto">
                       <table className="w-full text-xs">
@@ -2297,24 +2297,24 @@ export default function ProspectsPage() {
 
                   {/* Deduplication mode */}
                   <div className="bg-background-subtle rounded-md p-3 mb-4">
-                    <label className="text-xs font-medium text-foreground-muted mb-1.5 block">Mode de déduplication</label>
+                    <label className="text-xs font-medium text-foreground-muted mb-1.5 block">{t("prospects", "dedupMode")}</label>
                     <select
                       value={importDedupMode}
                       onChange={(e) => setImportDedupMode(e.target.value)}
                       className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
                     >
-                      <option value="companyName_city">Nom + Ville</option>
-                      <option value="gmaps_url">URL Google Maps</option>
-                      <option value="website">Site web</option>
-                      <option value="phone">Téléphone</option>
-                      <option value="none">Aucune (tout importer)</option>
+                      <option value="companyName_city">{t("prospects", "dedupNameCity")}</option>
+                      <option value="gmaps_url">{t("prospects", "dedupGmapsUrl")}</option>
+                      <option value="website">{t("prospects", "dedupWebsite")}</option>
+                      <option value="phone">{t("prospects", "dedupPhone")}</option>
+                      <option value="none">{t("prospects", "dedupNone")}</option>
                     </select>
                     <p className="text-xs text-foreground-muted mt-1">
-                      {importDedupMode === "gmaps_url" && "Les prospects avec la même URL Google Maps seront ignorés"}
-                      {importDedupMode === "website" && "Les prospects avec le même site web seront ignorés"}
-                      {importDedupMode === "phone" && "Les prospects avec le même téléphone seront ignorés"}
-                      {importDedupMode === "companyName_city" && "Les prospects avec le même nom et même ville seront ignorés"}
-                      {importDedupMode === "none" && "Tous les prospects seront importés sans vérification"}
+                      {importDedupMode === "gmaps_url" && t("prospects", "dedupDescGmaps")}
+                      {importDedupMode === "website" && t("prospects", "dedupDescWebsite")}
+                      {importDedupMode === "phone" && t("prospects", "dedupDescPhone")}
+                      {importDedupMode === "companyName_city" && t("prospects", "dedupDescNameCity")}
+                      {importDedupMode === "none" && t("prospects", "dedupDescNone")}
                     </p>
                   </div>
 
@@ -2326,14 +2326,14 @@ export default function ProspectsPage() {
                       onClick={() => { setImportStep("input"); setImportFileColumns([]); setImportFileRows([]); setImportColumnMap({}); setImportError(null); }}
                       className="text-sm px-4 py-2 rounded-md border border-border text-foreground-secondary hover:bg-background-subtle"
                     >
-                      Retour
+                      {t("common", "back")}
                     </button>
                     <button
                       onClick={applyColumnMapping}
                       disabled={!importColumnMap.companyName}
                       className="text-sm bg-primary text-white px-4 py-2 rounded-md hover:bg-primary-hover disabled:opacity-50"
                     >
-                      Appliquer et voir l&apos;aperçu
+                      {t("prospects", "applyAndPreview")}
                     </button>
                   </div>
                 </div>
@@ -2344,20 +2344,20 @@ export default function ProspectsPage() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm text-foreground-muted">
-                      {importParsed.filter((p) => p._selected).length} / {importParsed.length} prospect{importParsed.length !== 1 ? "s" : ""} sélectionné{importParsed.filter((p) => p._selected).length !== 1 ? "s" : ""}
+                      {importParsed.filter((p) => p._selected).length} / {importParsed.length} prospect{importParsed.length !== 1 ? "s" : ""} {importParsed.filter((p) => p._selected).length !== 1 ? t("prospects", "selectedPlural") : t("prospects", "selected")}
                     </p>
                     <div className="flex gap-2">
                       <button
                         onClick={() => setImportParsed(importParsed.map((p) => ({ ...p, _selected: true })))}
                         className="text-xs text-primary hover:underline"
                       >
-                        Tout sélectionner
+                        {t("common", "selectAll")}
                       </button>
                       <button
                         onClick={() => setImportParsed(importParsed.map((p) => ({ ...p, _selected: false })))}
                         className="text-xs text-foreground-muted hover:underline"
                       >
-                        Tout désélectionner
+                        {t("common", "deselectAll")}
                       </button>
                     </div>
                   </div>
@@ -2368,12 +2368,12 @@ export default function ProspectsPage() {
                           <tr>
                             <th className="px-3 py-2 w-8"></th>
                             <th className="px-3 py-2 w-6 text-xs text-foreground-muted">#</th>
-                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">Entreprise</th>
-                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">Ville</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "company")}</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "city")}</th>
                             <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">Email</th>
-                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">Téléphone</th>
-                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">Site web</th>
-                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">Type</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "phone")}</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "website")}</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "type")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2408,7 +2408,7 @@ export default function ProspectsPage() {
                       onClick={() => { setImportParsed(null); setImportError(null); setImportStep(importFileColumns.length > 0 ? "mapping" : "input"); }}
                       className="text-sm px-4 py-2 rounded-md border border-border text-foreground-secondary hover:bg-background-subtle"
                     >
-                      Retour
+                      {t("common", "back")}
                     </button>
                     <button
                       onClick={handleImportSave}
@@ -2418,10 +2418,10 @@ export default function ProspectsPage() {
                       {importSaving ? (
                         <>
                           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                          Import en cours...
+                          {t("prospects", "importInProgress")}
                         </>
                       ) : (
-                        <>Importer {importParsed.filter((p) => p._selected).length} prospect{importParsed.filter((p) => p._selected).length !== 1 ? "s" : ""}</>
+                        <>{t("common", "import")} {importParsed.filter((p) => p._selected).length} prospect{importParsed.filter((p) => p._selected).length !== 1 ? "s" : ""}</>
                       )}
                     </button>
                   </div>
@@ -2437,7 +2437,7 @@ export default function ProspectsPage() {
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           className="fixed bottom-6 right-6 z-50 bg-foreground text-background w-10 h-10 rounded-full shadow-lg hover:opacity-90 transition-all flex items-center justify-center opacity-80 hover:opacity-100"
-          title="Revenir en haut"
+          title={t("prospects", "scrollToTop")}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
         </button>

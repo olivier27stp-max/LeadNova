@@ -49,6 +49,7 @@ model Workspace {
   updatedAt   DateTime @updatedAt
 
   members         WorkspaceMember[]
+  invitations     WorkspaceInvitation[]
   prospects       Prospect[]
   campaigns       Campaign[]
   blacklist       Blacklist[]
@@ -60,6 +61,24 @@ model Workspace {
   keywordGenerations KeywordGeneration[]
 
   @@map("workspaces")
+}
+
+model WorkspaceInvitation {
+  id          String        @id @default(cuid())
+  workspaceId String
+  token       String        @unique
+  role        WorkspaceRole @default(MEMBER)
+  createdById String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  usedById    String?
+  createdAt   DateTime      @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([token])
+  @@map("workspace_invitations")
 }
 
 model WorkspaceMember {

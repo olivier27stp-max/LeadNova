@@ -16,6 +16,7 @@ const PUBLIC_PATHS = [
   "/api/auth/reset-password",
   "/api/track",
   "/api/webhooks",
+  "/invite",
 ];
 
 function isPublic(pathname: string): boolean {

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider, ThemeScript } from "@/components/ThemeProvider";
+import { LanguageProvider } from "@/components/LanguageProvider";
 import Header from "@/components/Header";
 import EnrichmentProvider from "@/components/EnrichmentProvider";
 import GlobalEnrichmentBar from "@/components/GlobalEnrichmentBar";
@@ -36,6 +37,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeProvider>
+          <LanguageProvider>
           <EnrichmentProvider>
             <div className="min-h-screen dot-pattern">
               <Header />
@@ -43,6 +45,7 @@ export default function RootLayout({
             </div>
             <GlobalEnrichmentBar />
           </EnrichmentProvider>
+          </LanguageProvider>
         </ThemeProvider>
       </body>
     </html>

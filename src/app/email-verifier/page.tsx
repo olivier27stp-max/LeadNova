@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/components/LanguageProvider";
 import JobProgressBar from "@/components/prospects/JobProgressBar";
 import { useEnrichment } from "@/components/EnrichmentProvider";
 import { PageHeader } from "@/components/ui/page-header";
@@ -50,23 +51,29 @@ type EmailStatusConfig = Record<
   { label: string; color: string; bg: string; icon: React.ReactNode }
 >;
 
-const EMAIL_STATUS_CONFIG: EmailStatusConfig = {
-  valid: { label: "Valide", color: "text-success", bg: "bg-success/10", icon: <CheckCircle2 className="size-4 text-success" /> },
-  risky: { label: "Risqué", color: "text-warning", bg: "bg-warning/10", icon: <AlertCircle className="size-4 text-warning" /> },
-  invalid: { label: "Invalide", color: "text-destructive", bg: "bg-destructive/10", icon: <XCircle className="size-4 text-destructive" /> },
-  "catch-all": { label: "Catch-all", color: "text-accent", bg: "bg-accent/10", icon: <AlertTriangle className="size-4 text-accent" /> },
-  disposable: { label: "Jetable", color: "text-destructive", bg: "bg-destructive/10", icon: <XCircle className="size-4 text-destructive" /> },
-  unknown: { label: "Non vérifié", color: "text-foreground-muted", bg: "bg-foreground/5", icon: <HelpCircle className="size-4 text-foreground-muted" /> },
-};
+type TFn = (section: "emailVerifier", key: string) => string;
 
-const STAT_CARDS = [
-  { key: "total", label: "Total scannés", color: "text-foreground" },
-  { key: "valid", label: "Valides", color: "text-success" },
-  { key: "risky", label: "Risqués", color: "text-warning" },
-  { key: "invalid", label: "Invalides", color: "text-destructive" },
-  { key: "disposable", label: "Jetables", color: "text-destructive" },
-  { key: "unknown", label: "Non vérifiés", color: "text-foreground-muted" },
-] as const;
+function getEmailStatusConfig(t: TFn): EmailStatusConfig {
+  return {
+    valid: { label: t("emailVerifier", "statusValid"), color: "text-success", bg: "bg-success/10", icon: <CheckCircle2 className="size-4 text-success" /> },
+    risky: { label: t("emailVerifier", "statusRisky"), color: "text-warning", bg: "bg-warning/10", icon: <AlertCircle className="size-4 text-warning" /> },
+    invalid: { label: t("emailVerifier", "statusInvalid"), color: "text-destructive", bg: "bg-destructive/10", icon: <XCircle className="size-4 text-destructive" /> },
+    "catch-all": { label: t("emailVerifier", "statusCatchAll"), color: "text-accent", bg: "bg-accent/10", icon: <AlertTriangle className="size-4 text-accent" /> },
+    disposable: { label: t("emailVerifier", "statusDisposable"), color: "text-destructive", bg: "bg-destructive/10", icon: <XCircle className="size-4 text-destructive" /> },
+    unknown: { label: t("emailVerifier", "statusUnknown"), color: "text-foreground-muted", bg: "bg-foreground/5", icon: <HelpCircle className="size-4 text-foreground-muted" /> },
+  };
+}
+
+function getStatCards(t: TFn) {
+  return [
+    { key: "total", label: t("emailVerifier", "statTotal"), color: "text-foreground" },
+    { key: "valid", label: t("emailVerifier", "statValid"), color: "text-success" },
+    { key: "risky", label: t("emailVerifier", "statRisky"), color: "text-warning" },
+    { key: "invalid", label: t("emailVerifier", "statInvalid"), color: "text-destructive" },
+    { key: "disposable", label: t("emailVerifier", "statDisposable"), color: "text-destructive" },
+    { key: "unknown", label: t("emailVerifier", "statUnverified"), color: "text-foreground-muted" },
+  ] as const;
+}
 
 const FILTERS = ["all", "valid", "risky", "invalid", "disposable", "unknown"] as const;
 
@@ -80,13 +87,16 @@ function VerifyEmailsTable({
   selected,
   onSelectedChange,
   scrollRef,
+  t,
 }: {
   prospects: VerifyProspect[];
   loading: boolean;
   selected: Set<string>;
   onSelectedChange: (s: Set<string>) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  t: TFn;
 }) {
+  const emailStatusConfig = getEmailStatusConfig(t);
   const allChecked = prospects.length > 0 && prospects.every((p) => selected.has(p.id));
   const someChecked = prospects.some((p) => selected.has(p.id)) && !allChecked;
 
@@ -126,7 +136,7 @@ function VerifyEmailsTable({
   if (prospects.length === 0) {
     return (
       <div className="border border-border rounded-lg p-10 text-center text-foreground-muted text-sm">
-        Aucun prospect avec email trouvé.
+        {t("emailVerifier", "noProspectsWithEmail")}
       </div>
     );
   }
@@ -147,10 +157,10 @@ function VerifyEmailsTable({
                   onChange={(e) => toggleAll(e.target.checked)}
                 />
               </th>
-              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[28%]">Entreprise</th>
-              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[30%]">Email</th>
-              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[22%]">Statut</th>
-              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[12%]">Vérifié le</th>
+              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[28%]">{t("emailVerifier", "tableCompany")}</th>
+              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[30%]">{t("emailVerifier", "tableEmail")}</th>
+              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[22%]">{t("emailVerifier", "tableStatus")}</th>
+              <th className="text-left px-4 py-2.5 font-medium text-foreground-muted w-[12%]">{t("emailVerifier", "tableVerifiedAt")}</th>
             </tr>
           </thead>
         </table>
@@ -164,8 +174,8 @@ function VerifyEmailsTable({
             const s = p.emailStatus ?? "unknown";
             const isConfirmedInvalid = (s === "invalid" || s === "disposable") && p.emailEnrichmentAttempts > 0;
             const cfg = isConfirmedInvalid
-              ? { label: "Définitivement invalide", color: "text-destructive", bg: "bg-destructive/10", icon: <XCircle className="size-4 text-destructive" /> }
-              : (EMAIL_STATUS_CONFIG[s] ?? EMAIL_STATUS_CONFIG.unknown);
+              ? { label: t("emailVerifier", "statusDefinitelyInvalid"), color: "text-destructive", bg: "bg-destructive/10", icon: <XCircle className="size-4 text-destructive" /> }
+              : (emailStatusConfig[s] ?? emailStatusConfig.unknown);
             const isSelected = selected.has(p.id);
 
             return (
@@ -226,9 +236,12 @@ export default function EmailVerifierPageWrapper() {
 }
 
 function EmailVerifierPage() {
+  const { t } = useTranslation();
   const searchParams = useSearchParams();
   const fromCampaign = searchParams.get("from") === "campaign";
   const campaignName = searchParams.get("campaign");
+  const emailStatusConfig = getEmailStatusConfig(t as TFn);
+  const statCards = getStatCards(t as TFn);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -296,7 +309,7 @@ function EmailVerifierPage() {
     if (prev === "running" && (currentStatus === "done" || currentStatus === "cancelled")) {
       loadStats();
       loadProspects();
-      if (currentStatus === "done") showToast("Enrichissement terminé — liste actualisée", "success");
+      if (currentStatus === "done") showToast(t("emailVerifier", "enrichmentDoneRefreshed"), "success");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enrichProgress?.status]);
@@ -310,10 +323,10 @@ function EmailVerifierPage() {
     const BATCH = 25;
     try {
       const r = await fetch("/api/verify-emails?ids=1");
-      if (!r.ok) throw new Error("Impossible de récupérer les prospects");
+      if (!r.ok) throw new Error(t("emailVerifier", "errorFetchProspects"));
       const { ids } = (await r.json()) as { ids: string[] };
       if (ids.length === 0) {
-        showToast("Aucun email à vérifier", "success");
+        showToast(t("emailVerifier", "noEmailsToVerify"), "success");
         return;
       }
       setVerifyProgress({ verified: 0, total: ids.length, startedAt: Date.now() });
@@ -327,7 +340,7 @@ function EmailVerifierPage() {
         });
         if (!res.ok) {
           const d = await res.json();
-          showToast(d.error || "Erreur lors de la vérification", "error");
+          showToast(d.error || t("emailVerifier", "errorVerification"), "error");
           return;
         }
         const data = await res.json();
@@ -339,11 +352,11 @@ function EmailVerifierPage() {
         }));
       }
 
-      showToast(`${totalVerified} emails vérifiés`, "success");
+      showToast(`${totalVerified} ${t("emailVerifier", "emailsVerified")}`, "success");
       await loadStats();
       await loadProspects();
     } catch {
-      showToast("Erreur réseau lors de la vérification", "error");
+      showToast(t("emailVerifier", "networkErrorVerification"), "error");
     } finally {
       setVerifying(false);
       setVerifyProgress(null);
@@ -365,7 +378,7 @@ function EmailVerifierPage() {
       setSelected(new Set());
       startEnrichPolling();
     } else {
-      showToast(data.error || "Erreur lors de l'approfondissement", "error");
+      showToast(data.error || t("emailVerifier", "errorDeepEnrich"), "error");
     }
   }
 
@@ -381,12 +394,12 @@ function EmailVerifierPage() {
     const data = await res.json();
     setDeletingSelected(false);
     if (res.ok) {
-      showToast(`${data.deleted} prospect(s) supprimé(s)`, "success");
+      showToast(`${data.deleted} ${t("emailVerifier", "prospectsDeleted")}`, "success");
       setSelected(new Set());
       await loadStats();
       await loadProspects();
     } else {
-      showToast(data.error || "Erreur lors de la suppression", "error");
+      showToast(data.error || t("emailVerifier", "errorDeletion"), "error");
     }
   }
 
@@ -417,8 +430,8 @@ function EmailVerifierPage() {
       <ToastContainer toast={toast} onClose={() => setToast(null)} />
 
       <PageHeader
-        title="Email Vérificateur"
-        description="Détectez les adresses invalides, risquées ou jetables avant d'envoyer vos campagnes."
+        title={t("emailVerifier", "title")}
+        description={t("emailVerifier", "description")}
       />
 
       {/* Campaign redirect banner */}
@@ -431,13 +444,13 @@ function EmailVerifierPage() {
           <Info className="size-4 text-primary shrink-0 mt-0.5" />
           <div className="text-sm">
             <p className="font-medium text-foreground">
-              Vérification requise avant envoi
+              {t("emailVerifier", "verificationRequired")}
             </p>
             <p className="text-foreground-muted mt-0.5">
               {campaignName
-                ? `Vérifiez les emails avant d'envoyer la campagne « ${campaignName} ».`
-                : "Vérifiez les emails de vos prospects avant d'envoyer votre campagne."}
-              {" "}Une fois terminé, retournez à votre campagne pour procéder à l&apos;envoi.
+                ? `${t("emailVerifier", "verifyCampaignEmails")} « ${campaignName} ».`
+                : t("emailVerifier", "verifyProspectEmails")}
+              {" "}{t("emailVerifier", "onceDoneReturn")}
             </p>
           </div>
         </motion.div>
@@ -450,15 +463,15 @@ function EmailVerifierPage() {
             data={{
               type: "enrichment",
               status: enrichProgress.status === "done" ? "completed" : enrichProgress.status === "cancelled" ? "cancelled" : enrichProgress.status === "error" ? "failed" : "running",
-              title: "Enrichissement approfondi",
+              title: t("emailVerifier", "deepEnrichTitle"),
               stepLabel: enrichProgress.currentProspect,
               processed: enrichProgress.enriched + enrichProgress.failed + enrichProgress.noData,
               total: enrichProgress.target,
               startedAt: enrichProgress.startedAt,
               secondaryLabel: [
-                enrichProgress.enriched > 0 ? `${enrichProgress.enriched} enrichis` : null,
-                enrichProgress.noData > 0 ? `${enrichProgress.noData} sans données` : null,
-                enrichProgress.failed > 0 ? `${enrichProgress.failed} échoués` : null,
+                enrichProgress.enriched > 0 ? `${enrichProgress.enriched} ${t("emailVerifier", "enriched")}` : null,
+                enrichProgress.noData > 0 ? `${enrichProgress.noData} ${t("emailVerifier", "noData")}` : null,
+                enrichProgress.failed > 0 ? `${enrichProgress.failed} ${t("emailVerifier", "failed")}` : null,
               ].filter(Boolean).join(", ") || undefined,
             }}
             onStop={enrichIsRunning ? handleStopEnrich : undefined}
@@ -472,7 +485,7 @@ function EmailVerifierPage() {
             data={{
               type: "enrichment",
               status: verifying ? "running" : "completed",
-              title: "Vérification des emails",
+              title: t("emailVerifier", "verificationTitle"),
               stepLabel: "",
               processed: verifyProgress.verified,
               total: verifyProgress.total,
@@ -492,7 +505,7 @@ function EmailVerifierPage() {
             >
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="size-6 animate-spin text-primary" />
-                <span className="text-sm text-foreground-muted">Actualisation…</span>
+                <span className="text-sm text-foreground-muted">{t("emailVerifier", "refreshing")}</span>
               </div>
             </motion.div>
           )}
@@ -500,7 +513,7 @@ function EmailVerifierPage() {
           <div className="bg-card border border-border rounded-xl p-6 space-y-6">
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              {STAT_CARDS.map(({ key, label, color }) => (
+              {statCards.map(({ key, label, color }) => (
                 <div
                   key={key}
                   className="bg-background-subtle border border-border rounded-lg p-3 text-center"
@@ -517,20 +530,20 @@ function EmailVerifierPage() {
             <div className="flex flex-wrap items-center gap-3">
               <Button variant="primary" onClick={runBulkVerify} disabled={verifying}>
                 {verifying ? (
-                  <><Loader2 className="size-4 animate-spin" />Vérification en cours…</>
+                  <><Loader2 className="size-4 animate-spin" />{t("emailVerifier", "verifyingInProgress")}</>
                 ) : (
-                  <><ShieldCheck className="size-4" />Vérifier tous les emails</>
+                  <><ShieldCheck className="size-4" />{t("emailVerifier", "verifyAll")}</>
                 )}
               </Button>
               <Button variant="secondary" onClick={handleRefresh} disabled={refreshing}>
                 <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-                {refreshing ? "Chargement…" : "Actualiser"}
+                {refreshing ? t("emailVerifier", "refreshLoading") : t("emailVerifier", "refresh")}
               </Button>
             </div>
 
             {/* Filter */}
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm text-foreground-muted mr-1">Filtrer :</span>
+              <span className="text-sm text-foreground-muted mr-1">{t("emailVerifier", "filterLabel")}</span>
               {FILTERS.map((f) => {
                 const active = filter === f;
                 const count = verifyStats && f !== "all" ? (verifyStats[f as keyof VerifyStats] ?? 0) : null;
@@ -545,7 +558,7 @@ function EmailVerifierPage() {
                         : "bg-card text-foreground-muted border-border hover:border-primary/40 hover:bg-background-subtle"
                     )}
                   >
-                    {f === "all" ? "Tous" : EMAIL_STATUS_CONFIG[f]?.label ?? f}
+                    {f === "all" ? t("emailVerifier", "filterAll") : emailStatusConfig[f]?.label ?? f}
                     {count !== null && count > 0 && (
                       <span className={cn("ml-1.5 opacity-70", active && "opacity-90")}>{count}</span>
                     )}
@@ -558,12 +571,12 @@ function EmailVerifierPage() {
             {selected.size > 0 && (
               <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary/5 border border-primary/20">
                 <span className="text-sm font-medium text-primary flex-1">
-                  {selected.size} prospect{selected.size !== 1 ? "s" : ""} sélectionné{selected.size !== 1 ? "s" : ""}
+                  {selected.size} {selected.size !== 1 ? t("emailVerifier", "prospectsSelected") : t("emailVerifier", "prospectSelected")}
                 </span>
                 <Button variant="secondary" onClick={runDeepEnrich} disabled={deepEnriching}>
                   {deepEnriching
-                    ? <><Loader2 className="size-4 animate-spin" />Enrichissement…</>
-                    : <><RefreshCw className="size-4" />Approfondir l&apos;enrichissement</>
+                    ? <><Loader2 className="size-4 animate-spin" />{t("emailVerifier", "deepEnriching")}</>
+                    : <><RefreshCw className="size-4" />{t("emailVerifier", "deepEnrich")}</>
                   }
                 </Button>
                 <Button
@@ -573,8 +586,8 @@ function EmailVerifierPage() {
                   className="text-destructive border-destructive/30 hover:bg-destructive/5"
                 >
                   {deletingSelected
-                    ? <><Loader2 className="size-4 animate-spin" />Suppression…</>
-                    : <><Trash2 className="size-4" />Supprimer</>
+                    ? <><Loader2 className="size-4 animate-spin" />{t("emailVerifier", "deleting")}</>
+                    : <><Trash2 className="size-4" />{t("emailVerifier", "deleteBtn")}</>
                   }
                 </Button>
                 <button
@@ -593,11 +606,12 @@ function EmailVerifierPage() {
               selected={selected}
               onSelectedChange={setSelected}
               scrollRef={scrollRef}
+              t={t as TFn}
             />
 
             {filteredProspects.length > 0 && (
               <p className="text-xs text-foreground-muted">
-                {filteredProspects.length} résultat{filteredProspects.length !== 1 ? "s" : ""}
+                {filteredProspects.length} {filteredProspects.length !== 1 ? t("emailVerifier", "results") : t("emailVerifier", "result")}
               </p>
             )}
           </div>

@@ -1,120 +1,132 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getSessionUser } from "@/lib/session";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
+// GET — list workspace members (not all users globally)
 export async function GET() {
   try {
-    const user = await getSessionUser();
-    if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-    if (user.role !== "ADMIN") return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+    const { workspaceId } = await requireWorkspaceContext();
 
-    const users = await prisma.user.findMany({
-      orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, email: true, role: true, active: true, lastActiveAt: true, createdAt: true },
+    const members = await prisma.workspaceMember.findMany({
+      where: { workspaceId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            active: true,
+            lastActiveAt: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
     });
-    return NextResponse.json(users);
+
+    // Return flat user objects with workspaceRole attached
+    const result = members.map((m) => ({
+      ...m.user,
+      workspaceRole: m.role,
+      memberId: m.id,
+    }));
+
+    return NextResponse.json(result);
   } catch (error) {
-    console.error("Users fetch error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch users" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-
-    if (!body.name || !body.email) {
-      return NextResponse.json(
-        { error: "name and email are required" },
-        { status: 400 }
-      );
-    }
-
-    const user = await prisma.user.create({
-      data: {
-        name: body.name,
-        email: body.email,
-        role: body.role || "USER",
-      },
-    });
-
-    await prisma.activityLog.create({
-      data: {
-        action: "user_created",
-        details: `Utilisateur créé: ${user.name} (${user.email})`,
-        userId: user.id,
-      },
-    });
-
-    return NextResponse.json(user, { status: 201 });
-  } catch (error) {
-    console.error("User create error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create user" },
-      { status: 500 }
-    );
-  }
-}
-
+// PATCH — update a workspace member's role (workspace-scoped)
 export async function PATCH(request: NextRequest) {
   try {
+    const { workspaceId, userId: currentUserId } = await requireWorkspaceContext();
     const body = await request.json();
-    const { id, ...data } = body;
+    const { id, workspaceRole } = body;
 
     if (!id) {
-      return NextResponse.json({ error: "id is required" }, { status: 400 });
+      return NextResponse.json({ error: "id requis" }, { status: 400 });
     }
 
-    const user = await prisma.user.update({
-      where: { id },
-      data,
+    // Verify target user is in this workspace
+    const member = await prisma.workspaceMember.findFirst({
+      where: { workspaceId, userId: id },
     });
+    if (!member) {
+      return NextResponse.json({ error: "Membre introuvable" }, { status: 404 });
+    }
+
+    // Prevent changing own role
+    if (id === currentUserId) {
+      return NextResponse.json({ error: "Vous ne pouvez pas modifier votre propre rôle" }, { status: 400 });
+    }
+
+    // Update workspace role
+    if (workspaceRole) {
+      await prisma.workspaceMember.update({
+        where: { id: member.id },
+        data: { role: workspaceRole },
+      });
+    }
 
     await prisma.activityLog.create({
       data: {
-        action: "user_updated",
-        details: `Utilisateur modifié: ${user.name}`,
-        userId: user.id,
+        workspaceId,
+        action: "member_updated",
+        details: `Rôle modifié pour le membre ${id}`,
+        userId: currentUserId,
       },
     });
 
-    return NextResponse.json(user);
+    return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error("User update error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update user" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }
 
+// DELETE — remove a member from the workspace
 export async function DELETE(request: NextRequest) {
   try {
+    const { workspaceId, userId: currentUserId } = await requireWorkspaceContext();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
     if (!id) {
-      return NextResponse.json({ error: "id is required" }, { status: 400 });
+      return NextResponse.json({ error: "id requis" }, { status: 400 });
     }
 
-    await prisma.user.delete({ where: { id } });
+    // Cannot remove yourself
+    if (id === currentUserId) {
+      return NextResponse.json({ error: "Vous ne pouvez pas vous retirer vous-même" }, { status: 400 });
+    }
+
+    // Find workspace membership
+    const member = await prisma.workspaceMember.findFirst({
+      where: { workspaceId, userId: id },
+    });
+    if (!member) {
+      return NextResponse.json({ error: "Membre introuvable" }, { status: 404 });
+    }
+
+    // Cannot remove the OWNER
+    if (member.role === "OWNER") {
+      return NextResponse.json({ error: "Impossible de retirer le propriétaire" }, { status: 400 });
+    }
+
+    await prisma.workspaceMember.delete({ where: { id: member.id } });
 
     await prisma.activityLog.create({
       data: {
-        action: "user_deleted",
-        details: `Utilisateur supprimé: ${id}`,
+        workspaceId,
+        action: "member_removed",
+        details: `Membre retiré: ${id}`,
+        userId: currentUserId,
       },
     });
 
     return NextResponse.json({ deleted: true });
   } catch (error) {
-    console.error("User delete error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete user" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }
