@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Free Leads - AI Lead Generation",
+  title: "LeadNova - AI Lead Generation",
   description: "AI-powered B2B lead generation platform",
 };
 

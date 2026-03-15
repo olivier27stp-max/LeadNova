@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 
 /**
- * Wraps a plain-text email body in a branded HTML template for Vision Lavage.
+ * Wraps a plain-text email body in a branded HTML template for LeadNova.
  * Compatible with Gmail, Outlook, Apple Mail, and all major clients.
  * Uses CID inline attachment for the logo image.
  */
@@ -15,7 +15,7 @@ export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string): st
     .join("\n");
 
   const phone = process.env.COMPANY_PHONE || "819-388-9150";
-  const website = process.env.COMPANY_WEBSITE || "visionlavage.com";
+  const website = process.env.COMPANY_WEBSITE || "leadnova.one";
   const contactName = process.env.CONTACT_NAME || "Olivier";
 
   return `<!DOCTYPE html>
@@ -50,7 +50,7 @@ export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string): st
           <tr>
             <td style="padding:24px 40px 0 40px;color:#374151;font-size:14px;line-height:1.6;">
               <strong style="color:#111827;">${contactName}</strong><br>
-              <span style="color:#6b7280;">Vision Lavage Inc.</span><br>
+              <span style="color:#6b7280;">LeadNova</span><br>
               <a href="tel:${phone}" style="color:#2563eb;text-decoration:none;">${phone}</a> &nbsp;·&nbsp;
               <a href="https://${website}" style="color:#2563eb;text-decoration:none;">${website}</a>
             </td>
@@ -63,8 +63,8 @@ export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string): st
                 <tr>
                   <td align="center" style="padding:20px 24px;">
                     <img
-                      src="cid:vision-lavage-logo"
-                      alt="Vision Lavage Inc."
+                      src="cid:leadnova-logo"
+                      alt="LeadNova"
                       width="160"
                       height="160"
                       style="display:block;border:0;outline:none;text-decoration:none;width:160px;height:160px;object-fit:contain;"
@@ -103,14 +103,14 @@ export function getLogoAttachment(logoUrl?: string): object | null {
     if (logoUrl && logoUrl.startsWith("/") && !logoUrl.startsWith("//")) {
       logoPath = path.join(process.cwd(), "public", logoUrl.slice(1));
     } else {
-      logoPath = path.join(process.cwd(), "public", "vision-lavage-logo.png");
+      logoPath = path.join(process.cwd(), "public", "leadnova-logo.png");
     }
     if (!fs.existsSync(logoPath)) return null;
     const ext = path.extname(logoPath).slice(1) || "png";
     return {
       filename: `logo.${ext}`,
       path: logoPath,
-      cid: "vision-lavage-logo",
+      cid: "leadnova-logo",
     };
   } catch {
     return null;
@@ -122,7 +122,7 @@ export function getLogoAttachment(logoUrl?: string): object | null {
  */
 export function getTextFooter(): string {
   const phone = process.env.COMPANY_PHONE || "819-388-9150";
-  const website = process.env.COMPANY_WEBSITE || "visionlavage.com";
+  const website = process.env.COMPANY_WEBSITE || "leadnova.one";
   const contactName = process.env.CONTACT_NAME || "Olivier";
 
   return `\n\n--\n${contactName}\nVision Lavage Inc.\n${phone} | ${website}\n\nPour vous désabonner, répondez avec "DÉSABONNER" dans le sujet.`;

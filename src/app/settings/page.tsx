@@ -183,6 +183,7 @@ const SECTIONS = [
   { id: "prospects", label: "Prospects", icon: UserSearch },
   { id: "campaigns", label: "Campagnes", icon: Megaphone },
   { id: "automation", label: "Automatisation", icon: Zap },
+  { id: "templates", label: "Templates email", icon: FileText },
   { id: "targeting", label: "Ciblage recherche", icon: Target },
   { id: "archive", label: "Archive", icon: Archive },
   { id: "appearance", label: "Apparence", icon: Palette },
@@ -370,6 +371,24 @@ export default function SettingsPage() {
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserRole, setNewUserRole] = useState("USER");
 
+
+  // Email templates state
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateType, setNewTemplateType] = useState("custom");
+  const [newTemplateSubject, setNewTemplateSubject] = useState("");
+  const [newTemplateBody, setNewTemplateBody] = useState("");
+  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/templates");
+      if (res.ok) setTemplates(await res.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   // Targeting state
   const [newKeyword, setNewKeyword] = useState("");

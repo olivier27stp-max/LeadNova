@@ -82,7 +82,10 @@ export default function LoginPage() {
           <div className="mb-4 p-3 bg-primary/10 rounded-2xl border border-primary/20">
             <Logo variant="icon" size={36} />
           </div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Free Leads</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            <span className="text-foreground">Lead</span>
+            <span className="bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">Nova</span>
+          </h1>
           <p className="text-sm text-foreground-muted mt-1">
             {isSetup ? "Créez votre compte administrateur" : "Connectez-vous à votre compte"}
           </p>
@@ -181,7 +184,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-foreground-muted mt-6">
-          Vision Lavage Inc. — Accès réservé au personnel autorisé
+          LeadNova — Accès réservé au personnel autorisé
         </p>
       </div>
     </div>

@@ -129,7 +129,7 @@ export default function CampaignDetailPage() {
   const [saving, setSaving] = useState(false);
 
   // Logo state
-  const [logoUrl, setLogoUrl] = useState("/vision-lavage-logo.png");
+  const [logoUrl, setLogoUrl] = useState("/leadnova-logo.png");
   const [logoEnabled, setLogoEnabled] = useState(true);
   const [editingLogo, setEditingLogo] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
@@ -610,10 +610,10 @@ export default function CampaignDetailPage() {
   <tr><td style="padding:0 32px;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:0;"></td></tr>
   <tr><td style="padding:20px 32px 0 32px;color:#374151;font-size:13px;line-height:1.6;">
     <strong style="color:#111827;">Olivier</strong><br>
-    <span style="color:#6b7280;">Vision Lavage Inc.</span><br>
+    <span style="color:#6b7280;">LeadNova</span><br>
     <a href="tel:819-388-9150" style="color:#2563eb;text-decoration:none;">819-388-9150</a>
     &nbsp;·&nbsp;
-    <a href="https://visionlavage.com" style="color:#2563eb;text-decoration:none;">visionlavage.com</a>
+    <a href="https://leadnova.one" style="color:#2563eb;text-decoration:none;">leadnova.one</a>
   </td></tr>
   ${logoEnabled ? `<tr><td style="padding:16px 32px 0 32px;">
     <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#000;border-radius:6px;overflow:hidden;">

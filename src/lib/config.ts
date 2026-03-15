@@ -43,7 +43,7 @@ export const EMAIL_DELAY_MIN_SECONDS = 120;
 export const EMAIL_DELAY_MAX_SECONDS = 300;
 
 export const COMPANY_INFO = {
-  name: process.env.COMPANY_NAME || "Free Leads",
+  name: process.env.COMPANY_NAME || "LeadNova",
   services: [
     "nettoyage de vitres",
     "nettoyage de gouttières",

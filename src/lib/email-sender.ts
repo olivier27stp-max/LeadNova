@@ -43,7 +43,7 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
   const fallbackProvider = process.env.RESEND_API_KEY ? "resend" : "smtp";
   // Platform-level "from" address — emails are sent from this address for all users
   const platformFrom = process.env.PLATFORM_FROM_EMAIL || "noreply@leadnova.one";
-  const platformFromName = process.env.PLATFORM_FROM_NAME || "Free Leads";
+  const platformFromName = process.env.PLATFORM_FROM_NAME || "LeadNova";
 
   try {
     const record = workspaceId

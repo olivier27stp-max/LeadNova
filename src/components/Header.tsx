@@ -70,9 +70,10 @@ export default function Header() {
             href="/"
             className="flex items-center gap-2"
           >
-            <Logo variant="icon" size={24} />
-            <span className="text-sm font-semibold text-foreground tracking-tight">
-              Free Leads
+            <Logo variant="icon" size={22} />
+            <span className="text-[15px] font-semibold tracking-tight">
+              <span className="text-foreground">Lead</span>
+              <span className="bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">Nova</span>
             </span>
           </Link>
 

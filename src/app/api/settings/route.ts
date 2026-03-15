@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS = {
     defaultFooter: "Pour vous désabonner, répondez avec \"DÉSABONNER\" dans le sujet.",
     provider: "smtp",
     providerStatus: "not_configured",
-    logoUrl: "/vision-lavage-logo.png",
+    logoUrl: "/leadnova-logo.png",
     logoEnabled: true,
     smtpHost: "",
     smtpPort: "587",
