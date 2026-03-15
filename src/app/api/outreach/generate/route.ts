@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateOutreachEmail, generateFallbackEmail } from "@/lib/outreach";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 export async function POST(request: NextRequest) {
+  try {
+  const ctx = await requireWorkspaceContext();
   const body = await request.json();
   const { prospectId } = body;
 
@@ -13,8 +16,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: prospectId },
+  const prospect = await prisma.prospect.findFirst({
+    where: { id: prospectId, workspaceId: ctx.workspaceId },
   });
 
   if (!prospect) {
@@ -40,5 +43,8 @@ export async function POST(request: NextRequest) {
       industry: prospect.industry,
     });
     return NextResponse.json({ ...fallback, fallback: true });
+  }
+  } catch (error) {
+    return handleWorkspaceError(error);
   }
 }

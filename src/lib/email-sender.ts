@@ -78,7 +78,8 @@ async function sendViaResend(
   subject: string,
   html: string,
   text: string,
-  senderInfo: SenderInfo
+  senderInfo: SenderInfo,
+  unsubscribeUrl?: string
 ): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY non configurée");
@@ -91,6 +92,10 @@ async function sendViaResend(
     html,
     text,
     ...(senderInfo.replyTo ? { replyTo: senderInfo.replyTo } : {}),
+    headers: unsubscribeUrl ? {
+      "List-Unsubscribe": `<${unsubscribeUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    } : undefined,
   });
 }
 
@@ -163,7 +168,8 @@ export async function canSendEmail(): Promise<{
 export async function sendEmail(
   prospectId: string,
   subject: string,
-  body: string
+  body: string,
+  campaignId?: string
 ): Promise<{ success: boolean; error?: string }> {
   const prospect = await prisma.prospect.findUnique({
     where: { id: prospectId },
@@ -187,6 +193,7 @@ export async function sendEmail(
   const activity = await prisma.emailActivity.create({
     data: {
       prospectId,
+      campaignId: campaignId || null,
       emailSubject: subject,
       emailBody: body,
       sentAt: new Date(),
@@ -198,13 +205,16 @@ export async function sendEmail(
   const trackingPixelUrl = appUrl
     ? `${appUrl}/api/track/open/${activity.id}`
     : undefined;
+  const unsubscribeUrl = appUrl
+    ? `${appUrl}/api/track/unsubscribe/${activity.id}`
+    : undefined;
 
-  const html = wrapInEmailTemplate(body, trackingPixelUrl);
-  const text = body + getTextFooter();
+  const html = wrapInEmailTemplate(body, trackingPixelUrl, unsubscribeUrl);
+  const text = body + getTextFooter(unsubscribeUrl);
 
   try {
     if (senderInfo.provider === "resend") {
-      await sendViaResend(prospect.email, subject, html, text, senderInfo);
+      await sendViaResend(prospect.email, subject, html, text, senderInfo, unsubscribeUrl);
     } else {
       await sendViaSmtp(prospect.email, subject, html, text, senderInfo);
     }

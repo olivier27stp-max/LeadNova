@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { setSessionCookie } from "@/lib/session";
-
-function hashPassword(password: string): string {
-  return createHash("sha256").update(password).digest("hex");
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,7 +33,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (hashPassword(password) !== user.passwordHash) {
+    // Check password: support both bcrypt and legacy SHA-256
+    let passwordValid = false;
+    const isBcrypt = user.passwordHash.startsWith("$2");
+
+    if (isBcrypt) {
+      passwordValid = await bcrypt.compare(password, user.passwordHash);
+    } else {
+      // Legacy SHA-256 hash (64 hex chars)
+      const sha256Hash = createHash("sha256").update(password).digest("hex");
+      passwordValid = sha256Hash === user.passwordHash;
+
+      // Migrate to bcrypt on successful login
+      if (passwordValid) {
+        const bcryptHash = await bcrypt.hash(password, 12);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { passwordHash: bcryptHash },
+        });
+      }
+    }
+
+    if (!passwordValid) {
       return NextResponse.json(
         { error: "Identifiants invalides" },
         { status: 401 }

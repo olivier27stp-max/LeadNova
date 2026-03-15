@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTheme } from "@/components/ThemeProvider";
 import { motion, AnimatePresence } from "motion/react";
+import { cn } from "@/lib/utils";
 import AiAssistButton from "@/components/AiAssistButton";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -46,6 +47,7 @@ import {
   AlertTriangle,
   Info,
   Send,
+  Loader2,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────
@@ -183,7 +185,6 @@ const SECTIONS = [
   { id: "prospects", label: "Prospects", icon: UserSearch },
   { id: "campaigns", label: "Campagnes", icon: Megaphone },
   { id: "automation", label: "Automatisation", icon: Zap },
-  { id: "templates", label: "Templates email", icon: FileText },
   { id: "targeting", label: "Ciblage recherche", icon: Target },
   { id: "archive", label: "Archive", icon: Archive },
   { id: "appearance", label: "Apparence", icon: Palette },
@@ -1638,220 +1639,6 @@ export default function SettingsPage() {
                   />
                 </div>
               </div>
-            </SectionCard>
-          </motion.div>
-        );
-
-      // === TEMPLATES ===
-      case "templates":
-        return (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            <SectionCard
-              title="Templates d'email"
-              description="Gérez vos modèles de messages réutilisables."
-            >
-              <div className="flex justify-end mb-2">
-                <Button
-                  onClick={() => setShowNewTemplate(!showNewTemplate)}
-                  size="sm"
-                >
-                  <Plus className="size-4" />
-                  Nouveau template
-                </Button>
-              </div>
-
-              <AnimatePresence>
-                {showNewTemplate && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="bg-background-subtle rounded-lg p-4 mb-4 space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <Input
-                          value={newTemplateName}
-                          onChange={(e) =>
-                            setNewTemplateName(e.target.value)
-                          }
-                          placeholder="Nom du template"
-                        />
-                        <Select
-                          value={newTemplateType}
-                          onChange={(e) =>
-                            setNewTemplateType(e.target.value)
-                          }
-                        >
-                          <option value="premier_contact">
-                            Premier contact
-                          </option>
-                          <option value="follow_up">Follow-up</option>
-                          <option value="relance">Relance</option>
-                          <option value="reponse">
-                            Réponse simple
-                          </option>
-                          <option value="custom">Personnalisé</option>
-                        </Select>
-                      </div>
-                      <Input
-                        value={newTemplateSubject}
-                        onChange={(e) =>
-                          setNewTemplateSubject(e.target.value)
-                        }
-                        placeholder="Sujet du email"
-                      />
-                      <TextArea
-                        value={newTemplateBody}
-                        onChange={setNewTemplateBody}
-                        placeholder="Corps du email..."
-                        rows={6}
-                      />
-                      <Button
-                        onClick={handleCreateTemplate}
-                        variant="success"
-                        size="sm"
-                      >
-                        Créer
-                      </Button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Editing modal */}
-              <AnimatePresence>
-                {editingTemplate && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
-                  >
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-card rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[80vh] overflow-y-auto border border-border"
-                    >
-                      <div className="flex justify-between mb-4">
-                        <h3 className="text-lg font-semibold text-foreground">
-                          Modifier le template
-                        </h3>
-                        <Button
-                          onClick={() => setEditingTemplate(null)}
-                          variant="ghost"
-                          size="icon-sm"
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                      <div className="space-y-3">
-                        <FieldGroup label="Nom">
-                          <Input
-                            value={editingTemplate.name}
-                            onChange={(e) =>
-                              setEditingTemplate({
-                                ...editingTemplate,
-                                name: e.target.value,
-                              })
-                            }
-                          />
-                        </FieldGroup>
-                        <FieldGroup label="Sujet">
-                          <Input
-                            value={editingTemplate.subject}
-                            onChange={(e) =>
-                              setEditingTemplate({
-                                ...editingTemplate,
-                                subject: e.target.value,
-                              })
-                            }
-                          />
-                        </FieldGroup>
-                        <FieldGroup label="Corps">
-                          <TextArea
-                            value={editingTemplate.body}
-                            onChange={(v) =>
-                              setEditingTemplate({
-                                ...editingTemplate,
-                                body: v,
-                              })
-                            }
-                            rows={8}
-                          />
-                        </FieldGroup>
-                        <Toggle
-                          checked={editingTemplate.isDefault}
-                          onChange={(v) =>
-                            setEditingTemplate({
-                              ...editingTemplate,
-                              isDefault: v,
-                            })
-                          }
-                          label="Template par défaut"
-                        />
-                        <Button onClick={handleUpdateTemplate}>
-                          Enregistrer
-                        </Button>
-                      </div>
-                    </motion.div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {templates.length === 0 ? (
-                <p className="text-foreground-muted text-sm py-4">
-                  Aucun template. Créez votre premier modèle
-                  d&apos;email.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {templates.map((t) => (
-                    <div
-                      key={t.id}
-                      className="flex items-center justify-between p-3 border border-border rounded-lg hover:bg-card-hover transition-colors"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-foreground">
-                            {t.name}
-                          </p>
-                          {t.isDefault && (
-                            <Badge variant="primary">
-                              Par défaut
-                            </Badge>
-                          )}
-                          <Badge variant="default">{t.type}</Badge>
-                        </div>
-                        <p className="text-xs text-foreground-muted mt-0.5">
-                          {t.subject || "(aucun sujet)"}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          onClick={() => setEditingTemplate(t)}
-                          variant="ghost"
-                          size="sm"
-                        >
-                          Modifier
-                        </Button>
-                        <Button
-                          onClick={() => handleDeleteTemplate(t.id)}
-                          variant="danger-ghost"
-                          size="sm"
-                        >
-                          Archiver
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </SectionCard>
           </motion.div>
         );
@@ -3333,6 +3120,7 @@ export default function SettingsPage() {
             </SectionCard>
           </motion.div>
         );
+
     }
   }
 
@@ -3348,27 +3136,55 @@ export default function SettingsPage() {
       <div className="flex gap-6">
         {/* Sidebar */}
         <nav className="w-52 shrink-0">
-          <div className="sticky top-24 space-y-0.5">
-            {SECTIONS.map((s) => {
-              const Icon = s.icon;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    setActiveSection(s.id);
-                    setHasUnsaved(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2.5 ${
-                    activeSection === s.id
-                      ? "bg-primary-subtle text-primary font-medium"
-                      : "text-foreground-muted hover:bg-card-hover"
-                  }`}
-                >
-                  <Icon className="size-4 shrink-0" />
-                  {s.label}
-                </button>
-              );
-            })}
+          <div className="sticky top-24 space-y-4">
+            {([
+              {
+                label: "Compte",
+                ids: ["company", "team"],
+              },
+              {
+                label: "Prospection",
+                ids: ["prospects", "targeting", "archive"],
+              },
+              {
+                label: "Campagnes",
+                ids: ["campaigns", "automation"],
+              },
+              {
+                label: "Plateforme",
+                ids: ["appearance", "security", "subscription", "activity"],
+              },
+            ] as const).map((group) => (
+              <div key={group.label}>
+                <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-widest text-foreground-muted/60">
+                  {group.label}
+                </p>
+                <div className="space-y-0.5">
+                  {group.ids.map((id) => {
+                    const s = SECTIONS.find((sec) => sec.id === id);
+                    if (!s) return null;
+                    const Icon = s.icon;
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          setActiveSection(s.id);
+                          setHasUnsaved(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2.5 ${
+                          activeSection === s.id
+                            ? "bg-primary-subtle text-primary font-medium"
+                            : "text-foreground-muted hover:bg-card-hover"
+                        }`}
+                      >
+                        <Icon className="size-4 shrink-0" />
+                        {s.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </nav>
 

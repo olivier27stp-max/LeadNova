@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  try {
+  const ctx = await requireWorkspaceContext();
   const { id: campaignId } = await params;
   const { searchParams } = new URL(req.url);
   const range = searchParams.get("range") || "all";
@@ -20,6 +23,15 @@ export async function GET(
     dateFrom = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   }
 
+  // Verify campaign belongs to workspace
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: campaignId, workspaceId: ctx.workspaceId },
+    select: { id: true },
+  });
+  if (!campaign) {
+    return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
+  }
+
   // Campaign contacts
   const campaignContacts = await prisma.campaignContact.findMany({
     where: { campaignId },
@@ -33,17 +45,17 @@ export async function GET(
   if (prospectIds.length === 0) {
     return NextResponse.json({
       kpis: { sent: 0, delivered: 0, opened: 0, replied: 0, bounced: 0, interested: 0, converted: 0, unsubscribed: 0 },
-      rates: { deliveryRate: 0, openRate: 0, replyRate: 0, bounceRate: 0 },
+      rates: { deliveryRate: 0, openRate: 0, replyRate: 0, bounceRate: 0, unsubscribeRate: 0 },
       timeline: [],
       contacts: [],
       totalContacts: 0,
     });
   }
 
-  // Email activities
+  // Email activities — query by campaignId directly for accuracy
   const activities = await prisma.emailActivity.findMany({
     where: {
-      prospectId: { in: prospectIds },
+      campaignId,
       ...(dateFrom ? { sentAt: { gte: dateFrom } } : {}),
     },
     select: {
@@ -53,6 +65,7 @@ export async function GET(
       openedAt: true,
       replyReceived: true,
       bounce: true,
+      unsubscribed: true,
     },
     orderBy: { sentAt: "asc" },
   });
@@ -70,21 +83,15 @@ export async function GET(
     (cc) => cc.prospect.status === "QUALIFIED"
   ).length;
 
-  // Unsubscribes: campaign contacts whose email is in the blacklist
-  const contactEmails = campaignContacts
-    .map((cc) => cc.prospect.email)
-    .filter((e): e is string => !!e);
-  const blacklistedEmails = await prisma.blacklist.findMany({
-    where: { email: { in: contactEmails } },
-    select: { email: true },
-  });
-  const unsubscribed = blacklistedEmails.length;
+  // Unsubscribes: from EmailActivity unsubscribed field
+  const unsubscribed = activities.filter((e) => e.unsubscribed).length;
 
   // Rates
   const deliveryRate = sent > 0 ? Math.round((delivered / sent) * 1000) / 10 : 0;
   const openRate = delivered > 0 ? Math.round((opened / delivered) * 1000) / 10 : 0;
   const replyRate = sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0;
   const bounceRate = sent > 0 ? Math.round((bounced / sent) * 1000) / 10 : 0;
+  const unsubscribeRate = sent > 0 ? Math.round((unsubscribed / sent) * 1000) / 10 : 0;
 
   // Timeline grouped by day
   const timelineMap = new Map<string, { sent: number; opened: number; replied: number; bounced: number }>();
@@ -121,13 +128,17 @@ export async function GET(
     openedAt: e.openedAt,
     replyReceived: e.replyReceived,
     bounce: e.bounce,
+    unsubscribed: e.unsubscribed,
   }));
 
   return NextResponse.json({
     kpis: { sent, delivered, opened, replied, bounced, interested, converted, unsubscribed },
-    rates: { deliveryRate, openRate, replyRate, bounceRate },
+    rates: { deliveryRate, openRate, replyRate, bounceRate, unsubscribeRate },
     timeline,
     contacts,
     totalContacts: campaignContacts.length,
   });
+  } catch (error) {
+    return handleWorkspaceError(error);
+  }
 }

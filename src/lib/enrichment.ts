@@ -39,7 +39,8 @@ const OBFUSCATED_AT = /\s*[\[({]\s*(?:at|@|arobase|chez)\s*[\])}]\s*/gi;
 const OBFUSCATED_DOT = /\s*[\[({]\s*(?:dot|point|\.)\s*[\])}]\s*/gi;
 
 // ─── Max pages to fetch per prospect (performance cap) ──
-const MAX_PAGES_PER_PROSPECT = 12;
+// Can be overridden by deep enrichment mode
+let MAX_PAGES_PER_PROSPECT = 12;
 
 // ─── Pages to scan (French + English, ordered by priority) ──
 const CONTACT_PATHS = [
@@ -53,6 +54,27 @@ const CONTACT_PATHS = [
   "/equipe",
   "/team",
   "/info",
+];
+
+// Extra paths tried only during deep enrichment
+const DEEP_CONTACT_PATHS = [
+  "/fr/contact",
+  "/en/contact",
+  "/coordonnees",
+  "/coordonnées",
+  "/rejoindre",
+  "/rejoignez-nous",
+  "/partenaires",
+  "/services",
+  "/soumission",
+  "/estimation",
+  "/devis",
+  "/bureau",
+  "/offices",
+  "/location",
+  "/trouver-nous",
+  "/sitemap",
+  "/plan-du-site",
 ];
 
 // Keywords to identify contact-related links in the page
@@ -1501,7 +1523,8 @@ async function enrichWithTimeout(prospectId: string): Promise<Awaited<ReturnType
 // ENRICH BY IDS (selected prospects, re-enriches already enriched)
 // ═══════════════════════════════════════════════════════════
 export async function enrichByIds(
-  ids: string[]
+  ids: string[],
+  workspaceId: string = "default"
 ): Promise<{ enriched: number; total: number; skipped: number; cancelled: boolean; failed: number; noData: number }> {
   const { setEnrichProgress, updateEnrichProgress, isCancelEnrichRequested } = await import("./enrich-progress");
 
@@ -1521,14 +1544,14 @@ export async function enrichByIds(
     noData: 0,
     currentProspect: "",
     startedAt: Date.now(),
-  });
+  }, workspaceId);
 
   let enriched = 0;
   let failed = 0;
   let noData = 0;
   for (const prospect of prospects) {
-    if (isCancelEnrichRequested()) break;
-    updateEnrichProgress({ currentProspect: prospect.companyName });
+    if (isCancelEnrichRequested(workspaceId)) break;
+    updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
     try {
       const result = await enrichWithTimeout(prospect.id);
       const foundSomething = !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
@@ -1544,12 +1567,12 @@ export async function enrichByIds(
       const msg = error instanceof Error ? error.message : "unknown";
       console.error(`[enrichByIds] Failed for ${prospect.companyName}: ${msg}`);
     }
-    updateEnrichProgress({ enriched, failed, noData });
+    updateEnrichProgress({ enriched, failed, noData }, workspaceId);
     // Yield DB connection so other pages/requests can query
     await yieldForDb();
   }
 
-  const wasCancelled = isCancelEnrichRequested();
+  const wasCancelled = isCancelEnrichRequested(workspaceId);
   setEnrichProgress({
     status: wasCancelled ? "cancelled" : "done",
     target: prospects.length,
@@ -1558,7 +1581,7 @@ export async function enrichByIds(
     noData,
     currentProspect: "",
     startedAt: 0,
-  });
+  }, workspaceId);
 
   // Log activity
   await logActivity({
@@ -1579,10 +1602,201 @@ export async function enrichByIds(
 }
 
 // ═══════════════════════════════════════════════════════════
+// DEEP ENRICHMENT — searches directories + increased page limit
+// ═══════════════════════════════════════════════════════════
+
+// Search email in Quebec business directories (PagesJaunes, Canada411, Yelp, etc.)
+async function deepSearchEmailInDirectories(companyName: string, city: string | null, domain: string | null): Promise<string[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return [];
+
+  const emails: string[] = [];
+  const queries = [
+    city
+      ? `"${companyName}" "${city}" courriel OR email OR contact`
+      : `"${companyName}" Québec courriel OR email OR contact`,
+    `site:pagesjaunes.ca "${companyName}"`,
+    `site:canada411.ca "${companyName}"`,
+    `site:yelp.ca "${companyName}"${city ? ` "${city}"` : ""}`,
+    domain ? `"@${domain}"` : null,
+  ].filter(Boolean) as string[];
+
+  for (const query of queries) {
+    try {
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ q: query, gl: "ca", hl: "fr", num: 5 }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as { organic?: Array<{ snippet?: string; link?: string }>; knowledgeGraph?: { description?: string } };
+      const snippets = [
+        data.knowledgeGraph?.description,
+        ...(data.organic || []).map((r) => r.snippet),
+      ].filter((s): s is string => !!s);
+
+      for (const snippet of snippets) {
+        emails.push(...extractEmails(snippet));
+      }
+
+      // Also try to scrape the first PagesJaunes / Canada411 result page directly
+      const directoryLinks = (data.organic || [])
+        .map((r) => r.link)
+        .filter((link): link is string => !!link && (
+          link.includes("pagesjaunes.ca") ||
+          link.includes("canada411.ca") ||
+          link.includes("yelp.ca")
+        ));
+      for (const link of directoryLinks.slice(0, 2)) {
+        const html = await fetchPage(link, 10000);
+        if (html) emails.push(...extractEmails(html));
+      }
+    } catch {
+      // ignore — directory search is best-effort
+    }
+  }
+
+  return [...new Set(emails.map((e) => e.toLowerCase().trim()))].filter(isValidEmail);
+}
+
+export async function deepEnrichByIds(
+  ids: string[],
+  workspaceId: string = "default"
+): Promise<{ enriched: number; total: number; skipped: number; cancelled: boolean; failed: number; noData: number }> {
+  const { setEnrichProgress, updateEnrichProgress, isCancelEnrichRequested } = await import("./enrich-progress");
+
+  const prospects = await prisma.prospect.findMany({
+    where: { id: { in: ids }, archivedAt: null },
+    select: { id: true, companyName: true, city: true, website: true },
+  });
+
+  setEnrichProgress({
+    status: "running",
+    target: prospects.length,
+    enriched: 0,
+    failed: 0,
+    noData: 0,
+    currentProspect: "",
+    startedAt: Date.now(),
+  }, workspaceId);
+
+  // Switch to deep mode: more pages, extra contact paths in enrichProspect
+  MAX_PAGES_PER_PROSPECT = 25;
+
+  let enriched = 0;
+  let failed = 0;
+  let noData = 0;
+
+  try {
+    for (const prospect of prospects) {
+      if (isCancelEnrichRequested(workspaceId)) break;
+      updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
+
+      try {
+        // 1. Clear old email so enrichProspect discovers fresh data
+        await prisma.prospect.update({
+          where: { id: prospect.id },
+          data: {
+            email: null,
+            emailStatus: null,
+            emailVerifiedAt: null,
+            emailVerificationResult: { set: null },
+          },
+        });
+        await yieldForDb();
+
+        // 2. Pre-seed: search Quebec directories for email
+        const domain = prospect.website ? (() => {
+          try { return new URL(normalizeBaseUrl(prospect.website!)).hostname.replace(/^www\./, ""); } catch { return null; }
+        })() : null;
+        const directoryEmails = await deepSearchEmailInDirectories(prospect.companyName, prospect.city, domain);
+        if (directoryEmails.length > 0) {
+          console.log(`[deepEnrich] ${prospect.companyName} — directory found: ${directoryEmails.join(", ")}`);
+          // Pre-seed best email so enrichProspect can compare/confirm it
+          await prisma.prospect.update({
+            where: { id: prospect.id },
+            data: { email: directoryEmails[0] },
+          });
+          await yieldForDb();
+        }
+
+        // 3. Run enrichProspect with extra contact paths active
+        // Temporarily append deep paths to CONTACT_PATHS for this run
+        const originalLen = CONTACT_PATHS.length;
+        CONTACT_PATHS.push(...DEEP_CONTACT_PATHS.filter((p) => !CONTACT_PATHS.includes(p)));
+
+        try {
+          const result = await enrichWithTimeout(prospect.id);
+          const foundSomething = !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
+          if (foundSomething) enriched++;
+          else if (result.noData) noData++;
+          else failed++;
+
+          // Auto-verify new email found during deep enrichment
+          if (result.email) {
+            try {
+              const { verifyEmail } = await import("./email-verifier");
+              const verResult = await verifyEmail(result.email);
+              await prisma.prospect.update({
+                where: { id: prospect.id },
+                data: {
+                  emailStatus: verResult.status,
+                  emailVerifiedAt: new Date(),
+                  emailVerificationResult: verResult as object,
+                },
+              });
+              await yieldForDb();
+              console.log(`[deepEnrich] ${prospect.companyName} — email verified: ${result.email} → ${verResult.status}`);
+            } catch (verErr) {
+              console.warn(`[deepEnrich] Email verification failed for ${prospect.companyName}: ${verErr}`);
+            }
+          }
+        } finally {
+          // Restore original CONTACT_PATHS length
+          CONTACT_PATHS.splice(originalLen);
+        }
+      } catch (error) {
+        failed++;
+        console.error(`[deepEnrich] Failed for ${prospect.companyName}: ${error instanceof Error ? error.message : error}`);
+      }
+
+      updateEnrichProgress({ enriched, failed, noData }, workspaceId);
+      await yieldForDb();
+    }
+  } finally {
+    // Always restore normal page limit
+    MAX_PAGES_PER_PROSPECT = 12;
+  }
+
+  const wasCancelled = isCancelEnrichRequested(workspaceId);
+  setEnrichProgress({
+    status: wasCancelled ? "cancelled" : "done",
+    target: prospects.length,
+    enriched,
+    failed,
+    noData,
+    currentProspect: "",
+    startedAt: 0,
+  }, workspaceId);
+
+  await logActivity({
+    action: "deep_enrichment_completed",
+    type: enriched > 0 ? "success" : "info",
+    title: "Approfondissement terminé",
+    details: `${enriched} prospect${enriched > 1 ? "s" : ""} enrichi${enriched > 1 ? "s" : ""} sur ${prospects.length}`,
+    metadata: { total: prospects.length, enriched, failed, noData, cancelled: wasCancelled },
+  });
+
+  return { enriched, total: prospects.length, skipped: 0, cancelled: wasCancelled, failed, noData };
+}
+
+// ═══════════════════════════════════════════════════════════
 // BATCH ENRICHMENT
 // ═══════════════════════════════════════════════════════════
 export async function enrichBatch(
-  limit: number = 10
+  limit: number = 10,
+  workspaceId: string = "default"
 ): Promise<{ enriched: number; total: number; cancelled: boolean; failed: number; noData: number }> {
   const { setEnrichProgress, updateEnrichProgress, isCancelEnrichRequested } = await import("./enrich-progress");
 
@@ -1600,14 +1814,14 @@ export async function enrichBatch(
     noData: 0,
     currentProspect: "",
     startedAt: Date.now(),
-  });
+  }, workspaceId);
 
   let enriched = 0;
   let failed = 0;
   let noData = 0;
   for (const prospect of prospects) {
-    if (isCancelEnrichRequested()) break;
-    updateEnrichProgress({ currentProspect: prospect.companyName });
+    if (isCancelEnrichRequested(workspaceId)) break;
+    updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
     try {
       const result = await enrichWithTimeout(prospect.id);
       const foundSomething = !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
@@ -1623,12 +1837,12 @@ export async function enrichBatch(
       const msg = error instanceof Error ? error.message : "unknown";
       console.error(`[enrichBatch] Failed for ${prospect.companyName}: ${msg}`);
     }
-    updateEnrichProgress({ enriched, failed, noData });
+    updateEnrichProgress({ enriched, failed, noData }, workspaceId);
     // Yield DB connection so other pages/requests can query
     await yieldForDb();
   }
 
-  const wasCancelled = isCancelEnrichRequested();
+  const wasCancelled = isCancelEnrichRequested(workspaceId);
   setEnrichProgress({
     status: wasCancelled ? "cancelled" : "done",
     target: prospects.length,
@@ -1637,7 +1851,7 @@ export async function enrichBatch(
     noData,
     currentProspect: "",
     startedAt: 0,
-  });
+  }, workspaceId);
 
   // Log activity
   await logActivity({

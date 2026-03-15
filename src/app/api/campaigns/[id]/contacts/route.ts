@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 // GET: list all prospects with selection status for this campaign
 export async function GET(
@@ -7,6 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireWorkspaceContext();
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || "";
@@ -14,8 +16,17 @@ export async function GET(
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
-    // Build filter (exclude archived)
-    const where: Record<string, unknown> = { archivedAt: null };
+    // Verify campaign belongs to workspace
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
+      select: { id: true },
+    });
+    if (!campaign) {
+      return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
+    }
+
+    // Build filter — scope to workspace, exclude archived
+    const where: Record<string, unknown> = { archivedAt: null, workspaceId: ctx.workspaceId };
     if (contactType) {
       where.contactType = contactType;
     }
@@ -64,11 +75,7 @@ export async function GET(
       selectedCount: selectedContacts.length,
     });
   } catch (error) {
-    console.error("Campaign contacts fetch error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch contacts" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }
 
@@ -78,6 +85,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireWorkspaceContext();
     const { id } = await params;
     const body = await request.json();
     const { prospectIds } = body as { prospectIds: string[] };
@@ -89,7 +97,15 @@ export async function POST(
       );
     }
 
-    // Use createMany with skipDuplicates
+    // Verify campaign belongs to workspace
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
+      select: { id: true },
+    });
+    if (!campaign) {
+      return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
+    }
+
     const result = await prisma.campaignContact.createMany({
       data: prospectIds.map((prospectId) => ({
         campaignId: id,
@@ -100,11 +116,7 @@ export async function POST(
 
     return NextResponse.json({ added: result.count });
   } catch (error) {
-    console.error("Campaign contacts add error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to add contacts" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }
 
@@ -114,6 +126,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireWorkspaceContext();
     const { id } = await params;
     const body = await request.json();
     const { prospectIds } = body as { prospectIds: string[] };
@@ -123,6 +136,15 @@ export async function DELETE(
         { error: "prospectIds array is required" },
         { status: 400 }
       );
+    }
+
+    // Verify campaign belongs to workspace
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
+      select: { id: true },
+    });
+    if (!campaign) {
+      return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
     }
 
     const result = await prisma.campaignContact.deleteMany({
@@ -134,10 +156,6 @@ export async function DELETE(
 
     return NextResponse.json({ removed: result.count });
   } catch (error) {
-    console.error("Campaign contacts remove error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to remove contacts" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }

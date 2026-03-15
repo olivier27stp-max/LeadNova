@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowLeft,
@@ -13,6 +13,7 @@ import {
   Search,
   Users,
   AlertTriangle,
+  ShieldCheck,
   RefreshCw,
   Clock,
   Pencil,
@@ -109,6 +110,7 @@ const VARIABLE_DISPLAY: Record<string, string> = {
 
 export default function CampaignDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const campaignId = params.id as string;
 
   const [campaign, setCampaign] = useState<Campaign | null>(null);
@@ -183,6 +185,7 @@ export default function CampaignDetailPage() {
   // Send state
   const [showSendConfirm, setShowSendConfirm] = useState(false);
   const [sending, setSending] = useState(false);
+  const [unverifiedStats, setUnverifiedStats] = useState<{ total: number; unverified: number } | null>(null);
   const [sendResult, setSendResult] = useState<{
     sent: number;
     failed: number;
@@ -241,6 +244,15 @@ export default function CampaignDetailPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, [campaignId]);
+
+  // ─── Fetch unverified email stats for this campaign ─
+  useEffect(() => {
+    if (!campaignId) return;
+    fetch(`/api/verify-emails?campaignId=${campaignId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setUnverifiedStats(data); })
+      .catch(console.error);
   }, [campaignId]);
 
   // ─── Fetch settings (automation + logo) ────────────
@@ -659,19 +671,50 @@ export default function CampaignDetailPage() {
         />
       )}
 
-      {/* Send Confirm Modal */}
+      {/* Send Confirm Modal — with smart verification gate */}
       {showSendConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-foreground">Confirmer l'envoi</h2>
+            <h2 className="text-lg font-semibold text-foreground">Confirmer l&apos;envoi</h2>
             <p className="text-sm text-foreground-secondary">
-              Vous êtes sur le point d'envoyer le message de cette campagne à{" "}
+              Vous êtes sur le point d&apos;envoyer le message de cette campagne à{" "}
               <span className="font-semibold text-foreground">{selectedCount} contact{selectedCount !== 1 ? "s" : ""}</span>.
               Cette action est irréversible.
             </p>
+
+            {/* Unverified emails warning — smart gate */}
+            {unverifiedStats && unverifiedStats.unverified > 0 && (
+              <div className="rounded-lg border border-warning/30 bg-warning/5 p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="size-4 text-warning shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-warning font-medium">
+                      {unverifiedStats.unverified} email{unverifiedStats.unverified !== 1 ? "s" : ""} non vérifié{unverifiedStats.unverified !== 1 ? "s" : ""}
+                    </p>
+                    <p className="text-xs text-foreground-muted mt-1">
+                      {unverifiedStats.unverified} sur {unverifiedStats.total} adresses de cette campagne n&apos;ont pas été vérifiées.
+                      Risque de rebonds élevé.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setShowSendConfirm(false);
+                    const params = new URLSearchParams({ from: "campaign", campaign: campaign.name || "" });
+                    router.push(`/email-verifier?${params}`);
+                  }}
+                >
+                  <ShieldCheck className="size-4" />
+                  Vérifier les emails maintenant
+                </Button>
+              </div>
+            )}
+
             {(!campaign.emailSubject || !campaign.emailBody) && (
               <p className="text-sm text-warning font-medium">
-                ⚠ Le message n'est pas encore configuré. Renseignez le sujet et le corps dans l'onglet Message.
+                ⚠ Le message n&apos;est pas encore configuré. Renseignez le sujet et le corps dans l&apos;onglet Message.
               </p>
             )}
             <div className="flex gap-3 justify-end pt-2">
@@ -684,7 +727,7 @@ export default function CampaignDetailPage() {
                 onClick={handleSend}
               >
                 <Send />
-                Confirmer l'envoi
+                {unverifiedStats && unverifiedStats.unverified > 0 ? "Envoyer quand même" : "Confirmer l'envoi"}
               </Button>
             </div>
           </div>

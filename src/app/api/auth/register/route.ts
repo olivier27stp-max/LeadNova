@@ -4,23 +4,8 @@ import { prisma } from "@/lib/db";
 import { setSessionCookie } from "@/lib/session";
 import { setWorkspaceCookie } from "@/lib/workspace";
 
-// GET — check if any users exist
-export async function GET() {
-  const count = await prisma.user.count();
-  return NextResponse.json({ hasUsers: count > 0 });
-}
-
-// POST — create first admin account (only if no users exist)
 export async function POST(request: NextRequest) {
   try {
-    const count = await prisma.user.count();
-    if (count > 0) {
-      return NextResponse.json(
-        { error: "Un compte existe déjà. Utilisez l'inscription." },
-        { status: 403 }
-      );
-    }
-
     const { name, email, password } = await request.json();
 
     if (!name || !email || !password) {
@@ -29,6 +14,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const trimmedEmail = email.toLowerCase().trim();
+    const trimmedName = name.trim();
+
     if (password.length < 8) {
       return NextResponse.json(
         { error: "Le mot de passe doit contenir au moins 8 caractères" },
@@ -36,14 +25,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check if email already exists
+    const existing = await prisma.user.findUnique({
+      where: { email: trimmedEmail },
+    });
+    if (existing) {
+      return NextResponse.json(
+        { error: "Un compte existe déjà avec cet email" },
+        { status: 409 }
+      );
+    }
+
+    // Hash password with bcrypt
     const passwordHash = await bcrypt.hash(password, 12);
 
+    // Create user
     const user = await prisma.user.create({
       data: {
-        name: name.trim(),
-        email: email.toLowerCase().trim(),
+        name: trimmedName,
+        email: trimmedEmail,
         passwordHash,
-        role: "ADMIN",
+        role: "USER",
         active: true,
       },
     });
@@ -51,7 +53,7 @@ export async function POST(request: NextRequest) {
     // Create default workspace
     const workspace = await prisma.workspace.create({
       data: {
-        name: name.trim(),
+        name: `${trimmedName}`,
       },
     });
 
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Create default settings
+    // Create default settings for workspace
     await prisma.appSettings.create({
       data: {
         workspaceId: workspace.id,
@@ -72,13 +74,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Log activity
     await prisma.activityLog.create({
       data: {
         workspaceId: workspace.id,
-        action: "user_created",
-        title: "Premier compte créé",
+        action: "user_registered",
+        title: "Nouveau compte créé",
         type: "success",
-        details: `Compte administrateur créé: ${user.name} (${user.email})`,
+        details: `${trimmedName} (${trimmedEmail}) a créé un compte`,
         userId: user.id,
       },
     });
@@ -93,7 +96,7 @@ export async function POST(request: NextRequest) {
     setWorkspaceCookie(res, workspace.id);
     return res;
   } catch (error) {
-    console.error("Setup error:", error);
+    console.error("Register error:", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }

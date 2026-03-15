@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { Sparkles, Mic, Square, X, Loader2, RefreshCw } from "lucide-react";
+import { Sparkles, Mic, Square, X, Loader2, RefreshCw, Plus, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -144,6 +144,25 @@ export default function AiAssistButton({ type, currentItems, onApply }: AiAssist
     setOpen(false);
   };
 
+  const handleAddSingle = (item: string) => {
+    if (!result) return;
+    onApply({ add: [item], remove: [] });
+    // Remove item from result list
+    setResult({
+      ...result,
+      add: result.add.filter((i) => i !== item),
+    });
+  };
+
+  const handleRemoveSingle = (item: string) => {
+    if (!result) return;
+    onApply({ add: [], remove: [item] });
+    setResult({
+      ...result,
+      remove: result.remove.filter((i) => i !== item),
+    });
+  };
+
   // ─── Close / reset ──────────────────────────────────────
 
   const handleClose = () => {
@@ -254,24 +273,37 @@ export default function AiAssistButton({ type, currentItems, onApply }: AiAssist
               {/* Items to add */}
               {result.add.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-success mb-1">
-                    + {result.add.length} {label} à ajouter
+                  <p className="text-xs font-medium text-success mb-2">
+                    {result.add.length} {label} suggéré{result.add.length > 1 ? "s" : ""} — cliquez sur <span className="inline-flex items-center justify-center size-4 rounded-full bg-success text-white text-[10px] align-middle"><Plus className="size-2.5" /></span> pour ajouter
                   </p>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-col gap-1">
                     {result.add.map((item, i) => {
                       const alreadyExists = currentItems.includes(item);
                       return (
-                        <span
+                        <div
                           key={i}
                           className={cn(
-                            "inline-flex items-center rounded-full px-2.5 py-1 text-xs border",
+                            "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm border transition-colors",
                             alreadyExists
-                              ? "bg-background-muted text-foreground-muted border-border line-through"
-                              : "bg-success-subtle text-success border-success/20"
+                              ? "bg-background-muted text-foreground-muted border-border opacity-60"
+                              : "bg-success-subtle text-foreground border-success/20"
                           )}
                         >
-                          {alreadyExists ? "déjà" : "+"} {item}
-                        </span>
+                          <button
+                            onClick={() => !alreadyExists && handleAddSingle(item)}
+                            disabled={alreadyExists}
+                            className={cn(
+                              "shrink-0 flex items-center justify-center size-5 rounded-full border text-[11px] font-bold transition-colors",
+                              alreadyExists
+                                ? "border-border text-foreground-muted cursor-default"
+                                : "border-success bg-success text-white hover:bg-success/80 cursor-pointer"
+                            )}
+                            title={alreadyExists ? "Déjà ajouté" : "Ajouter ce mot-clé"}
+                          >
+                            {alreadyExists ? <span>✓</span> : <Plus className="size-3" />}
+                          </button>
+                          <span className={cn("flex-1", alreadyExists && "line-through")}>{item}</span>
+                        </div>
                       );
                     })}
                   </div>
@@ -281,17 +313,24 @@ export default function AiAssistButton({ type, currentItems, onApply }: AiAssist
               {/* Items to remove */}
               {result.remove.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-danger mb-1">
-                    - {result.remove.length} {label} à retirer
+                  <p className="text-xs font-medium text-danger mb-2">
+                    {result.remove.length} {label} à retirer
                   </p>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-col gap-1">
                     {result.remove.map((item, i) => (
-                      <span
+                      <div
                         key={i}
-                        className="inline-flex items-center rounded-full px-2.5 py-1 text-xs border bg-danger-subtle text-danger border-danger/20"
+                        className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm border bg-danger-subtle text-foreground border-danger/20"
                       >
-                        &times; {item}
-                      </span>
+                        <button
+                          onClick={() => handleRemoveSingle(item)}
+                          className="shrink-0 flex items-center justify-center size-5 rounded-full border border-danger bg-danger text-white hover:bg-danger/80 cursor-pointer transition-colors"
+                          title="Retirer ce mot-clé"
+                        >
+                          <Minus className="size-3" />
+                        </button>
+                        <span className="flex-1">{item}</span>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -299,14 +338,16 @@ export default function AiAssistButton({ type, currentItems, onApply }: AiAssist
 
               {/* Action buttons */}
               <div className="flex gap-2 pt-1">
-                <Button variant="success" size="sm" onClick={handleApply}>
-                  Appliquer
-                  {result.add.length > 0 && result.remove.length > 0
-                    ? ` (+${result.add.length} / -${result.remove.length})`
-                    : result.add.length > 0
-                    ? ` (+${result.add.length})`
-                    : ` (-${result.remove.length})`}
-                </Button>
+                {(result.add.length > 0 || result.remove.length > 0) && (
+                  <Button variant="success" size="sm" onClick={handleApply}>
+                    Tout appliquer
+                    {result.add.length > 0 && result.remove.length > 0
+                      ? ` (+${result.add.length} / -${result.remove.length})`
+                      : result.add.length > 0
+                      ? ` (+${result.add.length})`
+                      : ` (-${result.remove.length})`}
+                  </Button>
+                )}
                 <Button variant="secondary" size="sm" onClick={handleGenerate} disabled={loading}>
                   <RefreshCw className="size-3.5" />
                   Régénérer

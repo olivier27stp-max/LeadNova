@@ -9,6 +9,7 @@ import { Logo } from "@/components/ui/logo";
 import {
   LayoutDashboard,
   Users,
+  ShieldCheck,
   Megaphone,
   Settings,
   Sun,
@@ -22,6 +23,7 @@ import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
 const NAV_ITEMS = [
   { href: "/", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/prospects", label: "Prospects", icon: Users },
+  { href: "/email-verifier", label: "Email Vérificateur", icon: ShieldCheck },
   { href: "/campaigns", label: "Campagnes", icon: Megaphone },
   { href: "/settings", label: "Paramètres", icon: Settings },
 ];
@@ -60,7 +62,7 @@ export default function Header() {
         : Moon;
 
   // Hide header on auth pages
-  if (pathname === "/login") return null;
+  if (["/login", "/register", "/forgot-password", "/reset-password"].some((p) => pathname === p || pathname.startsWith(p + "/"))) return null;
 
   return (
     <nav className="sticky top-0 z-40 bg-card/80 backdrop-blur-lg border-b border-border">
@@ -83,21 +85,19 @@ export default function Header() {
                 key={href}
                 href={href}
                 className={cn(
-                  "flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-md transition-colors",
+                  "relative flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-md transition-colors",
                   isActive(href)
                     ? "text-foreground bg-background-muted"
                     : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
                 )}
               >
-                <span className="relative inline-flex">
-                  <Icon className="size-3.5" />
-                  {href === "/settings" && unsubscribeCount > 0 && (
-                    <span className="absolute -top-[5px] -right-[7px] min-w-[15px] h-[15px] px-[3px] rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none ring-[1.5px] ring-card/80 pointer-events-none">
-                      {unsubscribeCount > 9 ? "9+" : unsubscribeCount}
-                    </span>
-                  )}
-                </span>
+                <Icon className="size-3.5" />
                 {label}
+                {href === "/settings" && unsubscribeCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none ring-2 ring-card/80 pointer-events-none">
+                    {unsubscribeCount > 99 ? "99+" : unsubscribeCount}
+                  </span>
+                )}
               </Link>
             ))}
           </div>

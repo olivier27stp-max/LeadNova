@@ -6,7 +6,7 @@ import path from "path";
  * Compatible with Gmail, Outlook, Apple Mail, and all major clients.
  * Uses CID inline attachment for the logo image.
  */
-export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string): string {
+export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string, unsubscribeUrl?: string): string {
   const htmlBody = body
     .split(/\n\n+/)
     .map((para) =>
@@ -78,7 +78,9 @@ export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string): st
           <!-- Unsubscribe -->
           <tr>
             <td style="padding:16px 40px 32px 40px;text-align:center;color:#9ca3af;font-size:11px;">
-              Pour vous désabonner, répondez avec « DÉSABONNER » dans le sujet.
+              ${unsubscribeUrl
+                ? `<a href="${unsubscribeUrl}" style="color:#9ca3af;text-decoration:underline;">Se désabonner</a>`
+                : `Pour vous désabonner, répondez avec « DÉSABONNER » dans le sujet.`}
               ${trackingPixelUrl ? `<img src="${trackingPixelUrl}" width="1" height="1" style="display:block;width:1px;height:1px;border:0;" alt="" />` : ""}
             </td>
           </tr>
@@ -120,10 +122,13 @@ export function getLogoAttachment(logoUrl?: string): object | null {
 /**
  * Plain-text fallback (for clients that don't render HTML)
  */
-export function getTextFooter(): string {
+export function getTextFooter(unsubscribeUrl?: string): string {
   const phone = process.env.COMPANY_PHONE || "819-388-9150";
   const website = process.env.COMPANY_WEBSITE || "leadnova.one";
   const contactName = process.env.CONTACT_NAME || "Olivier";
+  const unsub = unsubscribeUrl
+    ? `Se désabonner: ${unsubscribeUrl}`
+    : `Pour vous désabonner, répondez avec "DÉSABONNER" dans le sujet.`;
 
-  return `\n\n--\n${contactName}\nVision Lavage Inc.\n${phone} | ${website}\n\nPour vous désabonner, répondez avec "DÉSABONNER" dans le sujet.`;
+  return `\n\n--\n${contactName}\nLeadNova\n${phone} | ${website}\n\n${unsub}`;
 }

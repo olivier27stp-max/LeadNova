@@ -1,47 +1,39 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
+import { AlertTriangle, Eye, EyeOff, UserPlus, CheckCircle2 } from "lucide-react";
 
-type Mode = "loading" | "setup" | "login";
-
-export default function LoginPage() {
+export default function RegisterPage() {
   return (
     <Suspense>
-      <LoginPageInner />
+      <RegisterPageInner />
     </Suspense>
   );
 }
 
-function LoginPageInner() {
+function RegisterPageInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect") || "/";
 
-  const [mode, setMode] = useState<Mode>("loading");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // Redirect if already logged in
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
-      .then((d) => {
-        if (d.user) { router.replace("/"); return; }
-        return fetch("/api/auth/setup").then((r) => r.json());
-      })
-      .then((d) => {
-        if (d) setMode(d.hasUsers ? "login" : "setup");
-      })
-      .catch(() => setMode("login"));
+      .then((d) => { if (d.user) router.replace("/"); })
+      .catch(() => {})
+      .finally(() => setCheckingAuth(false));
   }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -49,20 +41,16 @@ function LoginPageInner() {
     setError("");
     setLoading(true);
     try {
-      const isSetup = mode === "setup";
-      const url = isSetup ? "/api/auth/setup" : "/api/auth/login";
-      const body = isSetup ? { name, email, password } : { email, password };
-
-      const res = await fetch(url, {
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ name, email, password }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Erreur");
+        setError(data.error || "Erreur lors de la création du compte");
       } else {
-        router.push(redirectTo);
+        router.push("/");
         router.refresh();
       }
     } catch {
@@ -72,7 +60,7 @@ function LoginPageInner() {
     }
   }
 
-  if (mode === "loading") {
+  if (checkingAuth) {
     return (
       <div className="fixed inset-0 bg-background flex items-center justify-center">
         <div className="size-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -80,7 +68,7 @@ function LoginPageInner() {
     );
   }
 
-  const isSetup = mode === "setup";
+  const passwordStrong = password.length >= 8;
 
   return (
     <div className="fixed inset-0 bg-background flex items-center justify-center p-4 z-10">
@@ -94,38 +82,26 @@ function LoginPageInner() {
             <span className="text-foreground">Lead</span>
             <span className="bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">Nova</span>
           </h1>
-          <p className="text-sm text-foreground-muted mt-1">
-            {isSetup ? "Créez votre compte administrateur" : "Connectez-vous à votre compte"}
-          </p>
+          <p className="text-sm text-foreground-muted mt-1">Créez votre compte gratuitement</p>
         </div>
-
-        {/* Setup notice */}
-        {isSetup && (
-          <div className="mb-4 flex items-start gap-2 bg-primary-subtle border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary">
-            <UserPlus className="size-4 shrink-0 mt-0.5" />
-            <span>Aucun compte détecté. Créez le premier compte administrateur.</span>
-          </div>
-        )}
 
         {/* Card */}
         <div className="bg-card border border-border rounded-2xl shadow-sm p-6 space-y-5">
           <form onSubmit={handleSubmit} className="space-y-4">
-            {isSetup && (
-              <div>
-                <label className="block text-sm font-medium text-foreground-secondary mb-1.5">
-                  Nom complet
-                </label>
-                <Input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Olivier Tremblay"
-                  required
-                  autoFocus
-                  autoComplete="name"
-                />
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-foreground-secondary mb-1.5">
+                Nom complet
+              </label>
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Jean Tremblay"
+                required
+                autoFocus
+                autoComplete="name"
+              />
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-foreground-secondary mb-1.5">
@@ -137,7 +113,6 @@ function LoginPageInner() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="vous@exemple.com"
                 required
-                autoFocus={!isSetup}
                 autoComplete="email"
               />
             </div>
@@ -153,7 +128,7 @@ function LoginPageInner() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  autoComplete={isSetup ? "new-password" : "current-password"}
+                  autoComplete="new-password"
                   className="pr-10"
                 />
                 <button
@@ -165,16 +140,17 @@ function LoginPageInner() {
                   {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
               </div>
-              {isSetup && (
-                <p className="text-xs text-foreground-muted mt-1">Minimum 8 caractères</p>
-              )}
-              {!isSetup && (
-                <div className="text-right mt-1">
-                  <Link href="/forgot-password" className="text-xs text-primary hover:underline">
-                    Mot de passe oublié ?
-                  </Link>
-                </div>
-              )}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                {password.length === 0 ? (
+                  <p className="text-xs text-foreground-muted">Minimum 8 caractères</p>
+                ) : passwordStrong ? (
+                  <p className="text-xs text-success flex items-center gap-1">
+                    <CheckCircle2 className="size-3" />Mot de passe valide
+                  </p>
+                ) : (
+                  <p className="text-xs text-warning">Encore {8 - password.length} caractère(s) requis</p>
+                )}
+              </div>
             </div>
 
             {error && (
@@ -188,25 +164,21 @@ function LoginPageInner() {
               type="submit"
               variant="primary"
               className="w-full"
-              disabled={loading || !email || !password || (isSetup && !name)}
+              disabled={loading || !email || !password || !name || !passwordStrong}
             >
-              {isSetup ? <UserPlus className="size-4" /> : <LogIn className="size-4" />}
-              {loading
-                ? isSetup ? "Création…" : "Connexion…"
-                : isSetup ? "Créer mon compte" : "Se connecter"}
+              <UserPlus className="size-4" />
+              {loading ? "Création du compte…" : "Créer mon compte"}
             </Button>
           </form>
 
-          {!isSetup && (
-            <div className="text-center pt-1 border-t border-border">
-              <p className="text-sm text-foreground-muted">
-                Pas encore de compte ?{" "}
-                <Link href="/register" className="text-primary hover:underline font-medium">
-                  Créer un compte
-                </Link>
-              </p>
-            </div>
-          )}
+          <div className="text-center pt-1 border-t border-border">
+            <p className="text-sm text-foreground-muted">
+              Déjà un compte ?{" "}
+              <Link href="/login" className="text-primary hover:underline font-medium">
+                Se connecter
+              </Link>
+            </p>
+          </div>
         </div>
 
         <p className="text-center text-xs text-foreground-muted mt-6">

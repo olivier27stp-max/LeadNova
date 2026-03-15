@@ -38,6 +38,7 @@ interface ReportData {
     openRate: number;
     replyRate: number;
     bounceRate: number;
+    unsubscribeRate: number;
   };
   timeline: { date: string; sent: number; opened: number; replied: number; bounced: number }[];
   contacts: {
@@ -50,6 +51,7 @@ interface ReportData {
     openedAt: string | null;
     replyReceived: boolean;
     bounce: boolean;
+    unsubscribed: boolean;
   }[];
   totalContacts: number;
 }
@@ -98,22 +100,24 @@ function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, ease: [0.16, 1, 0.3, 1], duration: 0.4 }}
     >
-      <Card className={`h-full ${alert ? "border-red-200 dark:border-red-900/60" : ""}`}>
-        <CardContent className="p-4 flex flex-col h-full">
-          <div className="flex items-start justify-between mb-3">
-            <div className={`p-1.5 rounded-md ${color}`}>
-              <Icon className="size-3.5" />
-            </div>
-            {alert && (
-              <span className="relative flex size-2 mt-0.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60" />
-                <span className="relative inline-flex rounded-full size-2 bg-red-500" />
-              </span>
-            )}
+      <Card className={`h-full relative overflow-hidden ${alert ? "border-red-200 dark:border-red-900/60" : ""}`}>
+        {alert && (
+          <div className="absolute top-2.5 right-2.5">
+            <span className="relative flex size-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60" />
+              <span className="relative inline-flex rounded-full size-2 bg-red-500" />
+            </span>
           </div>
-          <p className="text-xl font-bold text-foreground tracking-tight tabular-nums">{value}</p>
-          <p className="text-xs text-foreground-muted mt-0.5 leading-tight">{label}</p>
-          {sub && <p className="text-xs text-foreground-secondary mt-1 font-medium">{sub}</p>}
+        )}
+        <CardContent className="p-4 flex flex-col h-full gap-3">
+          <div className={`p-1.5 rounded-md w-fit ${color}`}>
+            <Icon className="size-3.5" />
+          </div>
+          <div className="mt-auto">
+            <p className="text-xl font-bold text-foreground tracking-tight tabular-nums">{value}</p>
+            <p className="text-xs text-foreground-muted mt-0.5 leading-tight">{label}</p>
+            {sub && <p className="text-xs text-foreground-secondary mt-1 font-medium">{sub}</p>}
+          </div>
         </CardContent>
       </Card>
     </motion.div>
@@ -394,6 +398,7 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
               icon={UserMinus}
               label="Désabonnements"
               value={data.kpis.unsubscribed.toLocaleString()}
+              sub={`${data.rates.unsubscribeRate}% taux`}
               color={data.kpis.unsubscribed > 0 ? "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400" : "bg-background-muted text-foreground-muted"}
               alert={data.kpis.unsubscribed > 0}
               delay={0.35}

@@ -9,8 +9,8 @@ export default function GlobalEnrichmentBar() {
   const [minimized, setMinimized] = useState(false);
   const pathname = usePathname();
 
-  // On prospects page, the full JobProgressBar is shown inline — hide this global one
-  if (pathname === "/prospects") return null;
+  // On pages with inline JobProgressBar, hide this global one
+  if (pathname === "/prospects" || pathname === "/email-verifier") return null;
 
   if (!enrichProgress) return null;
 

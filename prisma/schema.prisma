@@ -70,6 +70,7 @@ model WorkspaceMember {
   createdAt   DateTime      @default(now())
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
   @@index([workspaceId])
@@ -99,7 +100,11 @@ model Prospect {
   notes           String?
   contactType     String          @default("prospect")
   importBatchId   String?
-  archivedAt      DateTime?
+  archivedAt                DateTime?
+  emailStatus               String?   @default("unknown") // valid, invalid, risky, catch-all, disposable, unknown
+  emailVerifiedAt           DateTime?
+  emailVerificationResult   Json?
+  emailEnrichmentAttempts   Int       @default(0)
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
@@ -120,22 +125,27 @@ model Prospect {
   @@index([companyName])
   @@index([importBatchId])
   @@index([archivedAt])
+  @@index([emailStatus])
   @@map("prospects")
 }
 
 model EmailActivity {
   id             String    @id @default(cuid())
   prospectId     String
+  campaignId     String?
   emailSubject   String
   emailBody      String
   sentAt         DateTime  @default(now())
   openedAt       DateTime?
   replyReceived  Boolean   @default(false)
   bounce         Boolean   @default(false)
+  unsubscribed   Boolean   @default(false)
 
   prospect       Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  campaign       Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([prospectId])
+  @@index([campaignId])
   @@index([sentAt])
   @@map("email_activity")
 }
@@ -174,6 +184,7 @@ model Campaign {
 
   workspace           Workspace?      @relation(fields: [workspaceId], references: [id])
   contacts            CampaignContact[]
+  emailActivities     EmailActivity[]
 
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
@@ -222,6 +233,8 @@ model User {
   lastActiveAt      DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  workspaceMembers  WorkspaceMember[]
 
   @@map("users")
 }

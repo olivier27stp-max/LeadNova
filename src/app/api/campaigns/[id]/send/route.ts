@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendEmail, canSendEmail } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 function interpolate(template: string, prospect: { companyName: string; city?: string | null }): string {
   return template
@@ -14,13 +15,13 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  try {
+  const ctx = await requireWorkspaceContext();
   const { id } = await params;
 
-  // SMTP can be configured in Settings > Email or via env vars — validated at send time
-
-  // Fetch campaign with selected contacts
-  const campaign = await prisma.campaign.findUnique({
-    where: { id },
+  // Fetch campaign — verify workspace ownership
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, workspaceId: ctx.workspaceId },
     include: {
       contacts: {
         include: {
@@ -60,7 +61,7 @@ export async function POST(
     const subject = interpolate(campaign.emailSubject, prospect);
     const body = interpolate(campaign.emailBody, prospect);
 
-    const result = await sendEmail(prospect.id, subject, body);
+    const result = await sendEmail(prospect.id, subject, body, id);
 
     if (result.success) {
       sent++;
@@ -85,4 +86,7 @@ export async function POST(
   });
 
   return NextResponse.json({ sent, failed, skippedNoEmail, errors });
+  } catch (error) {
+    return handleWorkspaceError(error);
+  }
 }

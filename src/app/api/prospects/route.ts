@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
     const city = searchParams.get("city");
     const source = searchParams.get("source");
     const contactType = searchParams.get("contactType");
+    const emailStatus = searchParams.get("emailStatus");
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -39,6 +40,8 @@ export async function GET(request: NextRequest) {
     if (city) where.city = city;
     if (source) where.source = source;
     if (contactType) where.contactType = contactType;
+    if (emailStatus === "unknown") where.OR = [{ emailStatus: "unknown" }, { emailStatus: null }];
+    else if (emailStatus) where.emailStatus = emailStatus;
 
     // Text search across multiple fields
     if (search) {
@@ -95,6 +98,8 @@ export async function GET(request: NextRequest) {
         contactType: true,
         industry: true,
         emailGuessed: true,
+        emailStatus: true,
+        emailVerifiedAt: true,
         createdAt: true,
       },
     });

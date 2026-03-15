@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { sendEmail, canSendEmail, getRandomDelay } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 // Template variable substitution
 function substituteVariables(
@@ -20,11 +21,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireWorkspaceContext();
     const { id } = await params;
 
-    // Load campaign with follow-up template
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
+    // Load campaign — verify workspace ownership
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
       select: {
         id: true,
         name: true,
@@ -116,11 +118,7 @@ export async function GET(
       total: eligible.length,
     });
   } catch (error) {
-    console.error("Follow-up check error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }
 
@@ -130,13 +128,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireWorkspaceContext();
     const { id } = await params;
     const body = await request.json();
     const { prospectIds } = body; // Optional: send to specific prospects only
 
-    // Load campaign
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
+    // Load campaign — verify workspace ownership
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
       select: {
         id: true,
         name: true,
@@ -223,7 +222,7 @@ export async function POST(
       const subject = substituteVariables(campaign.followUpSubject!, prospect);
       const emailBody = substituteVariables(campaign.followUpBody!, prospect);
 
-      const result = await sendEmail(prospect.id, subject, emailBody);
+      const result = await sendEmail(prospect.id, subject, emailBody, id);
 
       if (result.success) {
         sent++;
@@ -249,10 +248,6 @@ export async function POST(
 
     return NextResponse.json({ sent, skipped, failed, errors });
   } catch (error) {
-    console.error("Follow-up send error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed" },
-      { status: 500 }
-    );
+    return handleWorkspaceError(error);
   }
 }

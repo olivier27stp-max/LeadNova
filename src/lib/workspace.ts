@@ -50,6 +50,35 @@ export async function getWorkspaceContext(): Promise<{ userId: string; workspace
   return { userId: user.id, workspaceId };
 }
 
+// ─── Strict workspace context (throws on failure) ────────
+// Use in API routes that require authentication + workspace.
+
+export async function requireWorkspaceContext(): Promise<{ userId: string; workspaceId: string }> {
+  const user = await getSessionUser();
+  if (!user) throw new WorkspaceError(401, "Non authentifié");
+  const workspaceId = await getActiveWorkspaceId(user.id);
+  if (!workspaceId) throw new WorkspaceError(403, "Aucun espace de travail actif");
+  return { userId: user.id, workspaceId };
+}
+
+export class WorkspaceError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export function handleWorkspaceError(error: unknown): NextResponse {
+  if (error instanceof WorkspaceError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  return NextResponse.json(
+    { error: error instanceof Error ? error.message : "Erreur serveur" },
+    { status: 500 }
+  );
+}
+
 // ─── Full workspaces list for a user ───────────────────────
 
 export async function getWorkspacesForUser(userId: string) {

@@ -6,7 +6,7 @@ import { prisma } from "./db";
 const SESSION_SECRET =
   process.env.SESSION_SECRET ?? "freeleads-dev-secret-change-in-prod";
 const COOKIE_NAME = "fl_session";
-const MAX_AGE_SEC = 60 * 60 * 8; // 8 hours
+const MAX_AGE_SEC = 60 * 60 * 24 * 7; // 7 days
 
 // ─── Token helpers ─────────────────────────────────────────
 

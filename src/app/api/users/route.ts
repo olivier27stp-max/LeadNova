@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getSessionUser } from "@/lib/session";
 
 export async function GET() {
   try {
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    if (user.role !== "ADMIN") return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+
     const users = await prisma.user.findMany({
       orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, email: true, role: true, active: true, lastActiveAt: true, createdAt: true },
     });
     return NextResponse.json(users);
   } catch (error) {

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendEmail, canSendEmail } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
+import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 export async function POST(request: NextRequest) {
+  try {
+  await requireWorkspaceContext();
   const body = await request.json();
   const { prospectId, subject, body: emailBody } = body;
 
@@ -43,4 +46,7 @@ export async function POST(request: NextRequest) {
     { error: result.error },
     { status: 500 }
   );
+  } catch (error) {
+    return handleWorkspaceError(error);
+  }
 }
