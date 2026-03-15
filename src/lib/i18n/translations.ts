@@ -490,7 +490,6 @@ export const translations = {
     companyDesc: { fr: "Ces données sont utilisées dans les emails, campagnes et templates.", en: "This data is used in emails, campaigns, and templates." },
     companyName: { fr: "Nom de l'entreprise", en: "Company name" },
     companyNamePlaceholder: { fr: "Mon entreprise inc.", en: "My company inc." },
-    brandName: { fr: "Nom commercial", en: "Brand name" },
     contactEmail: { fr: "Email de contact", en: "Contact email" },
     contactEmailPlaceholder: { fr: "info@monentreprise.com", en: "info@mycompany.com" },
     phone: { fr: "Téléphone", en: "Phone" },

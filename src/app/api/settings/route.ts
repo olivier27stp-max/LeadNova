@@ -13,7 +13,6 @@ const SENSITIVE_FIELDS: Record<string, string[]> = {
 const DEFAULT_SETTINGS = {
   company: {
     name: "",
-    brandName: "",
     email: "",
     phone: "",
     website: "",

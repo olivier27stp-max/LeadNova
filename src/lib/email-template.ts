@@ -1,12 +1,52 @@
 import fs from "fs";
 import path from "path";
 
+// ─── Types ───────────────────────────────────────────────
+
+export interface CompanyInfo {
+  name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+  emailSignature?: string;
+}
+
+// ─── Helpers ─────────────────────────────────────────────
+
+function buildAddressLine(info: CompanyInfo): string {
+  const parts = [info.address, info.city, info.province, info.postalCode, info.country].filter(Boolean);
+  return parts.join(", ");
+}
+
+function getContactName(info: CompanyInfo): string {
+  // Use the name part before the company name, or fall back
+  return info.emailSignature?.split("\n")[0]?.trim()
+    || process.env.CONTACT_NAME
+    || "L'équipe";
+}
+
 /**
  * Wraps a plain-text email body in a branded HTML template for LeadNova.
  * Compatible with Gmail, Outlook, Apple Mail, and all major clients.
  * Uses CID inline attachment for the logo image.
+ *
+ * @param body - Plain text email body
+ * @param companyInfo - Company settings from DB (source of truth)
+ * @param trackingPixelUrl - Optional tracking pixel URL
+ * @param unsubscribeUrl - Optional unsubscribe URL
  */
-export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string, unsubscribeUrl?: string): string {
+export function wrapInEmailTemplate(
+  body: string,
+  companyInfo?: CompanyInfo,
+  trackingPixelUrl?: string,
+  unsubscribeUrl?: string
+): string {
+  const info = companyInfo || {};
   const htmlBody = body
     .split(/\n\n+/)
     .map((para) =>
@@ -14,9 +54,23 @@ export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string, uns
     )
     .join("\n");
 
-  const phone = process.env.COMPANY_PHONE || "819-388-9150";
-  const website = process.env.COMPANY_WEBSITE || "leadnova.one";
-  const contactName = process.env.CONTACT_NAME || "Olivier";
+  const companyName = info.name || process.env.COMPANY_NAME || "LeadNova";
+  const phone = info.phone || process.env.COMPANY_PHONE || "";
+  const website = info.website || process.env.COMPANY_WEBSITE || "";
+  const contactName = getContactName(info);
+  const addressLine = buildAddressLine(info);
+
+  // Build signature lines
+  const phoneLine = phone
+    ? `<a href="tel:${phone}" style="color:#2563eb;text-decoration:none;">${phone}</a>`
+    : "";
+  const websiteLine = website
+    ? `<a href="${website.startsWith("http") ? website : `https://${website}`}" style="color:#2563eb;text-decoration:none;">${website.replace(/^https?:\/\//, "")}</a>`
+    : "";
+  const contactLine = [phoneLine, websiteLine].filter(Boolean).join(" &nbsp;·&nbsp; ");
+  const addressHtml = addressLine
+    ? `<br><span style="color:#9ca3af;font-size:12px;">${addressLine}</span>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -50,9 +104,8 @@ export function wrapInEmailTemplate(body: string, trackingPixelUrl?: string, uns
           <tr>
             <td style="padding:24px 40px 0 40px;color:#374151;font-size:14px;line-height:1.6;">
               <strong style="color:#111827;">${contactName}</strong><br>
-              <span style="color:#6b7280;">LeadNova</span><br>
-              <a href="tel:${phone}" style="color:#2563eb;text-decoration:none;">${phone}</a> &nbsp;·&nbsp;
-              <a href="https://${website}" style="color:#2563eb;text-decoration:none;">${website}</a>
+              <span style="color:#6b7280;">${companyName}</span><br>
+              ${contactLine}${addressHtml}
             </td>
           </tr>
 
@@ -120,15 +173,26 @@ export function getLogoAttachment(logoUrl?: string): object | null {
 }
 
 /**
- * Plain-text fallback (for clients that don't render HTML)
+ * Plain-text fallback footer (for clients that don't render HTML).
+ * Uses company settings from DB as source of truth.
  */
-export function getTextFooter(unsubscribeUrl?: string): string {
-  const phone = process.env.COMPANY_PHONE || "819-388-9150";
-  const website = process.env.COMPANY_WEBSITE || "leadnova.one";
-  const contactName = process.env.CONTACT_NAME || "Olivier";
+export function getTextFooter(companyInfo?: CompanyInfo, unsubscribeUrl?: string): string {
+  const info = companyInfo || {};
+  const companyName = info.name || process.env.COMPANY_NAME || "LeadNova";
+  const phone = info.phone || process.env.COMPANY_PHONE || "";
+  const website = info.website || process.env.COMPANY_WEBSITE || "";
+  const contactName = getContactName(info);
+  const addressLine = buildAddressLine(info);
+
+  const contactLine = [phone, website].filter(Boolean).join(" | ");
   const unsub = unsubscribeUrl
     ? `Se désabonner: ${unsubscribeUrl}`
     : `Pour vous désabonner, répondez avec "DÉSABONNER" dans le sujet.`;
 
-  return `\n\n--\n${contactName}\nLeadNova\n${phone} | ${website}\n\n${unsub}`;
+  const parts = [`\n\n--\n${contactName}\n${companyName}`];
+  if (contactLine) parts.push(contactLine);
+  if (addressLine) parts.push(addressLine);
+  parts.push(`\n${unsub}`);
+
+  return parts.join("\n");
 }

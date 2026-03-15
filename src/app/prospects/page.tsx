@@ -126,9 +126,9 @@ const ProspectRow = memo(function ProspectRow({
       className={`border-b border-border hover:bg-card-hover cursor-pointer ${selected ? "bg-primary-subtle" : ""}`}
       onClick={() => onSelect(prospect)}
     >
-      <td className="px-4 py-3 w-8 text-xs text-foreground-muted text-right">{rowIndex}</td>
+      <td className="px-4 py-3 text-xs text-foreground-muted text-right">{rowIndex}</td>
       <td
-        className="px-4 py-3 w-10 select-none"
+        className="px-4 py-3 select-none"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => { e.preventDefault(); onDragStart(prospect.id); }}
       >
@@ -139,28 +139,28 @@ const ProspectRow = memo(function ProspectRow({
           className="w-4 h-4 rounded border-border-strong text-primary focus:ring-primary pointer-events-none"
         />
       </td>
-      <td className="px-4 py-3">
-        <p className="font-medium text-foreground">{prospect.companyName}</p>
-        {prospect.industry && <p className="text-xs text-foreground-muted">{prospect.industry}</p>}
+      <td className="px-4 py-3 overflow-hidden">
+        <p className="font-medium text-foreground truncate">{prospect.companyName}</p>
+        {prospect.industry && <p className="text-xs text-foreground-muted truncate">{prospect.industry}</p>}
       </td>
-      <td className="px-4 py-3 text-foreground-secondary">{prospect.city || "—"}</td>
-      <td className="px-4 py-3 truncate max-w-48">
+      <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.city || "—"}</td>
+      <td className="px-4 py-3 overflow-hidden">
         {prospect.email ? (
           <span className="flex items-center gap-1">
-            <span className={prospect.emailGuessed ? "text-warning" : "text-foreground-secondary"}>{prospect.email}</span>
-            {prospect.emailGuessed && <span className="text-[10px] bg-warning-subtle text-warning px-1 rounded">{t("common", "guessed")}</span>}
+            <span className={`truncate ${prospect.emailGuessed ? "text-warning" : "text-foreground-secondary"}`}>{prospect.email}</span>
+            {prospect.emailGuessed && <span className="text-[10px] bg-warning-subtle text-warning px-1 rounded shrink-0">{t("common", "guessed")}</span>}
           </span>
         ) : "—"}
       </td>
-      <td className="px-4 py-3 text-foreground-secondary">{prospect.phone || "—"}</td>
-      <td className="px-4 py-3 text-xs text-foreground-muted">{prospect.source || "—"}</td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.phone || "—"}</td>
+      <td className="px-4 py-3 text-xs text-foreground-muted truncate overflow-hidden">{prospect.source || "—"}</td>
+      <td className="px-4 py-3 whitespace-nowrap">
         <span className="font-mono font-medium text-foreground tabular-nums">{prospect.leadScore}</span>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 whitespace-nowrap">
         <StatusBadge status={prospect.status} />
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 whitespace-nowrap">
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
           {prospect.status === "NEW" && (
             <button
@@ -1823,11 +1823,12 @@ export default function ProspectsPage() {
 
       {/* Table */}
       <div ref={(el) => { (tableRef as React.MutableRefObject<HTMLDivElement | null>).current = el; tableContainerRef.current = el; }} className="bg-card rounded-md border border-border shadow-sm overflow-x-auto">
-        <table className="w-full text-sm min-w-[900px]">
+        <table className="w-full text-sm min-w-[900px]" style={{ tableLayout: "fixed" }}>
+          <colgroup><col style={{ width: 40 }} /><col style={{ width: 40 }} /><col /><col style={{ width: 120 }} /><col style={{ width: 210 }} /><col style={{ width: 150 }} /><col style={{ width: 90 }} /><col style={{ width: 60 }} /><col style={{ width: 100 }} /><col style={{ width: 110 }} /></colgroup>
           <thead className="bg-background-subtle border-b border-border">
             <tr>
-              <th className="px-4 py-3 w-8 text-xs text-foreground-muted">#</th>
-              <th className="px-4 py-3 w-10">
+              <th className="px-4 py-3 text-xs text-foreground-muted">#</th>
+              <th className="px-4 py-3">
                 <input
                   type="checkbox"
                   checked={displayProspects.length > 0 && selectedIds.size === displayProspects.length}

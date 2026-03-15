@@ -89,9 +89,13 @@ const contactTypeVariantMap: Record<string, "primary" | "success" | "accent"> = 
 // ─── Variables Help ──────────────────────────────────────
 
 const TEMPLATE_VARIABLES = [
-  { key: "{{company_name}}", label: "Nom de l'entreprise" },
-  { key: "{{city}}", label: "Ville" },
+  { key: "{{company_name}}", label: "Nom de l'entreprise (prospect)" },
+  { key: "{{city}}", label: "Ville (prospect)" },
   { key: "{{contact_name}}", label: "Nom du contact" },
+  { key: "{{sender_name}}", label: "Votre entreprise" },
+  { key: "{{company_phone}}", label: "Votre téléphone" },
+  { key: "{{company_website}}", label: "Votre site web" },
+  { key: "{{company_email}}", label: "Votre email" },
 ];
 
 // ─── Main Page Component ─────────────────────────────────
@@ -122,6 +126,13 @@ export default function CampaignDetailPage() {
   // Logo state
   const [logoUrl, setLogoUrl] = useState("/leadnova-logo.png");
   const [logoEnabled, setLogoEnabled] = useState(true);
+
+  // Company settings (source of truth for preview)
+  const [companySettings, setCompanySettings] = useState({
+    name: "", email: "", phone: "", website: "",
+    address: "", city: "", province: "", postalCode: "", country: "",
+    emailSignature: "",
+  });
   const [editingLogo, setEditingLogo] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
 
@@ -252,6 +263,7 @@ export default function CampaignDetailPage() {
         if (data?.automation) setAutomationSettings(data.automation);
         if (data?.email?.logoUrl) setLogoUrl(data.email.logoUrl);
         if (typeof data?.email?.logoEnabled === "boolean") setLogoEnabled(data.email.logoEnabled);
+        if (data?.company) setCompanySettings((prev: typeof companySettings) => ({ ...prev, ...data.company }));
       })
       .catch(() => {});
   }, []);
@@ -588,7 +600,16 @@ export default function CampaignDetailPage() {
     return text
       .replace(/\{\{company_name\}\}/g, "Acme Corp")
       .replace(/\{\{city\}\}/g, "Montréal")
-      .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur");
+      .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
+      .replace(/\{\{company_email\}\}/g, companySettings.email || "")
+      .replace(/\{\{company_phone\}\}/g, companySettings.phone || "")
+      .replace(/\{\{company_website\}\}/g, companySettings.website || "")
+      .replace(/\{\{company_address\}\}/g, companySettings.address || "")
+      .replace(/\{\{company_city\}\}/g, companySettings.city || "")
+      .replace(/\{\{company_province\}\}/g, companySettings.province || "")
+      .replace(/\{\{company_postal_code\}\}/g, companySettings.postalCode || "")
+      .replace(/\{\{company_country\}\}/g, companySettings.country || "")
+      .replace(/\{\{sender_name\}\}/g, companySettings.name || "");
   }
 
   function buildEmailHtml(body: string): string {
@@ -600,6 +621,23 @@ export default function CampaignDetailPage() {
       )
       .join("\n");
 
+    // Use company settings from DB — source of truth
+    const cName = companySettings.name || "Mon entreprise";
+    const cPhone = companySettings.phone || "";
+    const cWebsite = companySettings.website || "";
+    const cContactName = companySettings.emailSignature?.split("\n")[0]?.trim() || cName;
+    const websiteDisplay = cWebsite.replace(/^https?:\/\//, "");
+    const websiteHref = cWebsite.startsWith("http") ? cWebsite : `https://${cWebsite}`;
+
+    // Build contact line
+    const phonePart = cPhone ? `<a href="tel:${cPhone}" style="color:#2563eb;text-decoration:none;">${cPhone}</a>` : "";
+    const websitePart = cWebsite ? `<a href="${websiteHref}" style="color:#2563eb;text-decoration:none;">${websiteDisplay}</a>` : "";
+    const contactLine = [phonePart, websitePart].filter(Boolean).join(" &nbsp;·&nbsp; ");
+
+    // Build address line
+    const addressParts = [companySettings.address, companySettings.city, companySettings.province, companySettings.postalCode, companySettings.country].filter(Boolean);
+    const addressHtml = addressParts.length > 0 ? `<br><span style="color:#9ca3af;font-size:11px;">${addressParts.join(", ")}</span>` : "";
+
     return `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -610,11 +648,9 @@ export default function CampaignDetailPage() {
   <tr><td style="padding:32px 32px 24px 32px;color:#1a1a1a;font-size:14px;">${htmlBody}</td></tr>
   <tr><td style="padding:0 32px;"><hr style="border:none;border-top:1px solid #e5e7eb;margin:0;"></td></tr>
   <tr><td style="padding:20px 32px 0 32px;color:#374151;font-size:13px;line-height:1.6;">
-    <strong style="color:#111827;">Olivier</strong><br>
-    <span style="color:#6b7280;">LeadNova</span><br>
-    <a href="tel:819-388-9150" style="color:#2563eb;text-decoration:none;">819-388-9150</a>
-    &nbsp;·&nbsp;
-    <a href="https://leadnova.one" style="color:#2563eb;text-decoration:none;">leadnova.one</a>
+    <strong style="color:#111827;">${cContactName}</strong><br>
+    <span style="color:#6b7280;">${cName}</span><br>
+    ${contactLine}${addressHtml}
   </td></tr>
   ${logoEnabled ? `<tr><td style="padding:16px 32px 0 32px;">
     <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#000;border-radius:6px;overflow:hidden;">

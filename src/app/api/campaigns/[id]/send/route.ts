@@ -4,11 +4,36 @@ import { sendEmail, canSendEmail } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
-function interpolate(template: string, prospect: { companyName: string; city?: string | null }): string {
+interface CompanySettings {
+  name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+function interpolate(
+  template: string,
+  prospect: { companyName: string; city?: string | null },
+  company: CompanySettings
+): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
     .replace(/\{\{city\}\}/g, prospect.city || "votre région")
-    .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur");
+    .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
+    .replace(/\{\{company_email\}\}/g, company.email || "")
+    .replace(/\{\{company_phone\}\}/g, company.phone || "")
+    .replace(/\{\{company_website\}\}/g, company.website || "")
+    .replace(/\{\{company_address\}\}/g, company.address || "")
+    .replace(/\{\{company_city\}\}/g, company.city || "")
+    .replace(/\{\{company_province\}\}/g, company.province || "")
+    .replace(/\{\{company_postal_code\}\}/g, company.postalCode || "")
+    .replace(/\{\{company_country\}\}/g, company.country || "")
+    .replace(/\{\{sender_name\}\}/g, company.name || "");
 }
 
 export async function POST(
@@ -43,6 +68,13 @@ export async function POST(
     );
   }
 
+  // Load company settings (source of truth for template variables)
+  const settingsRecord = await prisma.appSettings.findUnique({
+    where: { workspaceId: ctx.workspaceId },
+  });
+  const settingsData = settingsRecord?.data as Record<string, unknown> | null;
+  const companySettings = (settingsData?.company || {}) as CompanySettings;
+
   const prospects = campaign.contacts.map((c) => c.prospect);
   const withEmail = prospects.filter((p) => p.email);
   const skippedNoEmail = prospects.length - withEmail.length;
@@ -58,8 +90,8 @@ export async function POST(
       break;
     }
 
-    const subject = interpolate(campaign.emailSubject, prospect);
-    const body = interpolate(campaign.emailBody, prospect);
+    const subject = interpolate(campaign.emailSubject, prospect, companySettings);
+    const body = interpolate(campaign.emailBody, prospect, companySettings);
 
     const result = await sendEmail(prospect.id, subject, body, id);
 

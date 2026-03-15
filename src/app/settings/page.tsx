@@ -58,7 +58,6 @@ import {
 interface Settings {
   company: {
     name: string;
-    brandName: string;
     email: string;
     phone: string;
     website: string;
@@ -821,8 +820,12 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "MEMBER" }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erreur");
+      const text = await res.text();
+      if (!res.ok) {
+        console.error("Invite API error:", res.status, text);
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = JSON.parse(text);
       setInviteLink(data.inviteUrl);
       loadInvites();
       showToast(t("settings", "inviteCreated"), "success");
@@ -1007,13 +1010,6 @@ export default function SettingsPage() {
                     placeholder={t("settings", "companyNamePlaceholder")}
                   />
                 </FieldGroup>
-                <FieldGroup label={t("settings", "brandName")}>
-                  <Input
-                    value={settings.company.brandName}
-                    onChange={(e) => updateField("company", "brandName", e.target.value)}
-                    placeholder="Free Leads"
-                  />
-                </FieldGroup>
                 <FieldGroup label={t("settings", "contactEmail")}>
                   <Input
                     value={settings.company.email}
@@ -1091,7 +1087,7 @@ export default function SettingsPage() {
                   {t("settings", "availableVariables")}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {["{{company_name}}", "{{company_email}}", "{{company_phone}}", "{{company_website}}"].map((v) => (
+                  {["{{company_name}}", "{{company_email}}", "{{company_phone}}", "{{company_website}}", "{{company_address}}", "{{company_city}}"].map((v) => (
                     <span key={v} className="text-xs bg-card border border-border rounded px-2 py-1 text-foreground-muted font-mono">
                       {v}
                     </span>

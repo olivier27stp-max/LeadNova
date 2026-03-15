@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import { prisma } from "./db";
 import { DAILY_EMAIL_LIMIT, EMAIL_DELAY_MIN_SECONDS, EMAIL_DELAY_MAX_SECONDS } from "./config";
-import { wrapInEmailTemplate, getTextFooter, getLogoAttachment } from "./email-template";
+import { wrapInEmailTemplate, getTextFooter, getLogoAttachment, type CompanyInfo } from "./email-template";
 import { decrypt } from "./crypto";
 
 // ─── Types ───────────────────────────────────────────────
@@ -20,6 +20,7 @@ interface SenderInfo {
   logoUrl?: string;
   provider: "resend" | "smtp";
   smtp: SmtpConfig;
+  companyInfo: CompanyInfo;
 }
 
 // ─── Config builders ─────────────────────────────────────
@@ -65,9 +66,24 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
       ? emailSettings.provider
       : fallbackProvider;
     const smtp = buildSmtpConfig(emailSettings);
-    return { from, replyTo, logoUrl, provider, smtp };
+
+    // Build company info from DB settings — source of truth for templates
+    const companyInfo: CompanyInfo = {
+      name: companySettings?.name || undefined,
+      email: companySettings?.email || undefined,
+      phone: companySettings?.phone || undefined,
+      website: companySettings?.website || undefined,
+      address: companySettings?.address || undefined,
+      city: companySettings?.city || undefined,
+      province: companySettings?.province || undefined,
+      postalCode: companySettings?.postalCode || undefined,
+      country: companySettings?.country || undefined,
+      emailSignature: companySettings?.emailSignature || undefined,
+    };
+
+    return { from, replyTo, logoUrl, provider, smtp, companyInfo };
   } catch {
-    return { from: `"${platformFromName}" <${platformFrom}>`, provider: fallbackProvider, smtp: fallbackSmtp };
+    return { from: `"${platformFromName}" <${platformFrom}>`, provider: fallbackProvider, smtp: fallbackSmtp, companyInfo: {} };
   }
 }
 
@@ -209,8 +225,8 @@ export async function sendEmail(
     ? `${appUrl}/api/track/unsubscribe/${activity.id}`
     : undefined;
 
-  const html = wrapInEmailTemplate(body, trackingPixelUrl, unsubscribeUrl);
-  const text = body + getTextFooter(unsubscribeUrl);
+  const html = wrapInEmailTemplate(body, senderInfo.companyInfo, trackingPixelUrl, unsubscribeUrl);
+  const text = body + getTextFooter(senderInfo.companyInfo, unsubscribeUrl);
 
   try {
     if (senderInfo.provider === "resend") {
