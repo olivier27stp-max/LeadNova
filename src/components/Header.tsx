@@ -22,6 +22,7 @@ import {
 import ActivityBell from "@/components/ActivityBell";
 import AccountButton from "@/components/AccountButton";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
+import DiscoveryCounter from "@/components/DiscoveryCounter";
 
 const NAV_KEYS = [
   { href: "/", labelKey: "dashboard" as const, icon: LayoutDashboard },
@@ -128,6 +129,7 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-1">
+          <DiscoveryCounter />
           <WorkspaceSwitcher />
           <button
             onClick={cycleTheme}
