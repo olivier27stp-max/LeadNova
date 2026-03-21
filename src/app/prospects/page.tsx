@@ -117,7 +117,7 @@ const ProspectRow = memo(function ProspectRow({
   onToggleSelect: (id: string) => void;
   onEnrich: (id: string) => void;
   onEmail: (p: ProspectListItem) => void;
-  onDragStart: (id: string) => void;
+  onDragStart: (id: string, e?: React.MouseEvent) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -130,7 +130,7 @@ const ProspectRow = memo(function ProspectRow({
       <td
         className="px-4 py-3 select-none"
         onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => { e.preventDefault(); onDragStart(prospect.id); }}
+        onMouseDown={(e) => { e.preventDefault(); onDragStart(prospect.id, e); }}
       >
         <input
           type="checkbox"
@@ -676,15 +676,23 @@ export default function ProspectsPage() {
     });
   }, []);
 
-  const handleDragStart = useCallback((id: string) => {
-    const idx = prospects.findIndex((p) => p.id === id);
-    if (idx === -1) return;
-    isDragging.current = true;
-    dragStartIndex.current = idx;
-    dragLastIndex.current = idx;
+  const dragPendingId = useRef<string | null>(null);
+  const dragStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const DRAG_THRESHOLD = 8;
+
+  const handleDragStart = useCallback((id: string, e?: React.MouseEvent) => {
+    // Don't activate drag immediately — store pending and wait for threshold
+    dragPendingId.current = id;
+    dragStartPos.current = { x: e?.clientX ?? 0, y: e?.clientY ?? 0 };
+    isDragging.current = false;
+
+    // Toggle the clicked checkbox immediately
     const willSelect = !selectedIds.has(id);
     dragSelectMode.current = willSelect;
     dragPrevIds.current = new Set(selectedIds);
+    const idx = prospects.findIndex((p) => p.id === id);
+    dragStartIndex.current = idx;
+    dragLastIndex.current = idx;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (willSelect) next.add(id); else next.delete(id);
@@ -719,12 +727,24 @@ export default function ProspectsPage() {
 
     const handleMouseUp = () => {
       isDragging.current = false;
+      dragPendingId.current = null;
       dragStartIndex.current = -1;
       dragLastIndex.current = -1;
       scrollSpeedRef.current = 0;
     };
     const handleMouseMove = (e: MouseEvent) => {
       mouseYRef.current = e.clientY;
+      // Check drag threshold before activating
+      if (!isDragging.current && dragPendingId.current) {
+        const dx = e.clientX - dragStartPos.current.x;
+        const dy = e.clientY - dragStartPos.current.y;
+        if (Math.abs(dx) + Math.abs(dy) >= DRAG_THRESHOLD) {
+          isDragging.current = true;
+          dragPendingId.current = null;
+        } else {
+          return;
+        }
+      }
       if (!isDragging.current) { scrollSpeedRef.current = 0; return; }
       const edgeZone = 120;
       const viewH = window.innerHeight;
