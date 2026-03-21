@@ -607,7 +607,6 @@ export const translations = {
     // Automation section
     automationTitle: { fr: "Automatisation", en: "Automation" },
     automationDesc: { fr: "Configurez les automatismes de la plateforme.", en: "Configure platform automations." },
-    autoSend: { fr: "Envois automatiques", en: "Automatic sending" },
     autoFollowUp: { fr: "Follow-ups automatiques", en: "Automatic follow-ups" },
     autoReminder: { fr: "Relances automatiques", en: "Automatic reminders" },
     internalNotifications: { fr: "Notifications internes", en: "Internal notifications" },

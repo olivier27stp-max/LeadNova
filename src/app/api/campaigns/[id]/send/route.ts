@@ -120,6 +120,17 @@ export async function POST(
     }
   }
 
+  // Update campaign: mark as ACTIVE and record last sent time (used for follow-up scheduling)
+  if (sent > 0) {
+    await prisma.campaign.update({
+      where: { id },
+      data: {
+        lastSentAt: new Date(),
+        status: "ACTIVE",
+      },
+    });
+  }
+
   await logActivity({
     action: "campaign_sent",
     type: sent > 0 ? "success" : "error",

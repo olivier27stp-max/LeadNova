@@ -102,7 +102,6 @@ interface Settings {
     pauseOnError: boolean;
   };
   automation: {
-    autoSend: boolean;
     autoFollowUp: boolean;
     autoReminder: boolean;
     internalNotifications: boolean;
@@ -1908,13 +1907,6 @@ export default function SettingsPage() {
               saveLabel={t("settings", "saveBtn")}
             >
               <div className="space-y-1">
-                <Toggle
-                  checked={settings.automation.autoSend}
-                  onChange={(v) =>
-                    updateField("automation", "autoSend", v)
-                  }
-                  label={t("settings", "autoSend")}
-                />
                 <Toggle
                   checked={settings.automation.autoFollowUp}
                   onChange={(v) =>
