@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { User, LogIn, LogOut, Settings, ChevronDown, Shield } from "lucide-react";
 
 interface SessionUser {
@@ -32,7 +31,6 @@ export default function AccountButton() {
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const router = useRouter();
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -64,11 +62,8 @@ export default function AccountButton() {
   async function handleLogout() {
     setLoggingOut(true);
     await fetch("/api/auth/logout", { method: "POST" });
-    setUser(null);
-    setOpen(false);
-    setLoggingOut(false);
-    router.push("/login");
-    router.refresh();
+    // Hard redirect to clear ALL client state (React state, fetches, etc.)
+    window.location.href = "/login";
   }
 
   // Still loading
