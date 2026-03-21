@@ -349,17 +349,20 @@ export default function ProspectsPage() {
 
   // Derive available cities from loaded prospects (dynamic, no static list)
   const availableCities = useMemo(() => {
-    const cities = new Set<string>();
+    const seen = new Map<string, string>();
     for (const p of prospects) {
-      if (p.city) cities.add(p.city);
+      if (p.city) {
+        const key = p.city.trim().toLowerCase();
+        if (!seen.has(key)) seen.set(key, p.city.trim());
+      }
     }
-    return Array.from(cities).sort((a, b) => a.localeCompare(b, locale));
-  }, [prospects]);
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b, locale));
+  }, [prospects, locale]);
 
   // Client-side filtered prospects: instant filter using searchQuery + cityFilter (no debounce wait)
   const displayProspects = useMemo(() => {
     let result = prospects;
-    if (cityFilter) result = result.filter((p) => p.city === cityFilter);
+    if (cityFilter) result = result.filter((p) => p.city?.trim().toLowerCase() === cityFilter.trim().toLowerCase());
     const q = searchQuery.toLowerCase();
     if (!q) return result;
     return result.filter((p) =>
