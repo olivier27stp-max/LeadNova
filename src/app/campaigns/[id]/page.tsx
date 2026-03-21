@@ -288,7 +288,8 @@ export default function CampaignDetailPage() {
   contactsRef.current = contacts;
   const dragPendingId = useRef<string | null>(null);
   const dragStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const DRAG_THRESHOLD = 8;
+  const targetScrollSpeed = useRef(0);
+  const DRAG_THRESHOLD = 5;
 
   const applyContactDragRange = useCallback((currentIdx: number) => {
     if (dragStartIndex.current === -1 || currentIdx === dragLastIndex.current) return;
@@ -327,39 +328,48 @@ export default function CampaignDetailPage() {
   }, [localSelected, contacts]);
 
   useEffect(() => {
-    let lastTime = 0;
-    const loop = (time: number) => {
-      if (isDragging.current && contactsScrollRef.current) {
-        if (lastTime && scrollSpeedRef.current !== 0) {
-          const dt = time - lastTime;
-          contactsScrollRef.current.scrollBy(0, scrollSpeedRef.current * (dt / 16));
-        }
-        const el = document.elementFromPoint(window.innerWidth / 3, mouseYRef.current);
-        if (el) {
-          const tr = el.closest("tr[data-contact-idx]");
-          if (tr) {
-            const idx = parseInt(tr.getAttribute("data-contact-idx")!, 10);
-            if (!isNaN(idx)) applyContactDragRange(idx);
+    const startDragLoop = () => {
+      let lastTime = 0;
+      const loop = (time: number) => {
+        if (!isDragging.current) { lastTime = 0; return; }
+        if (contactsScrollRef.current) {
+          // Lerp scroll speed toward target for smooth acceleration/deceleration
+          scrollSpeedRef.current += (targetScrollSpeed.current - scrollSpeedRef.current) * 0.25;
+          if (Math.abs(scrollSpeedRef.current) < 0.3) scrollSpeedRef.current = 0;
+
+          if (lastTime && scrollSpeedRef.current !== 0) {
+            const dt = time - lastTime;
+            contactsScrollRef.current.scrollBy(0, scrollSpeedRef.current * (dt / 16));
+          }
+          // Find which row is under the cursor and update selection
+          const el = document.elementFromPoint(window.innerWidth / 3, mouseYRef.current);
+          if (el) {
+            const tr = el.closest("tr[data-contact-idx]");
+            if (tr) {
+              const idx = parseInt(tr.getAttribute("data-contact-idx")!, 10);
+              if (!isNaN(idx)) applyContactDragRange(idx);
+            }
           }
         }
-      }
-      lastTime = time;
+        lastTime = time;
+        rafRef.current = requestAnimationFrame(loop);
+      };
       rafRef.current = requestAnimationFrame(loop);
     };
-    rafRef.current = requestAnimationFrame(loop);
 
     const handleMouseUp = () => {
+      // Remove drag cursor style
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+
       if (isDragging.current || dragPendingId.current) {
-        // Compute diff and flush batch changes
         const prev = dragPrevSelected.current;
         setLocalSelected((current) => {
           const toAdd: string[] = [];
           const toRemove: string[] = [];
           current.forEach((id) => { if (!prev.has(id)) toAdd.push(id); });
           prev.forEach((id) => { if (!current.has(id)) toRemove.push(id); });
-          // Update selectedCount based on diff
           setSelectedCount(current.size);
-          // Queue batch sync (skip the first single-click item already handled)
           if (toAdd.length > 0) {
             toAdd.forEach((id) => {
               pendingRemoves.current.delete(id);
@@ -384,6 +394,7 @@ export default function CampaignDetailPage() {
       dragStartIndex.current = -1;
       dragLastIndex.current = -1;
       scrollSpeedRef.current = 0;
+      targetScrollSpeed.current = 0;
     };
     const handleMouseMove = (e: MouseEvent) => {
       mouseYRef.current = e.clientY;
@@ -393,19 +404,29 @@ export default function CampaignDetailPage() {
         if (Math.abs(dx) + Math.abs(dy) >= DRAG_THRESHOLD) {
           isDragging.current = true;
           dragPendingId.current = null;
+          // Prevent text selection and set grab cursor during drag
+          document.body.style.userSelect = "none";
+          document.body.style.cursor = "grabbing";
+          startDragLoop();
         } else {
           return;
         }
       }
-      if (!isDragging.current || !contactsScrollRef.current) { scrollSpeedRef.current = 0; return; }
+      if (!isDragging.current || !contactsScrollRef.current) { targetScrollSpeed.current = 0; return; }
       const rect = contactsScrollRef.current.getBoundingClientRect();
       const edgeZone = 80;
-      if (e.clientY < rect.top + edgeZone && e.clientY >= rect.top) {
-        scrollSpeedRef.current = -Math.max(3, Math.round((rect.top + edgeZone - e.clientY) / 3));
-      } else if (e.clientY > rect.bottom - edgeZone && e.clientY <= rect.bottom) {
-        scrollSpeedRef.current = Math.max(3, Math.round((e.clientY - (rect.bottom - edgeZone)) / 3));
+      // Clamp to viewport so edge-scroll works even when container extends beyond the window
+      const visibleTop = Math.max(rect.top, 0);
+      const visibleBottom = Math.min(rect.bottom, window.innerHeight);
+      if (e.clientY < visibleTop + edgeZone && e.clientY >= visibleTop) {
+        // Quadratic ease — closer to edge = faster scroll
+        const ratio = (visibleTop + edgeZone - e.clientY) / edgeZone;
+        targetScrollSpeed.current = -(2 + ratio * ratio * 14);
+      } else if (e.clientY > visibleBottom - edgeZone && e.clientY <= visibleBottom) {
+        const ratio = (e.clientY - (visibleBottom - edgeZone)) / edgeZone;
+        targetScrollSpeed.current = 2 + ratio * ratio * 14;
       } else {
-        scrollSpeedRef.current = 0;
+        targetScrollSpeed.current = 0;
       }
     };
     window.addEventListener("mouseup", handleMouseUp);
