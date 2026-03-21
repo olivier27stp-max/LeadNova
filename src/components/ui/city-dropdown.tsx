@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -17,48 +17,78 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0, placement: "below" as "below" | "above" });
 
+  // Measure real menu height and position accordingly
   const updatePosition = useCallback(() => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const menuHeight = Math.min(cities.length * 36 + 44, 284); // estimate
-    const openAbove = spaceBelow < menuHeight && rect.top > menuHeight;
-    setPos({
-      top: openAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
-      left: rect.left,
-      width: Math.max(rect.width, 180),
-    });
-  }, [cities.length]);
+    if (!triggerRef.current || !menuRef.current) return;
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const menuHeight = menuRef.current.offsetHeight;
+    const spaceBelow = window.innerHeight - triggerRect.bottom - 8;
+    const spaceAbove = triggerRect.top - 8;
+    const openAbove = spaceBelow < menuHeight && spaceAbove > spaceBelow;
 
-  // Position the menu when opening
+    setPos({
+      top: openAbove ? triggerRect.top - menuHeight - 4 : triggerRect.bottom + 4,
+      left: triggerRect.left,
+      width: Math.max(triggerRect.width, 200),
+      placement: openAbove ? "above" : "below",
+    });
+  }, []);
+
+  // Position on open + reposition on scroll/resize
+  useLayoutEffect(() => {
+    if (!open) return;
+    // Defer to next frame so menuRef is mounted
+    const raf = requestAnimationFrame(() => updatePosition());
+    return () => cancelAnimationFrame(raf);
+  }, [open, updatePosition]);
+
   useEffect(() => {
     if (!open) return;
-    updatePosition();
-    window.addEventListener("scroll", updatePosition, true);
-    window.addEventListener("resize", updatePosition);
+    const reposition = () => requestAnimationFrame(updatePosition);
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
     return () => {
-      window.removeEventListener("scroll", updatePosition, true);
-      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
     };
   }, [open, updatePosition]);
 
-  // Isolate scroll: attach native wheel listener with { passive: false }
+  // Capture ALL wheel events on the menu portal — prevent page/table scroll
   useEffect(() => {
     if (!open) return;
-    const el = scrollRef.current;
+    const el = menuRef.current;
     if (!el) return;
+
     function handleWheel(e: WheelEvent) {
-      const { scrollTop, scrollHeight, clientHeight } = el!;
-      const atTop = scrollTop <= 0 && e.deltaY < 0;
-      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
-      if (atTop || atBottom) {
+      // Find the scrollable container inside the menu
+      const scrollable = el!.querySelector("[data-scroll]") as HTMLElement | null;
+      if (!scrollable) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = scrollable;
+      const maxScroll = scrollHeight - clientHeight;
+
+      if (maxScroll <= 0) {
+        // Not scrollable — block everything
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      // Let the scroll happen inside, but clamp at boundaries
+      if (e.deltaY < 0 && scrollTop <= 0) {
+        e.preventDefault();
+      } else if (e.deltaY > 0 && scrollTop >= maxScroll - 1) {
         e.preventDefault();
       }
       e.stopPropagation();
     }
+
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, [open]);
@@ -85,6 +115,18 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
+  }, [open]);
+
+  // Prevent touch move from scrolling the page when touching the dropdown
+  useEffect(() => {
+    if (!open) return;
+    const el = menuRef.current;
+    if (!el) return;
+    function handleTouch(e: TouchEvent) {
+      e.stopPropagation();
+    }
+    el.addEventListener("touchmove", handleTouch, { passive: false });
+    return () => el.removeEventListener("touchmove", handleTouch);
   }, [open]);
 
   const handleSelect = (city: string) => {
@@ -145,15 +187,16 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
 
             {/* Scrollable city list */}
             <div
-              ref={scrollRef}
-              className="max-h-[240px] overflow-y-auto overscroll-contain"
+              data-scroll
+              className="max-h-[240px] overflow-y-auto overscroll-contain scroll-smooth"
+              style={{ WebkitOverflowScrolling: "touch" }}
             >
               {cities.map((city) => (
                 <div
                   key={city}
                   className={cn(
                     "flex items-center justify-between px-3 py-2 text-sm cursor-pointer transition-colors",
-                    "hover:bg-primary-subtle",
+                    "hover:bg-primary-subtle active:bg-primary-subtle/70",
                     value === city && "text-primary font-medium bg-primary-subtle/50"
                   )}
                   onClick={() => handleSelect(city)}
