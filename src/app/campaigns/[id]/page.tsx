@@ -357,10 +357,37 @@ export default function CampaignDetailPage() {
     }
   }
 
-  async function handleToggleContact(prospectId: string) {
+  // Batch pending toggle changes and flush to server
+  const pendingAdds = useRef<Set<string>>(new Set());
+  const pendingRemoves = useRef<Set<string>>(new Set());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function flushPendingChanges() {
+    const toAdd = [...pendingAdds.current];
+    const toRemove = [...pendingRemoves.current];
+    pendingAdds.current.clear();
+    pendingRemoves.current.clear();
+
+    if (toAdd.length > 0) {
+      fetch(`/api/campaigns/${campaignId}/contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prospectIds: toAdd }),
+      }).catch(() => showToast(t("campaignDetail", "errorUpdate"), "error"));
+    }
+    if (toRemove.length > 0) {
+      fetch(`/api/campaigns/${campaignId}/contacts`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prospectIds: toRemove }),
+      }).catch(() => showToast(t("campaignDetail", "errorUpdate"), "error"));
+    }
+  }
+
+  function handleToggleContact(prospectId: string) {
     const isSelected = localSelected.has(prospectId);
 
-    // Optimistic update
+    // Instant local update
     setLocalSelected((prev) => {
       const next = new Set(prev);
       if (isSelected) {
@@ -372,27 +399,17 @@ export default function CampaignDetailPage() {
     });
     setSelectedCount((prev) => prev + (isSelected ? -1 : 1));
 
-    try {
-      const res = await fetch(`/api/campaigns/${campaignId}/contacts`, {
-        method: isSelected ? "DELETE" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prospectIds: [prospectId] }),
-      });
-      if (!res.ok) throw new Error("Failed");
-    } catch {
-      // Revert on failure
-      setLocalSelected((prev) => {
-        const next = new Set(prev);
-        if (isSelected) {
-          next.add(prospectId);
-        } else {
-          next.delete(prospectId);
-        }
-        return next;
-      });
-      setSelectedCount((prev) => prev + (isSelected ? 1 : -1));
-      showToast(t("campaignDetail", "errorUpdate"), "error");
+    // Queue for batch server sync
+    if (isSelected) {
+      pendingAdds.current.delete(prospectId);
+      pendingRemoves.current.add(prospectId);
+    } else {
+      pendingRemoves.current.delete(prospectId);
+      pendingAdds.current.add(prospectId);
     }
+
+    if (flushTimer.current) clearTimeout(flushTimer.current);
+    flushTimer.current = setTimeout(flushPendingChanges, 500);
   }
 
   async function handleSelectAll() {
