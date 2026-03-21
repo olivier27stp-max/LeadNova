@@ -52,6 +52,10 @@ import {
   Link2,
   Globe,
   Ban,
+  Crown,
+  Rocket,
+  Sparkles,
+  ArrowRight,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────
@@ -143,10 +147,13 @@ interface Settings {
     searchQueries: string[];
   };
   subscription: {
-    plan: string;
+    plan: "starter" | "growth" | "pro";
     status: string;
     maxUsers: number;
     maxEmailsPerMonth: number;
+    maxDiscoveriesPerMonth: number;
+    discoveriesUsedThisMonth: number;
+    currentPeriodStart: string;
   };
 }
 
@@ -3637,8 +3644,68 @@ export default function SettingsPage() {
           </motion.div>
         );
 
-      // === ABONNEMENT ===
-      case "subscription":
+      // === PLANS & TARIFICATION ===
+      case "subscription": {
+        const PLANS = [
+          {
+            id: "starter" as const,
+            name: t("settings", "planStarter"),
+            price: 39,
+            icon: Sparkles,
+            maxDiscoveries: 5000,
+            maxEnrichments: 5000,
+            maxEmails: 1000,
+            campaigns: 5,
+            badge: null,
+            color: "primary",
+          },
+          {
+            id: "growth" as const,
+            name: t("settings", "planGrowth"),
+            price: 109,
+            icon: Rocket,
+            maxDiscoveries: 15000,
+            maxEnrichments: 15000,
+            maxEmails: 5000,
+            campaigns: 20,
+            badge: t("settings", "mostPopular"),
+            color: "accent",
+          },
+          {
+            id: "pro" as const,
+            name: t("settings", "planPro"),
+            price: 209,
+            icon: Crown,
+            maxDiscoveries: 50000,
+            maxEnrichments: 50000,
+            maxEmails: 15000,
+            campaigns: -1,
+            badge: t("settings", "bestValue"),
+            color: "success",
+          },
+        ];
+
+        const currentPlan = settings.subscription.plan;
+        const currentPlanIndex = PLANS.findIndex((p) => p.id === currentPlan);
+        const used = settings.subscription.discoveriesUsedThisMonth || 0;
+        const max = settings.subscription.maxDiscoveriesPerMonth || 5000;
+        const usagePercent = Math.min(100, Math.round((used / max) * 100));
+
+        async function handlePlanChange(planId: "starter" | "growth" | "pro") {
+          if (!settings || planId === currentPlan) return;
+          const plan = PLANS.find((p) => p.id === planId)!;
+          if (!confirm(`${t("settings", "confirmPlanChangeDesc")} ${plan.name} (${plan.price}$ USD${t("settings", "perMonth")}) ?`)) return;
+          const updated = {
+            ...settings.subscription,
+            plan: planId,
+            maxDiscoveriesPerMonth: plan.maxDiscoveries,
+            maxEmailsPerMonth: plan.maxEmails,
+          };
+          setSettings({ ...settings, subscription: updated } as Settings);
+          await saveSection("subscription", updated as unknown as Record<string, unknown>);
+          showToast(t("settings", "planChanged"), "success");
+        }
+
         return (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -3649,55 +3716,122 @@ export default function SettingsPage() {
               title={t("settings", "subscriptionTitle")}
               description={t("settings", "subscriptionDesc")}
             >
-              <div className="bg-primary-subtle rounded-lg p-6 mb-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-foreground-muted uppercase font-medium">
-                      {t("settings", "currentPlan")}
-                    </p>
-                    <p className="text-2xl font-bold text-primary mt-1 capitalize">
-                      {settings.subscription.plan}
-                    </p>
-                  </div>
-                  <Badge
-                    variant={
-                      settings.subscription.status === "active"
-                        ? "success"
-                        : "default"
-                    }
-                  >
-                    {settings.subscription.status === "active"
-                      ? t("settings", "statusActive")
-                      : settings.subscription.status}
+              {/* Usage bar */}
+              <div className="bg-background-subtle rounded-lg p-5 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-medium text-foreground">{t("settings", "usageThisPeriod")}</p>
+                  <Badge variant={usagePercent >= 90 ? "danger" : usagePercent >= 70 ? "warning" : "success"}>
+                    {used.toLocaleString()} / {max.toLocaleString()} {t("settings", "discoveries")}
                   </Badge>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 border border-border rounded-lg">
-                  <p className="text-sm text-foreground-muted">
-                    {t("settings", "allowedUsers")}
-                  </p>
-                  <p className="text-xl font-bold text-foreground">
-                    {settings.subscription.maxUsers}
-                  </p>
+                <div className="w-full bg-background-muted rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all duration-500",
+                      usagePercent >= 90 ? "bg-danger" : usagePercent >= 70 ? "bg-warning" : "bg-success"
+                    )}
+                    style={{ width: `${usagePercent}%` }}
+                  />
                 </div>
-                <div className="p-4 border border-border rounded-lg">
-                  <p className="text-sm text-foreground-muted">
-                    {t("settings", "emailsPerMonth")}
-                  </p>
-                  <p className="text-xl font-bold text-foreground">
-                    {settings.subscription.maxEmailsPerMonth.toLocaleString()}
-                  </p>
-                </div>
+                <p className="text-xs text-foreground-muted mt-2">{usagePercent}% {t("settings", "discoveriesUsed").toLowerCase()}</p>
               </div>
-              <div className="mt-4 p-3 bg-primary-subtle rounded-lg">
-                <p className="text-xs text-primary">
-                  {t("settings", "subscriptionComingSoon")}
-                </p>
+
+              {/* Plan cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {PLANS.map((plan, idx) => {
+                  const isCurrent = plan.id === currentPlan;
+                  const isUpgrade = idx > currentPlanIndex;
+                  const PlanIcon = plan.icon;
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={cn(
+                        "relative rounded-xl border-2 p-5 transition-all",
+                        isCurrent
+                          ? "border-primary bg-primary-subtle shadow-md"
+                          : "border-border hover:border-foreground-muted hover:shadow-sm"
+                      )}
+                    >
+                      {/* Badge */}
+                      {plan.badge && (
+                        <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
+                          <span className="bg-accent text-white text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                            {plan.badge}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Header */}
+                      <div className="flex items-center gap-2 mb-3">
+                        <PlanIcon className={cn("w-5 h-5", isCurrent ? "text-primary" : "text-foreground-muted")} />
+                        <h3 className="text-base font-bold text-foreground">{plan.name}</h3>
+                      </div>
+
+                      {/* Price */}
+                      <div className="mb-4">
+                        <span className="text-3xl font-extrabold text-foreground">{plan.price}$</span>
+                        <span className="text-sm text-foreground-muted ml-1">USD{t("settings", "perMonth")}</span>
+                      </div>
+
+                      {/* Features */}
+                      <ul className="space-y-2 mb-5 text-sm">
+                        <li className="flex items-center gap-2">
+                          <Check className="w-4 h-4 text-success shrink-0" />
+                          <span className="text-foreground">{plan.maxDiscoveries.toLocaleString()} {t("settings", "planFeatureDiscoveries")}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-4 h-4 text-success shrink-0" />
+                          <span className="text-foreground">{plan.maxEnrichments.toLocaleString()} {t("settings", "planFeatureEnrichments")}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-4 h-4 text-success shrink-0" />
+                          <span className="text-foreground">{plan.maxEmails.toLocaleString()} {t("settings", "planFeatureEmails")}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-4 h-4 text-success shrink-0" />
+                          <span className="text-foreground">{plan.campaigns === -1 ? t("settings", "planFeatureUnlimited") : plan.campaigns} {t("settings", "planFeatureCampaigns")}</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-4 h-4 text-success shrink-0" />
+                          <span className="text-foreground">{t("settings", "planFeatureVerification")}</span>
+                        </li>
+                        {plan.id === "pro" && (
+                          <li className="flex items-center gap-2">
+                            <Check className="w-4 h-4 text-success shrink-0" />
+                            <span className="text-foreground">{t("settings", "planFeatureSupport")}</span>
+                          </li>
+                        )}
+                      </ul>
+
+                      {/* CTA */}
+                      {isCurrent ? (
+                        <div className="w-full py-2 px-4 rounded-lg bg-primary/10 text-primary text-sm font-semibold text-center">
+                          {t("settings", "currentPlanBadge")}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handlePlanChange(plan.id)}
+                          disabled={saving}
+                          className={cn(
+                            "w-full py-2 px-4 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-1.5",
+                            isUpgrade
+                              ? "bg-primary text-white hover:bg-primary/90"
+                              : "bg-background-muted text-foreground-secondary hover:bg-background-subtle"
+                          )}
+                        >
+                          {isUpgrade ? t("settings", "upgradePlan") : t("settings", "downgradePlan")}
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </SectionCard>
           </motion.div>
         );
+      }
 
       // === JOURNAL ===
       case "activity":

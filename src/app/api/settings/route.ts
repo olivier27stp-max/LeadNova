@@ -100,10 +100,13 @@ const DEFAULT_SETTINGS = {
     auditLogRetentionDays: 90,
   },
   subscription: {
-    plan: "free",
+    plan: "starter",
     status: "active",
     maxUsers: 5,
     maxEmailsPerMonth: 1000,
+    maxDiscoveriesPerMonth: 5000,
+    discoveriesUsedThisMonth: 0,
+    currentPeriodStart: new Date().toISOString(),
   },
 };
 

@@ -3,6 +3,7 @@ import { discoverProspects, discoverAllCities, loadTargetingSettings } from "@/l
 import { getDiscoveryProgress, setDiscoveryProgress, updateDiscoveryProgress, requestCancelDiscovery, isCancelRequested } from "@/lib/discovery-progress";
 import { logActivity, generateBatchId } from "@/lib/activity";
 import { getWorkspaceContext } from "@/lib/workspace";
+import { prisma } from "@/lib/db";
 
 export async function GET() {
   const progress = getDiscoveryProgress();
@@ -23,11 +24,63 @@ export async function POST(request: NextRequest) {
   const target = Math.max(1, targetCount || 10);
 
   try {
-    const maxToFind = target;
+    // Helper: increment discovery usage counter
+    async function incrementDiscoveryUsage(count: number) {
+      try {
+        const row = await prisma.appSettings.findFirst({ where, select: { id: true, data: true } });
+        if (!row) return;
+        const data = (row.data as Record<string, unknown>) || {};
+        const sub = (data.subscription as Record<string, unknown>) || {};
+        const periodStartVal = sub.currentPeriodStart as string | undefined;
+        const nowDate = new Date();
+        const pDate = periodStartVal ? new Date(periodStartVal) : null;
+        const newMonth = !pDate || pDate.getMonth() !== nowDate.getMonth() || pDate.getFullYear() !== nowDate.getFullYear();
+        const prevUsed = newMonth ? 0 : ((sub.discoveriesUsedThisMonth as number) || 0);
+        await prisma.appSettings.update({
+          where: { id: row.id },
+          data: {
+            data: {
+              ...data,
+              subscription: {
+                ...sub,
+                discoveriesUsedThisMonth: prevUsed + count,
+                currentPeriodStart: newMonth ? nowDate.toISOString() : (periodStartVal || nowDate.toISOString()),
+              },
+            },
+          },
+        });
+      } catch { /* silent */ }
+    }
 
-    // Load cities from user targeting settings
+    // Load settings (targeting + subscription)
     const targeting = await loadTargetingSettings(workspaceId);
     const settingsCities = targeting.cities;
+
+    // Check subscription discovery limit
+    const where = workspaceId ? { workspaceId } : { workspaceId: null };
+    const settingsRow = await prisma.appSettings.findFirst({ where, select: { data: true } });
+    const settingsData = (settingsRow?.data as Record<string, unknown>) || {};
+    const subscription = (settingsData.subscription as Record<string, unknown>) || {};
+    const maxDiscoveries = (subscription.maxDiscoveriesPerMonth as number) || 5000;
+    const usedDiscoveries = (subscription.discoveriesUsedThisMonth as number) || 0;
+    const periodStart = subscription.currentPeriodStart as string | undefined;
+
+    // Reset counter if new month
+    const now = new Date();
+    const periodDate = periodStart ? new Date(periodStart) : null;
+    const isNewMonth = !periodDate || periodDate.getMonth() !== now.getMonth() || periodDate.getFullYear() !== now.getFullYear();
+    const currentUsed = isNewMonth ? 0 : usedDiscoveries;
+
+    if (currentUsed >= maxDiscoveries) {
+      return NextResponse.json(
+        { error: `Limite de découvertes atteinte (${maxDiscoveries.toLocaleString()}/mois). Passez à un plan supérieur dans Paramètres > Plans et tarifs.` },
+        { status: 429 }
+      );
+    }
+
+    // Cap target to remaining allowance
+    const remaining = maxDiscoveries - currentUsed;
+    const maxToFind = Math.min(target, remaining);
 
     if (city === "all" && settingsCities.length === 0) {
       return NextResponse.json(
@@ -129,6 +182,9 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        // Update discovery usage counter
+        if (totalNew > 0) await incrementDiscoveryUsage(totalNew);
+
         return NextResponse.json({
           message: wasCancelled
             ? `Recherche arrêtée (${totalNew} nouveaux trouvés avant l'arrêt)`
@@ -193,6 +249,9 @@ export async function POST(request: NextRequest) {
           industry: industry || undefined,
         },
       });
+
+      // Update discovery usage counter
+      if (result.new > 0) await incrementDiscoveryUsage(result.new);
 
       return NextResponse.json({
         message: `Discovery complete for ${city}`,
