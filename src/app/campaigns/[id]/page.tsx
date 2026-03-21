@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
@@ -37,6 +37,7 @@ import { ToastContainer } from "@/components/ui/toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import CampaignReports from "@/components/CampaignReports";
+import { CityDropdown } from "@/components/ui/city-dropdown";
 import { useTranslation } from "@/components/LanguageProvider";
 
 // ─── Types ───────────────────────────────────────────────
@@ -242,6 +243,7 @@ export default function CampaignDetailPage() {
   const [contactsLoading, setContactsLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [contactTypeFilter, setContactTypeFilter] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
   const [localSelected, setLocalSelected] = useState<Set<string>>(new Set());
   const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -521,6 +523,25 @@ export default function CampaignDetailPage() {
       fetchContacts();
     }
   }, [activeTab, fetchContacts]);
+
+  // Available cities from contacts for the city filter dropdown
+  const availableCities = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const c of contacts) {
+      const city = c.city?.trim();
+      if (city) {
+        const key = city.toLowerCase().normalize("NFC");
+        if (!seen.has(key)) seen.set(key, city);
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [contacts]);
+
+  // Filter contacts by city (client-side, instant)
+  const displayContacts = useMemo(() => {
+    if (!cityFilter) return contacts;
+    return contacts.filter((c) => c.city?.trim().toLowerCase() === cityFilter.trim().toLowerCase());
+  }, [contacts, cityFilter]);
 
   // ─── Handlers ───────────────────────────────────────
 
@@ -876,7 +897,7 @@ export default function CampaignDetailPage() {
   // ─── Render ─────────────────────────────────────────
 
   const allPageSelected =
-    contacts.length > 0 && contacts.every((c) => localSelected.has(c.id));
+    displayContacts.length > 0 && displayContacts.every((c) => localSelected.has(c.id));
 
   const tabItems = [
     { id: "message", label: t("campaignDetail", "message") },
@@ -1655,7 +1676,7 @@ export default function CampaignDetailPage() {
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted w-10">
                       <input
                         type="checkbox"
-                        checked={allPageSelected && contacts.length > 0}
+                        checked={allPageSelected && displayContacts.length > 0}
                         onChange={() =>
                           allPageSelected ? handleDeselectAll() : handleSelectAll()
                         }
@@ -1669,7 +1690,12 @@ export default function CampaignDetailPage() {
                       Email
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
-                      {t("prospects", "city")}
+                      <CityDropdown
+                        value={cityFilter}
+                        onChange={setCityFilter}
+                        cities={availableCities}
+                        placeholder={t("prospects", "city")}
+                      />
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
                       {t("prospects", "type")}
@@ -1690,18 +1716,18 @@ export default function CampaignDetailPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : contacts.length === 0 ? (
+                  ) : displayContacts.length === 0 ? (
                     <tr>
                       <td colSpan={6}>
                         <EmptyState
                           icon={<Users />}
                           title={
-                            search || contactTypeFilter
+                            search || contactTypeFilter || cityFilter
                               ? t("campaignDetail", "noContactFilter")
                               : t("campaignDetail", "noContactApp")
                           }
                           description={
-                            search || contactTypeFilter
+                            search || contactTypeFilter || cityFilter
                               ? undefined
                               : t("campaignDetail", "noContactDesc")
                           }
@@ -1709,7 +1735,7 @@ export default function CampaignDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    contacts.map((c, idx) => (
+                    displayContacts.map((c, idx) => (
                       <tr
                         key={c.id}
                         id={`contact-${c.id}`}
