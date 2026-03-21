@@ -1332,12 +1332,15 @@ export default function CampaignDetailPage() {
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted">
                       {t("prospects", "score")}
                     </th>
+                    <th className="text-left px-4 py-3 font-medium text-foreground-muted">
+                      Statut
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {contactsLoading ? (
                     <tr>
-                      <td colSpan={6} className="p-4">
+                      <td colSpan={7} className="p-4">
                         <div className="space-y-3">
                           {[...Array(5)].map((_, i) => (
                             <Skeleton key={i} className="h-10 w-full" />
@@ -1347,7 +1350,7 @@ export default function CampaignDetailPage() {
                     </tr>
                   ) : contacts.length === 0 ? (
                     <tr>
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <EmptyState
                           icon={<Users />}
                           title={
@@ -1397,6 +1400,11 @@ export default function CampaignDetailPage() {
                         </td>
                         <td className="px-4 py-3">
                           <span className="font-mono text-foreground">{c.leadScore}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={c.status === "CONTACTED" || c.status === "REPLIED" || c.status === "QUALIFIED" ? "success" : c.status === "NOT_INTERESTED" ? "destructive" : "secondary"}>
+                            {t("prospectStatus", c.status) || c.status}
+                          </Badge>
                         </td>
                       </tr>
                     ))

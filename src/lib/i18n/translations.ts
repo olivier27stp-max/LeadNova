@@ -79,6 +79,16 @@ export const translations = {
     nouveau_client: { fr: "Nouveau client", en: "New Client" },
   },
 
+  // ─── Prospect Statuses ────────────────────────────────
+  prospectStatus: {
+    NEW: { fr: "Non contacté", en: "Not contacted" },
+    ENRICHED: { fr: "Non contacté", en: "Not contacted" },
+    CONTACTED: { fr: "Contacté", en: "Contacted" },
+    REPLIED: { fr: "Répondu", en: "Replied" },
+    QUALIFIED: { fr: "Qualifié", en: "Qualified" },
+    NOT_INTERESTED: { fr: "Pas intéressé", en: "Not interested" },
+  },
+
   // ─── Dashboard ──────────────────────────────────────────
   dashboard: {
     title: { fr: "Tableau de bord", en: "Dashboard" },
