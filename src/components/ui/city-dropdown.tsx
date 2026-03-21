@@ -13,6 +13,10 @@ interface CityDropdownProps {
   className?: string;
 }
 
+const HEADER_HEIGHT = 37; // "Toutes les villes" row + border
+const MAX_LIST_HEIGHT = 240;
+const VIEWPORT_PADDING = 12;
+
 export function CityDropdown({ value, onChange, cities, placeholder = "Ville", className }: CityDropdownProps) {
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
@@ -20,26 +24,34 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
   const popoverRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<React.CSSProperties>({});
+  const [listMaxH, setListMaxH] = useState(MAX_LIST_HEIGHT);
 
-  // ── Position popover relative to trigger ──
+  // ── Position popover + constrain list height to available space ──
   const reposition = useCallback(() => {
     const el = triggerRef.current;
-    const pop = popoverRef.current;
-    if (!el || !pop) return;
+    if (!el) return;
     const r = el.getBoundingClientRect();
-    const h = pop.scrollHeight;
-    const below = window.innerHeight - r.bottom;
-    const above = r.top;
-    const goUp = below < h + 8 && above > below;
+
+    const spaceBelow = window.innerHeight - r.bottom - VIEWPORT_PADDING;
+    const spaceAbove = r.top - VIEWPORT_PADDING;
+
+    // Decide direction: prefer below, go above only if significantly more room
+    const idealHeight = HEADER_HEIGHT + Math.min(cities.length * 36, MAX_LIST_HEIGHT);
+    const goUp = spaceBelow < idealHeight && spaceAbove > spaceBelow;
+
+    const available = goUp ? spaceAbove : spaceBelow;
+    const constrainedListH = Math.max(80, Math.min(MAX_LIST_HEIGHT, available - HEADER_HEIGHT));
+
+    setListMaxH(constrainedListH);
     setStyle({
       position: "fixed",
       left: r.left,
-      top: goUp ? r.top - h - 4 : r.bottom + 4,
+      top: goUp ? r.top - Math.min(idealHeight, available) - 4 : r.bottom + 4,
       minWidth: Math.max(r.width, 200),
       zIndex: 9999,
     });
     setReady(true);
-  }, []);
+  }, [cities.length]);
 
   // Mount → measure → show
   useEffect(() => {
@@ -77,7 +89,7 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
     return () => document.removeEventListener("keydown", h);
   }, [open]);
 
-  // ── Scroll isolation: handler directly on the scrollable list ──
+  // ── Scroll isolation on the list ──
   useEffect(() => {
     if (!open) return;
     const list = listRef.current;
@@ -85,29 +97,24 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
     const h = (e: WheelEvent) => {
       const max = list.scrollHeight - list.clientHeight;
       if (max <= 0) {
-        // List not scrollable — block so page doesn't scroll
         e.preventDefault();
       } else if (e.deltaY < 0 && list.scrollTop <= 0) {
-        // At top, scrolling up — block
         e.preventDefault();
       } else if (e.deltaY > 0 && list.scrollTop >= max - 1) {
-        // At bottom, scrolling down — block
         e.preventDefault();
       }
-      // Always stop propagation so table/page never gets the event
       e.stopPropagation();
     };
     list.addEventListener("wheel", h, { passive: false });
     return () => list.removeEventListener("wheel", h);
   }, [open]);
 
-  // Block wheel on the header area (outside the list)
+  // Block wheel on header area
   useEffect(() => {
     if (!open) return;
     const pop = popoverRef.current;
     if (!pop) return;
     const h = (e: WheelEvent) => {
-      // If event is from inside the list, the list handler already dealt with it
       if (listRef.current?.contains(e.target as Node)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -158,11 +165,11 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
 
             {cities.length > 0 && <div className="border-t border-border" />}
 
-            {/* Scrollable list */}
+            {/* Scrollable list — height constrained to available viewport space */}
             <div
               ref={listRef}
-              className="max-h-[240px] overflow-y-auto overscroll-contain"
-              style={{ WebkitOverflowScrolling: "touch" }}
+              className="overflow-y-auto overscroll-contain"
+              style={{ maxHeight: listMaxH, WebkitOverflowScrolling: "touch" }}
             >
               {cities.map(city => (
                 <div
