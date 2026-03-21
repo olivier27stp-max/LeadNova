@@ -1295,10 +1295,20 @@ export default function CampaignDetailPage() {
                     {contactsTotal} {contactsTotal !== 1 ? t("campaignDetail", "contactPlural") : t("campaignDetail", "contact")}{" "}
                     {contactTypeFilter && `(${contactTypeFilter})`}
                   </p>
-                  <p className="text-sm font-medium text-primary">
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-primary hover:underline cursor-pointer"
+                    onClick={() => {
+                      const firstSelected = contacts.find((c) => localSelected.has(c.id));
+                      if (firstSelected) {
+                        const el = document.getElementById(`contact-${firstSelected.id}`);
+                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }
+                    }}
+                  >
                     {selectedCount} {selectedCount !== 1 ? t("campaignDetail", "contactPlural") : t("campaignDetail", "contact")}{" "}
                     {selectedCount !== 1 ? t("prospects", "selectedPlural") : t("prospects", "selected")}
-                  </p>
+                  </button>
                 </div>
               </div>
 
@@ -1370,6 +1380,7 @@ export default function CampaignDetailPage() {
                     contacts.map((c) => (
                       <tr
                         key={c.id}
+                        id={`contact-${c.id}`}
                         className={`border-b border-border hover:bg-card-hover cursor-pointer transition-colors ${
                           localSelected.has(c.id) ? "bg-primary-subtle/50" : ""
                         }`}
