@@ -184,6 +184,7 @@ export default function CampaignDetailPage() {
   // Send state
   const [showSendConfirm, setShowSendConfirm] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [unverifiedStats, setUnverifiedStats] = useState<{ total: number; unverified: number } | null>(null);
   const [sendResult, setSendResult] = useState<{
     sent: number;
@@ -211,6 +212,186 @@ export default function CampaignDetailPage() {
   const [search, setSearch] = useState("");
   const [contactTypeFilter, setContactTypeFilter] = useState("");
   const [localSelected, setLocalSelected] = useState<Set<string>>(new Set());
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  // Batch pending toggle changes and flush to server
+  const pendingAdds = useRef<Set<string>>(new Set());
+  const pendingRemoves = useRef<Set<string>>(new Set());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function flushPendingChanges() {
+    const toAdd = [...pendingAdds.current];
+    const toRemove = [...pendingRemoves.current];
+    pendingAdds.current.clear();
+    pendingRemoves.current.clear();
+
+    if (toAdd.length > 0) {
+      fetch(`/api/campaigns/${campaignId}/contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prospectIds: toAdd }),
+      }).catch(() => showToast(t("campaignDetail", "errorUpdate"), "error"));
+    }
+    if (toRemove.length > 0) {
+      fetch(`/api/campaigns/${campaignId}/contacts`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prospectIds: toRemove }),
+      }).catch(() => showToast(t("campaignDetail", "errorUpdate"), "error"));
+    }
+  }
+
+  // ─── Drag-to-select for contacts ───────────────────
+  const isDragging = useRef(false);
+  const dragSelectMode = useRef<boolean>(true);
+  const dragStartIndex = useRef<number>(-1);
+  const dragLastIndex = useRef<number>(-1);
+  const dragPrevSelected = useRef<Set<string>>(new Set());
+  const contactsScrollRef = useRef<HTMLDivElement>(null);
+  const scrollSpeedRef = useRef(0);
+  const rafRef = useRef<number>(0);
+  const mouseYRef = useRef(0);
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
+  const dragPendingId = useRef<string | null>(null);
+  const dragStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const DRAG_THRESHOLD = 8;
+
+  const applyContactDragRange = useCallback((currentIdx: number) => {
+    if (dragStartIndex.current === -1 || currentIdx === dragLastIndex.current) return;
+    dragLastIndex.current = currentIdx;
+    const lo = Math.min(dragStartIndex.current, currentIdx);
+    const hi = Math.max(dragStartIndex.current, currentIdx);
+    const cs = contactsRef.current;
+    const rangeIds = new Set<string>();
+    for (let i = lo; i <= hi; i++) rangeIds.add(cs[i].id);
+    setLocalSelected(() => {
+      const next = new Set(dragPrevSelected.current);
+      for (const rid of rangeIds) {
+        if (dragSelectMode.current) next.add(rid); else next.delete(rid);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleContactDragStart = useCallback((id: string, e: React.MouseEvent) => {
+    dragPendingId.current = id;
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    isDragging.current = false;
+
+    const willSelect = !localSelected.has(id);
+    dragSelectMode.current = willSelect;
+    dragPrevSelected.current = new Set(localSelected);
+    const idx = contacts.findIndex((c) => c.id === id);
+    dragStartIndex.current = idx;
+    dragLastIndex.current = idx;
+    setLocalSelected((prev) => {
+      const next = new Set(prev);
+      if (willSelect) next.add(id); else next.delete(id);
+      return next;
+    });
+    setSelectedCount((prev) => prev + (willSelect ? 1 : -1));
+  }, [localSelected, contacts]);
+
+  useEffect(() => {
+    let lastTime = 0;
+    const loop = (time: number) => {
+      if (isDragging.current && contactsScrollRef.current) {
+        if (lastTime && scrollSpeedRef.current !== 0) {
+          const dt = time - lastTime;
+          contactsScrollRef.current.scrollBy(0, scrollSpeedRef.current * (dt / 16));
+        }
+        const el = document.elementFromPoint(window.innerWidth / 3, mouseYRef.current);
+        if (el) {
+          const tr = el.closest("tr[data-contact-idx]");
+          if (tr) {
+            const idx = parseInt(tr.getAttribute("data-contact-idx")!, 10);
+            if (!isNaN(idx)) applyContactDragRange(idx);
+          }
+        }
+      }
+      lastTime = time;
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+
+    const handleMouseUp = () => {
+      if (isDragging.current || dragPendingId.current) {
+        // Compute diff and flush batch changes
+        const prev = dragPrevSelected.current;
+        setLocalSelected((current) => {
+          const toAdd: string[] = [];
+          const toRemove: string[] = [];
+          current.forEach((id) => { if (!prev.has(id)) toAdd.push(id); });
+          prev.forEach((id) => { if (!current.has(id)) toRemove.push(id); });
+          // Update selectedCount based on diff
+          setSelectedCount(current.size);
+          // Queue batch sync (skip the first single-click item already handled)
+          if (toAdd.length > 0) {
+            toAdd.forEach((id) => {
+              pendingRemoves.current.delete(id);
+              pendingAdds.current.add(id);
+            });
+          }
+          if (toRemove.length > 0) {
+            toRemove.forEach((id) => {
+              pendingAdds.current.delete(id);
+              pendingRemoves.current.add(id);
+            });
+          }
+          if (toAdd.length > 0 || toRemove.length > 0) {
+            if (flushTimer.current) clearTimeout(flushTimer.current);
+            flushTimer.current = setTimeout(flushPendingChanges, 300);
+          }
+          return current;
+        });
+      }
+      isDragging.current = false;
+      dragPendingId.current = null;
+      dragStartIndex.current = -1;
+      dragLastIndex.current = -1;
+      scrollSpeedRef.current = 0;
+    };
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseYRef.current = e.clientY;
+      if (!isDragging.current && dragPendingId.current) {
+        const dx = e.clientX - dragStartPos.current.x;
+        const dy = e.clientY - dragStartPos.current.y;
+        if (Math.abs(dx) + Math.abs(dy) >= DRAG_THRESHOLD) {
+          isDragging.current = true;
+          dragPendingId.current = null;
+        } else {
+          return;
+        }
+      }
+      if (!isDragging.current || !contactsScrollRef.current) { scrollSpeedRef.current = 0; return; }
+      const rect = contactsScrollRef.current.getBoundingClientRect();
+      const edgeZone = 80;
+      if (e.clientY < rect.top + edgeZone && e.clientY >= rect.top) {
+        scrollSpeedRef.current = -Math.max(3, Math.round((rect.top + edgeZone - e.clientY) / 3));
+      } else if (e.clientY > rect.bottom - edgeZone && e.clientY <= rect.bottom) {
+        scrollSpeedRef.current = Math.max(3, Math.round((e.clientY - (rect.bottom - edgeZone)) / 3));
+      } else {
+        scrollSpeedRef.current = 0;
+      }
+    };
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => {
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [applyContactDragRange]);
+
+  // Scroll-to-top button for contacts table
+  useEffect(() => {
+    const el = contactsScrollRef.current;
+    if (!el) return;
+    const onScroll = () => setShowScrollTop(el.scrollTop > 200);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [activeTab]);
 
   // ─── Fetch campaign ─────────────────────────────────
 
@@ -357,33 +538,6 @@ export default function CampaignDetailPage() {
     }
   }
 
-  // Batch pending toggle changes and flush to server
-  const pendingAdds = useRef<Set<string>>(new Set());
-  const pendingRemoves = useRef<Set<string>>(new Set());
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function flushPendingChanges() {
-    const toAdd = [...pendingAdds.current];
-    const toRemove = [...pendingRemoves.current];
-    pendingAdds.current.clear();
-    pendingRemoves.current.clear();
-
-    if (toAdd.length > 0) {
-      fetch(`/api/campaigns/${campaignId}/contacts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prospectIds: toAdd }),
-      }).catch(() => showToast(t("campaignDetail", "errorUpdate"), "error"));
-    }
-    if (toRemove.length > 0) {
-      fetch(`/api/campaigns/${campaignId}/contacts`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prospectIds: toRemove }),
-      }).catch(() => showToast(t("campaignDetail", "errorUpdate"), "error"));
-    }
-  }
-
   function handleToggleContact(prospectId: string) {
     const isSelected = localSelected.has(prospectId);
 
@@ -483,6 +637,25 @@ export default function CampaignDetailPage() {
       showToast(t("campaignDetail", "errorSaving"), "error");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleSendFollowUp() {
+    setSendingFollowUp(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/follow-up`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || t("campaignDetail", "errorSaving"), "error");
+      } else if (data.sent === 0) {
+        showToast(t("campaignDetail", "noEligibleFollowUp") || "Aucun contact éligible pour la relance", "error");
+      } else {
+        showToast(`${data.sent} relance${data.sent > 1 ? "s" : ""} envoyée${data.sent > 1 ? "s" : ""}`, "success");
+      }
+    } catch {
+      showToast(t("campaignDetail", "errorSaving"), "error");
+    } finally {
+      setSendingFollowUp(false);
     }
   }
 
@@ -779,6 +952,24 @@ export default function CampaignDetailPage() {
         </div>
       )}
 
+      {/* Missing sender email warning */}
+      {!companySettings.email && (
+        <div className="mb-4 rounded-lg px-4 py-3 text-sm flex items-center gap-3 bg-warning-subtle border border-warning/20">
+          <AlertTriangle className="size-4 text-warning shrink-0" />
+          <p className="text-foreground-secondary">
+            {locale === "en"
+              ? "No sender email configured. Go to "
+              : "Aucun email d'envoi configuré. Allez dans "}
+            <a href="/settings" className="text-accent underline font-medium">
+              {locale === "en" ? "Settings" : "Paramètres"}
+            </a>
+            {locale === "en"
+              ? " → Company to set your email before sending."
+              : " → Entreprise pour configurer votre email avant d'envoyer."}
+          </p>
+        </div>
+      )}
+
       {/* Scheduled Email Banner */}
       {scheduledEmail && (
         <div className="mb-4 rounded-lg px-4 py-3 text-sm flex items-center justify-between gap-4 bg-accent-subtle border border-accent/20">
@@ -891,6 +1082,14 @@ export default function CampaignDetailPage() {
                 >
                   <CalendarClock className="size-4 text-accent" />
                   {t("campaignDetail", "scheduleEmail")}
+                </button>
+                <button
+                  className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-foreground hover:bg-card-hover transition-colors border-t border-border"
+                  disabled={sendingFollowUp}
+                  onClick={() => { setShowSendDropdown(false); handleSendFollowUp(); }}
+                >
+                  <RefreshCw className={`size-4 text-warning ${sendingFollowUp ? "animate-spin" : ""}`} />
+                  {sendingFollowUp ? "Envoi en cours..." : "Envoyer les relances"}
                 </button>
               </div>
             )}
@@ -1330,7 +1529,7 @@ export default function CampaignDetailPage() {
               </div>
 
               {/* Table */}
-              <div className="max-h-[600px] overflow-y-auto">
+              <div className="max-h-[600px] overflow-y-auto" ref={contactsScrollRef}>
               <table className="w-full text-sm">
                 <thead className="bg-background-subtle border-b border-border sticky top-0 z-10">
                   <tr>
@@ -1391,22 +1590,26 @@ export default function CampaignDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    contacts.map((c) => (
+                    contacts.map((c, idx) => (
                       <tr
                         key={c.id}
                         id={`contact-${c.id}`}
+                        data-contact-idx={idx}
                         className={`border-b border-border hover:bg-card-hover cursor-pointer transition-colors ${
                           localSelected.has(c.id) ? "bg-primary-subtle/50" : ""
                         }`}
                         onClick={() => handleToggleContact(c.id)}
                       >
-                        <td className="px-4 py-3">
+                        <td
+                          className="px-4 py-3 select-none"
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => { e.preventDefault(); handleContactDragStart(c.id, e); }}
+                        >
                           <input
                             type="checkbox"
                             checked={localSelected.has(c.id)}
                             onChange={() => handleToggleContact(c.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="rounded-md border-border"
+                            className="rounded-md border-border pointer-events-none"
                           />
                         </td>
                         <td className="px-4 py-3 font-medium text-foreground">{c.companyName}</td>
@@ -1424,7 +1627,7 @@ export default function CampaignDetailPage() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={c.status === "CONTACTED" || c.status === "REPLIED" || c.status === "QUALIFIED" ? "success" : c.status === "NOT_INTERESTED" ? "danger" : "default"}>
+                          <Badge variant={c.status === "CONTACTED" || c.status === "REPLIED" || c.status === "QUALIFIED" ? "success" : c.status === "NOT_INTERESTED" ? "danger" : c.status === "SCHEDULED" ? "warning" : "default"}>
                             {t("prospectStatus", c.status as "NEW") || c.status}
                           </Badge>
                         </td>
@@ -1433,6 +1636,15 @@ export default function CampaignDetailPage() {
                   )}
                 </tbody>
               </table>
+              {showScrollTop && (
+                <button
+                  onClick={() => contactsScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+                  className="sticky bottom-3 left-full mr-3 z-20 bg-foreground text-background w-9 h-9 rounded-full shadow-lg hover:opacity-90 transition-all flex items-center justify-center opacity-80 hover:opacity-100"
+                  title="Remonter"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                </button>
+              )}
               </div>
             </Card>
           </motion.div>

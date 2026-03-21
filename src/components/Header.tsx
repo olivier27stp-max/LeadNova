@@ -11,8 +11,10 @@ import {
   LayoutDashboard,
   Users,
   ShieldCheck,
+  CalendarDays,
   Megaphone,
   Settings,
+  StickyNote,
   Sun,
   Moon,
   Monitor,
@@ -25,6 +27,7 @@ const NAV_KEYS = [
   { href: "/", labelKey: "dashboard" as const, icon: LayoutDashboard },
   { href: "/prospects", labelKey: "prospects" as const, icon: Users },
   { href: "/email-verifier", labelKey: "emailVerifier" as const, icon: ShieldCheck },
+  { href: "/calendar", labelKey: "calendar" as const, icon: CalendarDays },
   { href: "/campaigns", labelKey: "campaigns" as const, icon: Megaphone },
   { href: "/settings", labelKey: "settings" as const, icon: Settings },
 ];
@@ -35,6 +38,7 @@ export default function Header() {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [unsubscribeCount, setUnsubscribeCount] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -42,6 +46,10 @@ export default function Header() {
     fetch("/api/blacklist?count=true")
       .then((r) => r.json())
       .then((d) => { if (d.count != null) setUnsubscribeCount(d.count); })
+      .catch(() => {});
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => { if (d.user?.role === "ADMIN") setIsAdmin(true); })
       .catch(() => {});
   }, []);
 
@@ -102,6 +110,20 @@ export default function Header() {
                 )}
               </Link>
             ))}
+            {isAdmin && (
+              <Link
+                href="/notes"
+                className={cn(
+                  "relative flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-md transition-colors",
+                  isActive("/notes")
+                    ? "text-foreground bg-background-muted"
+                    : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
+                )}
+              >
+                <StickyNote className="size-3.5" />
+                Notes
+              </Link>
+            )}
           </div>
         </div>
 

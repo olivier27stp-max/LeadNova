@@ -18,33 +18,46 @@ export interface CompanyInfo {
 
 // ─── Helpers ─────────────────────────────────────────────
 
-function buildAddressLine(info: CompanyInfo): string {
-  const parts = [info.address, info.city, info.province, info.postalCode, info.country].filter(Boolean);
-  return parts.join(", ");
-}
-
 function getContactName(info: CompanyInfo): string {
-  // Use the name part before the company name, or fall back
   return info.emailSignature?.split("\n")[0]?.trim()
     || process.env.CONTACT_NAME
-    || "L'équipe";
+    || "";
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 /**
- * Wraps a plain-text email body in a branded HTML template for LeadNova.
- * Compatible with Gmail, Outlook, Apple Mail, and all major clients.
- * Uses CID inline attachment for the logo image.
+ * Wraps a plain-text email body in a professional HTML template.
  *
- * @param body - Plain text email body
- * @param companyInfo - Company settings from DB (source of truth)
- * @param trackingPixelUrl - Optional tracking pixel URL
- * @param unsubscribeUrl - Optional unsubscribe URL
+ * Signature format:
+ *   Bonne journée,
+ *
+ *   {{contact_name}}
+ *   {{company_name}}
+ *   {{phone}}
+ *
+ *   ---
+ *   {{contact_name}}
+ *   {{company_name}} Inc.
+ *   {{phone}} · {{website}}
+ *   Canada
+ *
+ *   [Logo]
+ *
+ *   Se désabonner
  */
 export function wrapInEmailTemplate(
   body: string,
   companyInfo?: CompanyInfo,
   trackingPixelUrl?: string,
-  unsubscribeUrl?: string
+  unsubscribeUrl?: string,
+  logoEnabled?: boolean
 ): string {
   const info = companyInfo || {};
   const htmlBody = body
@@ -54,22 +67,90 @@ export function wrapInEmailTemplate(
     )
     .join("\n");
 
-  const companyName = info.name || process.env.COMPANY_NAME || "LeadNova";
-  const phone = info.phone || process.env.COMPANY_PHONE || "";
-  const website = info.website || process.env.COMPANY_WEBSITE || "";
   const contactName = getContactName(info);
-  const addressLine = buildAddressLine(info);
+  const companyName = info.name || "";
+  const phone = info.phone || "";
+  const website = info.website || "";
+  const websiteDisplay = website.replace(/^https?:\/\//, "");
+  const websiteHref = website.startsWith("http") ? website : `https://${website}`;
+  const showLogo = logoEnabled !== false;
 
-  // Build signature lines
-  const phoneLine = phone
-    ? `<a href="tel:${phone}" style="color:#2563eb;text-decoration:none;">${phone}</a>`
+  // ── Greeting block ──
+  const greetingHtml = `
+          <tr>
+            <td style="padding:24px 40px 0 40px;color:#374151;font-size:14px;line-height:1.8;">
+              Bonne journ&eacute;e,
+            </td>
+          </tr>`;
+
+  // ── Short signature (name, company, phone) ──
+  const shortSigLines: string[] = [];
+  if (contactName) shortSigLines.push(`<strong style="color:#111827;">${escapeHtml(contactName)}</strong>`);
+  if (companyName) shortSigLines.push(`<span style="color:#6b7280;">${escapeHtml(companyName)}</span>`);
+  if (phone) shortSigLines.push(`<a href="tel:${escapeHtml(phone)}" style="color:#374151;text-decoration:none;">${escapeHtml(phone)}</a>`);
+
+  const shortSigHtml = shortSigLines.length > 0
+    ? `
+          <tr>
+            <td style="padding:8px 40px 0 40px;color:#374151;font-size:14px;line-height:1.8;">
+              ${shortSigLines.join("<br>")}
+            </td>
+          </tr>`
     : "";
-  const websiteLine = website
-    ? `<a href="${website.startsWith("http") ? website : `https://${website}`}" style="color:#2563eb;text-decoration:none;">${website.replace(/^https?:\/\//, "")}</a>`
+
+  // ── Divider ──
+  const dividerHtml = `
+          <tr>
+            <td style="padding:20px 40px 0 40px;">
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;">
+            </td>
+          </tr>`;
+
+  // ── Full signature block (contact card) ──
+  const fullSigLines: string[] = [];
+  if (contactName) fullSigLines.push(`<strong style="color:#111827;font-size:13px;">${escapeHtml(contactName)}</strong>`);
+  if (companyName) fullSigLines.push(`<span style="color:#6b7280;font-size:13px;">${escapeHtml(companyName)} Inc.</span>`);
+
+  // Phone · Website on same line
+  const contactParts: string[] = [];
+  if (phone) contactParts.push(`<a href="tel:${escapeHtml(phone)}" style="color:#374151;text-decoration:none;font-size:12px;">${escapeHtml(phone)}</a>`);
+  if (website) contactParts.push(`<a href="${escapeHtml(websiteHref)}" style="color:#2563eb;text-decoration:none;font-size:12px;">${escapeHtml(websiteDisplay)}</a>`);
+  if (contactParts.length > 0) fullSigLines.push(contactParts.join(` <span style="color:#d1d5db;"> &middot; </span> `));
+
+  // Country
+  const country = info.country || "Canada";
+  fullSigLines.push(`<span style="color:#9ca3af;font-size:12px;">${escapeHtml(country)}</span>`);
+
+  const fullSigHtml = fullSigLines.length > 0
+    ? `
+          <tr>
+            <td style="padding:16px 40px 0 40px;color:#374151;font-size:13px;line-height:1.8;">
+              ${fullSigLines.join("<br>")}
+            </td>
+          </tr>`
     : "";
-  const contactLine = [phoneLine, websiteLine].filter(Boolean).join(" &nbsp;·&nbsp; ");
-  const addressHtml = addressLine
-    ? `<br><span style="color:#9ca3af;font-size:12px;">${addressLine}</span>`
+
+  // ── Logo block ──
+  const logoHtml = showLogo ? `
+          <tr>
+            <td style="padding:16px 40px 0 40px;text-align:center;">
+              <img
+                src="cid:company-logo"
+                alt="${escapeHtml(companyName || "Logo")}"
+                width="140"
+                style="display:inline-block;max-width:140px;height:auto;border:0;outline:none;text-decoration:none;"
+              />
+            </td>
+          </tr>` : "";
+
+  // ── Unsubscribe ──
+  const unsubHtml = unsubscribeUrl
+    ? `<a href="${escapeHtml(unsubscribeUrl)}" style="color:#9ca3af;text-decoration:underline;font-size:11px;">Se d&eacute;sabonner</a>`
+    : `<a href="mailto:${escapeHtml(info.email || "")}?subject=D%C3%89SABONNER" style="color:#9ca3af;text-decoration:underline;font-size:11px;">Se d&eacute;sabonner</a>`;
+
+  // ── Tracking pixel ──
+  const pixelHtml = trackingPixelUrl
+    ? `<img src="${escapeHtml(trackingPixelUrl)}" width="1" height="1" style="display:block;width:1px;height:1px;border:0;" alt="" />`
     : "";
 
   return `<!DOCTYPE html>
@@ -77,64 +158,54 @@ export function wrapInEmailTemplate(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .email-card { background-color: #1f2937 !important; }
+      .email-body { color: #f3f4f6 !important; }
+    }
+    @media only screen and (max-width: 620px) {
+      .email-card { width: 100% !important; border-radius: 0 !important; }
+      .email-cell { padding-left: 24px !important; padding-right: 24px !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f5;">
     <tr>
       <td align="center" style="padding:32px 16px;">
 
         <!-- Email card -->
-        <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <table class="email-card" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
 
           <!-- Body -->
           <tr>
-            <td style="padding:40px 40px 32px 40px;color:#1a1a1a;font-size:15px;">
+            <td class="email-cell email-body" style="padding:40px 40px 16px 40px;color:#1a1a1a;font-size:15px;">
               ${htmlBody}
             </td>
           </tr>
 
+          <!-- Greeting -->
+          ${greetingHtml}
+
+          <!-- Short signature -->
+          ${shortSigHtml}
+
           <!-- Divider -->
-          <tr>
-            <td style="padding:0 40px;">
-              <hr style="border:none;border-top:1px solid #e5e7eb;margin:0;">
-            </td>
-          </tr>
+          ${dividerHtml}
 
-          <!-- Signature -->
-          <tr>
-            <td style="padding:24px 40px 0 40px;color:#374151;font-size:14px;line-height:1.6;">
-              <strong style="color:#111827;">${contactName}</strong><br>
-              <span style="color:#6b7280;">${companyName}</span><br>
-              ${contactLine}${addressHtml}
-            </td>
-          </tr>
+          <!-- Full signature card -->
+          ${fullSigHtml}
 
-          <!-- Logo footer -->
-          <tr>
-            <td style="padding:24px 40px 0 40px;">
-              <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#000000;border-radius:6px;overflow:hidden;">
-                <tr>
-                  <td align="center" style="padding:20px 24px;">
-                    <img
-                      src="cid:leadnova-logo"
-                      alt="LeadNova"
-                      width="160"
-                      height="160"
-                      style="display:block;border:0;outline:none;text-decoration:none;width:160px;height:160px;object-fit:contain;"
-                    />
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+          <!-- Logo -->
+          ${logoHtml}
 
           <!-- Unsubscribe -->
           <tr>
-            <td style="padding:16px 40px 32px 40px;text-align:center;color:#9ca3af;font-size:11px;">
-              ${unsubscribeUrl
-                ? `<a href="${unsubscribeUrl}" style="color:#9ca3af;text-decoration:underline;">Se désabonner</a>`
-                : `Pour vous désabonner, répondez avec « DÉSABONNER » dans le sujet.`}
-              ${trackingPixelUrl ? `<img src="${trackingPixelUrl}" width="1" height="1" style="display:block;width:1px;height:1px;border:0;" alt="" />` : ""}
+            <td style="padding:24px 40px 32px 40px;text-align:center;">
+              ${unsubHtml}
+              ${pixelHtml}
             </td>
           </tr>
 
@@ -154,18 +225,13 @@ export function wrapInEmailTemplate(
  */
 export function getLogoAttachment(logoUrl?: string): object | null {
   try {
-    let logoPath: string;
-    if (logoUrl && logoUrl.startsWith("/") && !logoUrl.startsWith("//")) {
-      logoPath = path.join(process.cwd(), "public", logoUrl.slice(1));
-    } else {
-      logoPath = path.join(process.cwd(), "public", "leadnova-logo.png");
-    }
+    const logoPath = resolveLogoPath(logoUrl);
     if (!fs.existsSync(logoPath)) return null;
     const ext = path.extname(logoPath).slice(1) || "png";
     return {
       filename: `logo.${ext}`,
       path: logoPath,
-      cid: "leadnova-logo",
+      cid: "company-logo",
     };
   } catch {
     return null;
@@ -173,26 +239,64 @@ export function getLogoAttachment(logoUrl?: string): object | null {
 }
 
 /**
- * Plain-text fallback footer (for clients that don't render HTML).
- * Uses company settings from DB as source of truth.
+ * Returns the logo as a base64 data URI string for embedding directly in HTML.
+ * Used by providers that don't support CID attachments (e.g. Resend).
+ */
+export function getLogoBase64DataUri(logoUrl?: string): string | null {
+  try {
+    const logoPath = resolveLogoPath(logoUrl);
+    if (!fs.existsSync(logoPath)) return null;
+    const ext = path.extname(logoPath).slice(1) || "png";
+    const mime = ext === "svg" ? "image/svg+xml" : `image/${ext}`;
+    const data = fs.readFileSync(logoPath).toString("base64");
+    return `data:${mime};base64,${data}`;
+  } catch {
+    return null;
+  }
+}
+
+function resolveLogoPath(logoUrl?: string): string {
+  if (logoUrl && logoUrl.startsWith("/") && !logoUrl.startsWith("//")) {
+    return path.join(process.cwd(), "public", logoUrl.slice(1));
+  }
+  return path.join(process.cwd(), "public", "leadnova-logo.png");
+}
+
+/**
+ * Plain-text fallback footer.
+ * Matches the HTML signature structure.
  */
 export function getTextFooter(companyInfo?: CompanyInfo, unsubscribeUrl?: string): string {
   const info = companyInfo || {};
-  const companyName = info.name || process.env.COMPANY_NAME || "LeadNova";
-  const phone = info.phone || process.env.COMPANY_PHONE || "";
-  const website = info.website || process.env.COMPANY_WEBSITE || "";
   const contactName = getContactName(info);
-  const addressLine = buildAddressLine(info);
+  const companyName = info.name || "";
+  const phone = info.phone || "";
+  const website = info.website?.replace(/^https?:\/\//, "") || "";
+  const country = info.country || "Canada";
 
-  const contactLine = [phone, website].filter(Boolean).join(" | ");
   const unsub = unsubscribeUrl
     ? `Se désabonner: ${unsubscribeUrl}`
-    : `Pour vous désabonner, répondez avec "DÉSABONNER" dans le sujet.`;
+    : "";
 
-  const parts = [`\n\n--\n${contactName}\n${companyName}`];
-  if (contactLine) parts.push(contactLine);
-  if (addressLine) parts.push(addressLine);
-  parts.push(`\n${unsub}`);
+  // Short signature
+  const shortLines: string[] = [];
+  shortLines.push("Bonne journée,");
+  shortLines.push("");
+  if (contactName) shortLines.push(contactName);
+  if (companyName) shortLines.push(companyName);
+  if (phone) shortLines.push(phone);
 
-  return parts.join("\n");
+  // Full signature
+  const fullLines: string[] = [];
+  fullLines.push("---");
+  if (contactName) fullLines.push(contactName);
+  if (companyName) fullLines.push(`${companyName} Inc.`);
+  const contactParts: string[] = [];
+  if (phone) contactParts.push(phone);
+  if (website) contactParts.push(website);
+  if (contactParts.length > 0) fullLines.push(contactParts.join(" · "));
+  fullLines.push(country);
+
+  const sig = `\n\n${shortLines.join("\n")}\n\n${fullLines.join("\n")}`;
+  return unsub ? `${sig}\n\n${unsub}` : sig;
 }

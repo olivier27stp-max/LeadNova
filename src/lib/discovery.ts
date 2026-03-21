@@ -4,6 +4,27 @@ import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
 import { isCancelRequested } from "./discovery-progress";
 
+// ─── Blocked keywords loader ────────────────────────────
+async function loadBlockedKeywords(workspaceId?: string | null): Promise<string[]> {
+  try {
+    const where = workspaceId ? { workspaceId } : { workspaceId: null };
+    const row = await prisma.appSettings.findFirst({ where, select: { data: true } });
+    if (!row?.data || typeof row.data !== "object") return [];
+    const data = row.data as Record<string, unknown>;
+    const targeting = data.targeting as Record<string, unknown> | undefined;
+    if (!targeting?.blockedKeywords || !Array.isArray(targeting.blockedKeywords)) return [];
+    return (targeting.blockedKeywords as string[]).map((k) => k.toLowerCase().trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function matchesBlockedKeyword(text: string, blockedKeywords: string[]): boolean {
+  if (blockedKeywords.length === 0) return false;
+  const lower = text.toLowerCase();
+  return blockedKeywords.some((bk) => lower.includes(bk));
+}
+
 // ─── City name normalization (merge variants) ────────────
 const CITY_CANONICAL: Record<string, string> = {
   "montreal": "Montréal",
@@ -150,6 +171,7 @@ export async function discoverProspects(
 ): Promise<DiscoveryOutcome> {
   const normalizedCity = normalizeCityName(city);
   const queries = SEARCH_QUERIES.map((q) => q.replace("{city}", city));
+  const blockedKeywords = await loadBlockedKeywords(workspaceId);
 
   const allResults: SearchResult[] = [];
   const errors: string[] = [];
@@ -188,9 +210,17 @@ export async function discoverProspects(
     return true;
   });
 
+  // Filter out prospects matching blocked keywords
+  const filtered = blockedKeywords.length > 0
+    ? unique.filter((r) => {
+        const textToCheck = [r.companyName, r.industry, r.website, r.address].filter(Boolean).join(" ");
+        return !matchesBlockedKeyword(textToCheck, blockedKeywords);
+      })
+    : unique;
+
   let newCount = 0;
 
-  for (const result of unique) {
+  for (const result of filtered) {
     if (newCount >= maxNew || isCancelRequested()) break;
 
     try {

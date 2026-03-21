@@ -29,7 +29,7 @@ const DEFAULT_SETTINGS = {
     senderEmail: "",
     replyToEmail: "",
     defaultSignature: "",
-    defaultFooter: "Pour vous désabonner, répondez avec \"DÉSABONNER\" dans le sujet.",
+    defaultFooter: "",
     provider: "smtp",
     providerStatus: "not_configured",
     logoUrl: "/leadnova-logo.png",
@@ -71,6 +71,7 @@ const DEFAULT_SETTINGS = {
   },
   targeting: {
     keywords: [],
+    blockedKeywords: [],
     cities: [],
     searchQueries: [],
   },

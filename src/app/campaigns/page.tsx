@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Play, Pause, ShieldBan, Trash2, Megaphone, Inbox } from "lucide-react";
+import { Plus, Play, Pause, ShieldBan, Trash2, Megaphone, Inbox, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,14 @@ interface Campaign {
   lastSentAt: string | null;
   requireApproval: boolean;
   createdAt: string;
+}
+
+type StatsPeriod = "day" | "week" | "month";
+
+interface CampaignStats {
+  byCampaign: Record<string, number>;
+  total: number;
+  period: string;
 }
 
 interface BlacklistEntry {
@@ -74,6 +82,23 @@ export default function CampaignsPage() {
   const [newBlacklistEmail, setNewBlacklistEmail] = useState("");
   const [newBlacklistDomain, setNewBlacklistDomain] = useState("");
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<CampaignStats | null>(null);
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("day");
+
+  // Scroll to top button
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  function fetchStats(period: StatsPeriod) {
+    fetch(`/api/campaigns/stats?period=${period}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => data && setStats(data))
+      .catch(console.error);
+  }
 
   useEffect(() => {
     Promise.all([
@@ -92,7 +117,13 @@ export default function CampaignsPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+    fetchStats(statsPeriod);
   }, []);
+
+  function handlePeriodChange(period: StatsPeriod) {
+    setStatsPeriod(period);
+    fetchStats(period);
+  }
 
   async function createCampaign() {
     if (!newCampaignName.trim()) return;
@@ -196,6 +227,21 @@ export default function CampaignsPage() {
               <Megaphone className="size-4 text-foreground-muted" />
               {t("campaigns", "campaigns")}
             </CardTitle>
+            <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 bg-background">
+              {(["day", "week", "month"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => handlePeriodChange(p)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                    statsPeriod === p
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground-muted hover:text-foreground"
+                  }`}
+                >
+                  {t("campaigns", p === "day" ? "today" : p === "week" ? "thisWeek" : "thisMonth")}
+                </button>
+              ))}
+            </div>
           </CardHeader>
           <CardContent>
             {campaigns.length === 0 ? (
@@ -222,8 +268,12 @@ export default function CampaignsPage() {
                       >
                         {c.name}
                       </Link>
-                      <p className="text-xs text-foreground-muted mt-0.5">
-                        {t("campaigns", "maxPerDay")}: {c.maxPerDay}{t("campaigns", "perDay")} — {t("campaigns", "delay")}: {c.delayMinSeconds}-{c.delayMaxSeconds}s — {t("campaigns", "sentToday")}: {c.sentToday}
+                      <p className="text-xs text-foreground-muted mt-0.5 flex items-center gap-3">
+                        <span>{t("campaigns", "maxPerDay")}: {c.maxPerDay}{t("campaigns", "perDay")} — {t("campaigns", "delay")}: {c.delayMinSeconds}-{c.delayMaxSeconds}s</span>
+                        <span className="inline-flex items-center gap-1 text-primary font-medium">
+                          <Mail className="size-3" />
+                          {stats?.byCampaign[c.id] || 0} {t("campaigns", "emailsSent")}
+                        </span>
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-4">
@@ -341,6 +391,17 @@ export default function CampaignsPage() {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Scroll to top */}
+      {showScrollTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="fixed bottom-6 right-6 z-50 bg-foreground text-background w-10 h-10 rounded-full shadow-lg hover:opacity-90 transition-all flex items-center justify-center opacity-80 hover:opacity-100"
+          title={t("prospects", "scrollToTop")}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+        </button>
+      )}
     </div>
   );
 }

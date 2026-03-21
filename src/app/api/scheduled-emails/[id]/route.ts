@@ -28,7 +28,27 @@ export async function PATCH(
       data.scheduledFor = scheduled;
     }
     if (body.timezone) data.timezone = body.timezone;
-    if (body.status === "CANCELLED") data.status = "CANCELLED";
+    if (body.status === "CANCELLED") {
+      data.status = "CANCELLED";
+      // Revert prospect status from SCHEDULED to ENRICHED
+      if (existing.campaignId) {
+        const contacts = await prisma.campaignContact.findMany({
+          where: { campaignId: existing.campaignId },
+          select: { prospectId: true },
+        });
+        for (const contact of contacts) {
+          await prisma.prospect.updateMany({
+            where: { id: contact.prospectId, status: "SCHEDULED" },
+            data: { status: "ENRICHED" },
+          });
+        }
+      } else if (existing.prospectId) {
+        await prisma.prospect.updateMany({
+          where: { id: existing.prospectId, status: "SCHEDULED" },
+          data: { status: "ENRICHED" },
+        });
+      }
+    }
 
     const updated = await prisma.scheduledEmail.update({ where: { id }, data });
     return NextResponse.json(updated);
@@ -53,6 +73,26 @@ export async function DELETE(
       where: { id },
       data: { status: "CANCELLED" },
     });
+
+    // Revert prospect status from SCHEDULED to ENRICHED
+    if (existing.campaignId) {
+      const contacts = await prisma.campaignContact.findMany({
+        where: { campaignId: existing.campaignId },
+        select: { prospectId: true },
+      });
+      for (const contact of contacts) {
+        await prisma.prospect.updateMany({
+          where: { id: contact.prospectId, status: "SCHEDULED" },
+          data: { status: "ENRICHED" },
+        });
+      }
+    } else if (existing.prospectId) {
+      await prisma.prospect.updateMany({
+        where: { id: existing.prospectId, status: "SCHEDULED" },
+        data: { status: "ENRICHED" },
+      });
+    }
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handleWorkspaceError(error);

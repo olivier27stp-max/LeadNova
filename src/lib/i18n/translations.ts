@@ -42,6 +42,7 @@ export const translations = {
     dashboard: { fr: "Tableau de bord", en: "Dashboard" },
     prospects: { fr: "Prospects", en: "Prospects" },
     emailVerifier: { fr: "Email Vérificateur", en: "Email Verifier" },
+    calendar: { fr: "Calendrier", en: "Calendar" },
     campaigns: { fr: "Campagnes", en: "Campaigns" },
     settings: { fr: "Paramètres", en: "Settings" },
     theme: { fr: "Thème", en: "Theme" },
@@ -83,6 +84,7 @@ export const translations = {
   prospectStatus: {
     NEW: { fr: "Non contacté", en: "Not contacted" },
     ENRICHED: { fr: "Non contacté", en: "Not contacted" },
+    SCHEDULED: { fr: "Envoi cédulé", en: "Scheduled" },
     CONTACTED: { fr: "Contacté", en: "Contacted" },
     REPLIED: { fr: "Répondu", en: "Replied" },
     QUALIFIED: { fr: "Qualifié", en: "Qualified" },
@@ -328,6 +330,10 @@ export const translations = {
     blacklistEmptyDesc: { fr: "Ajoutez des emails ou domaines à bloquer.", en: "Add emails or domains to block." },
     domain: { fr: "Domaine", en: "Domain" },
     block: { fr: "Bloquer", en: "Block" },
+    emailsSent: { fr: "emails envoyés", en: "emails sent" },
+    today: { fr: "Aujourd'hui", en: "Today" },
+    thisWeek: { fr: "7 jours", en: "7 days" },
+    thisMonth: { fr: "30 jours", en: "30 days" },
   },
 
   // ─── Campaign Detail Page ───────────────────────────────
@@ -439,6 +445,7 @@ export const translations = {
     maximum: { fr: "Maximum", en: "Maximum" },
     followUp: { fr: "relance", en: "follow-up" },
     followUps: { fr: "relances", en: "follow-ups" },
+    noEligibleFollowUp: { fr: "Aucun contact éligible pour la relance", en: "No contacts eligible for follow-up" },
     perContact: { fr: "par contact, espacées de", en: "per contact, spaced by" },
     stopOnReply: { fr: "Arrêt automatique si le contact répond", en: "Auto-stop if contact replies" },
   },
@@ -447,6 +454,7 @@ export const translations = {
   settings: {
     title: { fr: "Paramètres", en: "Settings" },
     company: { fr: "Entreprise", en: "Company" },
+    emailSection: { fr: "Email", en: "Email" },
     team: { fr: "Équipe", en: "Team" },
     campaigns: { fr: "Campagnes", en: "Campaigns" },
     automation: { fr: "Automatisation", en: "Automation" },

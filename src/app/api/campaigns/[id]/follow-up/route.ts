@@ -4,15 +4,52 @@ import { sendEmail, canSendEmail, getRandomDelay } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
-// Template variable substitution
-function substituteVariables(
+interface CompanySettings {
+  name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+function titleCase(str: string): string {
+  return str.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function interpolate(
   template: string,
-  prospect: { companyName: string; city: string | null; email: string | null }
+  prospect: { companyName: string; city: string | null; email: string | null },
+  company: CompanySettings
 ): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
-    .replace(/\{\{city\}\}/g, prospect.city || "votre ville")
-    .replace(/\{\{contact_name\}\}/g, "");
+    .replace(/\{\{city\}\}/g, titleCase(prospect.city || "votre région"))
+    .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
+    .replace(/\{\{company_email\}\}/g, company.email || "")
+    .replace(/\{\{company_phone\}\}/g, company.phone || "")
+    .replace(/\{\{company_website\}\}/g, company.website || "")
+    .replace(/\{\{company_address\}\}/g, company.address || "")
+    .replace(/\{\{company_city\}\}/g, company.city || "")
+    .replace(/\{\{company_province\}\}/g, company.province || "")
+    .replace(/\{\{company_postal_code\}\}/g, company.postalCode || "")
+    .replace(/\{\{company_country\}\}/g, company.country || "")
+    .replace(/\{\{sender_name\}\}/g, company.name || "");
+}
+
+async function loadAutomationSettings(workspaceId: string) {
+  const settingsRow = await prisma.appSettings.findUnique({ where: { workspaceId } });
+  const settings = (settingsRow?.data as Record<string, unknown>) || {};
+  const automation = (settings.automation as Record<string, unknown>) || {};
+  return {
+    followUpDelayDays: (automation.followUpDelayDays as number) || 3,
+    maxFollowUps: (automation.maxFollowUps as number) || 3,
+    stopOnReply: automation.stopOnReply !== false,
+    companySettings: ((settings.company || {}) as CompanySettings),
+  };
 }
 
 // GET: List contacts eligible for follow-up in this campaign
@@ -24,7 +61,6 @@ export async function GET(
     const ctx = await requireWorkspaceContext();
     const { id } = await params;
 
-    // Load campaign — verify workspace ownership
     const campaign = await prisma.campaign.findFirst({
       where: { id, workspaceId: ctx.workspaceId },
       select: {
@@ -40,15 +76,8 @@ export async function GET(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    // Load automation settings
-    const settingsRow = await prisma.appSettings.findFirst({ where: { id: "singleton" } });
-    const settings = (settingsRow?.data as Record<string, unknown>) || {};
-    const automation = (settings.automation as Record<string, unknown>) || {};
-    const followUpDelayDays = (automation.followUpDelayDays as number) || 3;
-    const maxFollowUps = (automation.maxFollowUps as number) || 3;
-    const stopOnReply = automation.stopOnReply !== false;
+    const { followUpDelayDays, maxFollowUps, stopOnReply } = await loadAutomationSettings(ctx.workspaceId);
 
-    // Find campaign contacts
     const campaignContacts = await prisma.campaignContact.findMany({
       where: { campaignId: id },
       include: {
@@ -76,34 +105,27 @@ export async function GET(
       hasReply: boolean;
     }> = [];
 
-    // Check each contact's email history sequentially (connection_limit=1)
     for (const cc of campaignContacts) {
       const prospect = cc.prospect;
       if (!prospect.email) continue;
 
-      // Count emails sent to this prospect
       const emails = await prisma.emailActivity.findMany({
         where: { prospectId: prospect.id, bounce: false },
         orderBy: { sentAt: "desc" },
         select: { sentAt: true, replyReceived: true },
       });
 
-      const emailCount = emails.length;
-      if (emailCount === 0) continue; // Never contacted — not eligible for follow-up
-      if (emailCount > maxFollowUps) continue; // Already hit max follow-ups
-
-      const hasReply = stopOnReply && emails.some((e) => e.replyReceived);
-      if (hasReply) continue; // Got a reply — skip
-
-      const lastEmail = emails[0];
-      if (lastEmail.sentAt > cutoffDate) continue; // Too recent — wait
+      if (emails.length === 0) continue;
+      if (emails.length > maxFollowUps) continue;
+      if (stopOnReply && emails.some((e) => e.replyReceived)) continue;
+      if (emails[0].sentAt > cutoffDate) continue;
 
       eligible.push({
         prospectId: prospect.id,
         companyName: prospect.companyName,
         email: prospect.email,
-        lastEmailAt: lastEmail.sentAt.toISOString(),
-        emailCount,
+        lastEmailAt: emails[0].sentAt.toISOString(),
+        emailCount: emails.length,
         hasReply: false,
       });
     }
@@ -131,9 +153,8 @@ export async function POST(
     const ctx = await requireWorkspaceContext();
     const { id } = await params;
     const body = await request.json();
-    const { prospectIds } = body; // Optional: send to specific prospects only
+    const { prospectIds } = body;
 
-    // Load campaign — verify workspace ownership
     const campaign = await prisma.campaign.findFirst({
       where: { id, workspaceId: ctx.workspaceId },
       select: {
@@ -156,15 +177,8 @@ export async function POST(
       );
     }
 
-    // Load automation settings
-    const settingsRow = await prisma.appSettings.findFirst({ where: { id: "singleton" } });
-    const settings = (settingsRow?.data as Record<string, unknown>) || {};
-    const automation = (settings.automation as Record<string, unknown>) || {};
-    const followUpDelayDays = (automation.followUpDelayDays as number) || 3;
-    const maxFollowUps = (automation.maxFollowUps as number) || 3;
-    const stopOnReply = automation.stopOnReply !== false;
+    const { followUpDelayDays, maxFollowUps, stopOnReply, companySettings } = await loadAutomationSettings(ctx.workspaceId);
 
-    // Get campaign contacts
     const whereClause: Record<string, unknown> = { campaignId: id };
     if (prospectIds?.length) {
       whereClause.prospectId = { in: prospectIds };
@@ -199,14 +213,12 @@ export async function POST(
         continue;
       }
 
-      // Check daily limit
       const { allowed } = await canSendEmail();
       if (!allowed) {
         errors.push("Limite journalière atteinte");
         break;
       }
 
-      // Check email history
       const emails = await prisma.emailActivity.findMany({
         where: { prospectId: prospect.id, bounce: false },
         orderBy: { sentAt: "desc" },
@@ -218,9 +230,8 @@ export async function POST(
       if (stopOnReply && emails.some((e) => e.replyReceived)) { skipped++; continue; }
       if (emails[0].sentAt > cutoffDate) { skipped++; continue; }
 
-      // Substitute variables and send
-      const subject = substituteVariables(campaign.followUpSubject!, prospect);
-      const emailBody = substituteVariables(campaign.followUpBody!, prospect);
+      const subject = interpolate(campaign.followUpSubject!, prospect, companySettings);
+      const emailBody = interpolate(campaign.followUpBody!, prospect, companySettings);
 
       const result = await sendEmail(prospect.id, subject, emailBody, id);
 
@@ -231,13 +242,11 @@ export async function POST(
         errors.push(`${prospect.companyName}: ${result.error}`);
       }
 
-      // Delay between emails
       if (sent + failed < campaignContacts.length) {
         await new Promise((resolve) => setTimeout(resolve, getRandomDelay()));
       }
     }
 
-    // Log activity
     await logActivity({
       action: "followup_sent",
       type: sent > 0 ? "success" : "info",

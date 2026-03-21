@@ -1115,7 +1115,7 @@ async function findFallbackProspectData(prospect: {
       updateData.website = normalizeBaseUrl(mapsResult.website);
     }
     if (mapsResult.phone && !prospect.phone) updateData.phone = mapsResult.phone;
-    if (mapsResult.city && !prospect.city) updateData.city = mapsResult.city;
+    if (mapsResult.city && !prospect.city) updateData.city = normalizeCity(mapsResult.city);
     if (mapsResult.address && !prospect.address) updateData.address = mapsResult.address;
   }
 
@@ -1125,7 +1125,7 @@ async function findFallbackProspectData(prospect: {
     updateData.website = normalizeBaseUrl(webResult.website);
   }
   if (!updateData.phone && !prospect.phone && webResult.phone) updateData.phone = webResult.phone;
-  if (!updateData.city && !prospect.city && webResult.city) updateData.city = webResult.city;
+  if (!updateData.city && !prospect.city && webResult.city) updateData.city = normalizeCity(webResult.city);
   if (webResult.email) updateData.email = webResult.email;
   if (!updateData.address && !prospect.address && webResult.address) updateData.address = webResult.address;
 
@@ -1176,7 +1176,7 @@ export async function enrichProspect(prospectId: string): Promise<{
       } else {
         // No website found, but we have data from Maps/Web
         const score = calculateLeadScore(updated!);
-        await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED" });
+        await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
         return {
           phone: (updateData.phone as string) || undefined,
           city: (updateData.city as string) || undefined,
@@ -1210,7 +1210,7 @@ export async function enrichProspect(prospectId: string): Promise<{
             companyDomain = new URL(normalizeBaseUrl(refreshed.website)).hostname.replace(/^www\./, "");
           } else {
             const score = calculateLeadScore(updated!);
-            await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED" });
+            await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
             return {
               phone: (fallbackData.phone as string) || undefined,
               city: (fallbackData.city as string) || undefined,
@@ -1219,7 +1219,7 @@ export async function enrichProspect(prospectId: string): Promise<{
           }
         } else {
           const score = calculateLeadScore(updated!);
-          await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED" });
+          await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
           return {
             phone: (fallbackData.phone as string) || undefined,
             city: (fallbackData.city as string) || undefined,
@@ -1249,7 +1249,7 @@ export async function enrichProspect(prospectId: string): Promise<{
         companyDomain = new URL(normalizeBaseUrl(refreshed.website)).hostname.replace(/^www\./, "");
       } else {
         const score = calculateLeadScore(updated!);
-        await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED" });
+        await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
         return {
           phone: (fallbackData.phone as string) || undefined,
           city: (fallbackData.city as string) || undefined,
@@ -1258,7 +1258,7 @@ export async function enrichProspect(prospectId: string): Promise<{
       }
     } else {
       const score = calculateLeadScore(updated!);
-      await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED" });
+      await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
       return {
         phone: (fallbackData.phone as string) || undefined,
         city: (fallbackData.city as string) || undefined,
@@ -1377,11 +1377,11 @@ export async function enrichProspect(prospectId: string): Promise<{
     const mapsResult = await searchGoogleMaps(prospect.companyName, prospect.city || undefined);
     if (mapsResult) {
       if (mapsResult.phone && !foundPhone) foundPhone = mapsResult.phone;
-      if (mapsResult.city && !foundCity) foundCity = mapsResult.city;
+      if (mapsResult.city && !foundCity) foundCity = normalizeCity(mapsResult.city);
     }
     const webResult = await searchWebForCompany(prospect.companyName, prospect.city || undefined);
     if (webResult.phone && !foundPhone) foundPhone = webResult.phone;
-    if (webResult.city && !foundCity) foundCity = webResult.city;
+    if (webResult.city && !foundCity) foundCity = normalizeCity(webResult.city);
     if (webResult.email) allEmails.push(webResult.email);
   }
 
@@ -1428,14 +1428,14 @@ export async function enrichProspect(prospectId: string): Promise<{
   if (!hasEverything()) {
     const mapsResult = await searchGoogleMaps(prospect.companyName, prospect.city || foundCity || undefined);
     if (mapsResult) {
-      if (!foundCity && mapsResult.city) foundCity = mapsResult.city;
+      if (!foundCity && mapsResult.city) foundCity = normalizeCity(mapsResult.city);
       if (!foundPhone && mapsResult.phone) foundPhone = mapsResult.phone;
     }
 
     // Also try web search for any remaining missing data
     if (!foundCity || !foundPhone || allEmails.length === 0) {
       const webResult = await searchWebForCompany(prospect.companyName, prospect.city || foundCity || undefined);
-      if (!foundCity && webResult.city) foundCity = webResult.city;
+      if (!foundCity && webResult.city) foundCity = normalizeCity(webResult.city);
       if (!foundPhone && webResult.phone) foundPhone = webResult.phone;
       if (allEmails.length === 0 && webResult.email) allEmails.push(webResult.email);
     }
@@ -1493,6 +1493,7 @@ export async function enrichProspect(prospectId: string): Promise<{
   const updatedProspect = await safeUpdateProspect(prospectId, {
     ...enrichedData,
     status,
+    ...(foundSomething ? { enrichedAt: new Date() } : {}),
   });
 
   // Recalculate lead score

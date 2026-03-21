@@ -59,6 +59,26 @@ export async function POST(request: NextRequest) {
         status: "PENDING",
       },
     });
+
+    // Update campaign contacts' prospect status to SCHEDULED
+    if (campaignId) {
+      const contacts = await prisma.campaignContact.findMany({
+        where: { campaignId },
+        select: { prospectId: true },
+      });
+      for (const contact of contacts) {
+        await prisma.prospect.update({
+          where: { id: contact.prospectId },
+          data: { status: "SCHEDULED" },
+        });
+      }
+    } else if (prospectId) {
+      await prisma.prospect.update({
+        where: { id: prospectId },
+        data: { status: "SCHEDULED" },
+      });
+    }
+
     return NextResponse.json(scheduledEmail, { status: 201 });
   } catch (e) {
     console.error("[scheduled-emails POST]", e);

@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
+import fs from "fs";
+import pathMod from "path";
 import { prisma } from "./db";
 import { DAILY_EMAIL_LIMIT, EMAIL_DELAY_MIN_SECONDS, EMAIL_DELAY_MAX_SECONDS } from "./config";
 import { wrapInEmailTemplate, getTextFooter, getLogoAttachment, type CompanyInfo } from "./email-template";
@@ -18,6 +20,7 @@ interface SenderInfo {
   from: string;
   replyTo?: string;
   logoUrl?: string;
+  logoEnabled: boolean;
   provider: "resend" | "smtp";
   smtp: SmtpConfig;
   companyInfo: CompanyInfo;
@@ -42,9 +45,6 @@ function buildSmtpConfig(emailSettings: Record<string, string> | null): SmtpConf
 async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
   const fallbackSmtp = buildSmtpConfig(null);
   const fallbackProvider = process.env.RESEND_API_KEY ? "resend" : "smtp";
-  // Platform-level "from" address — emails are sent from this address for all users
-  const platformFrom = process.env.PLATFORM_FROM_EMAIL || "noreply@leadnova.one";
-  const platformFromName = process.env.PLATFORM_FROM_NAME || "LeadNova";
 
   try {
     const record = workspaceId
@@ -54,25 +54,60 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
     const emailSettings = data?.email as Record<string, string> | null;
     const companySettings = data?.company as Record<string, string> | null;
 
-    // "From" uses company name but platform email (like Jobber)
-    const companyName = companySettings?.name || platformFromName;
-    const from = `"${companyName}" <${platformFrom}>`;
+    const smtp = buildSmtpConfig(emailSettings);
 
-    // Reply-to = the user's company email so responses go to them
-    const replyTo = companySettings?.email || emailSettings?.replyToEmail || undefined;
+    // Contact email from Settings → Company → Contact Email (source of truth)
+    const contactEmail = companySettings?.email || "";
+
+    // FROM email: contactEmail > senderEmail override > SMTP user > env fallback
+    const fromEmail = contactEmail
+      || emailSettings?.senderEmail
+      || smtp.auth.user
+      || process.env.SMTP_FROM
+      || process.env.SMTP_USER
+      || "";
+
+    // FROM name: company name > env fallback
+    const fromName = companySettings?.name || process.env.COMPANY_NAME || "";
+    const from = fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
+
+    // Reply-To = always the Contact Email from Settings (not SMTP user or fallbacks)
+    const replyTo = contactEmail || fromEmail || undefined;
 
     const logoUrl = emailSettings?.logoUrl || undefined;
-    // Use explicit provider setting, or auto-detect: if SMTP host is configured use smtp, otherwise fall back to resend
-    const smtpHost = emailSettings?.smtpHost || process.env.SMTP_HOST || "";
+    const logoEnabled = emailSettings?.logoEnabled !== undefined
+      ? String(emailSettings.logoEnabled) !== "false"
+      : true;
+
+    // Provider detection — "gmail" and "outlook" are SMTP with pre-configured hosts
+    const rawProvider = emailSettings?.provider || "";
+    let smtpHost = emailSettings?.smtpHost || process.env.SMTP_HOST || "";
+    if (rawProvider === "gmail") {
+      smtpHost = "smtp.gmail.com";
+      smtp.host = "smtp.gmail.com";
+      smtp.port = 587;
+      smtp.secure = false;
+    } else if (rawProvider === "outlook") {
+      smtpHost = "smtp.office365.com";
+      smtp.host = "smtp.office365.com";
+      smtp.port = 587;
+      smtp.secure = false;
+    }
+
     let provider: "resend" | "smtp";
-    if (emailSettings?.provider === "resend" || emailSettings?.provider === "smtp") {
-      provider = emailSettings.provider;
+    if (rawProvider === "gmail" || rawProvider === "outlook") {
+      provider = "smtp";
+    } else if (emailSettings?.provider === "resend") {
+      provider = "resend";
+    } else if (emailSettings?.provider === "smtp" && smtpHost && !smtpHost.includes("localhost") && !smtpHost.includes("127.0.0.1")) {
+      provider = "smtp";
+    } else if (process.env.RESEND_API_KEY) {
+      provider = "resend";
     } else if (smtpHost) {
       provider = "smtp";
     } else {
       provider = fallbackProvider;
     }
-    const smtp = buildSmtpConfig(emailSettings);
 
     // Build company info from DB settings — source of truth for templates
     const companyInfo: CompanyInfo = {
@@ -88,9 +123,10 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
       emailSignature: companySettings?.emailSignature || undefined,
     };
 
-    return { from, replyTo, logoUrl, provider, smtp, companyInfo };
+    return { from, replyTo, logoUrl, logoEnabled, provider, smtp, companyInfo };
   } catch {
-    return { from: `"${platformFromName}" <${platformFrom}>`, provider: fallbackProvider, smtp: fallbackSmtp, companyInfo: {} };
+    const fallbackFrom = process.env.SMTP_FROM || process.env.SMTP_USER || "";
+    return { from: fallbackFrom, provider: fallbackProvider, smtp: fallbackSmtp, logoEnabled: true, companyInfo: {} };
   }
 }
 
@@ -108,18 +144,110 @@ async function sendViaResend(
   if (!apiKey) throw new Error("RESEND_API_KEY non configurée");
   const resend = new Resend(apiKey);
 
+  // Logo strategy for Resend:
+  // 1. Best: public URL (works everywhere including Gmail) — requires APP_URL
+  // 2. Fallback: read file from disk + embed as base64 data URI
+  //    (won't show in Gmail but works in Apple Mail, Outlook, etc. — acceptable for local dev)
+  let finalHtml = html;
+  let attachments: Array<{ filename: string; content: Buffer; content_type: string }> | undefined;
+
+  if (senderInfo.logoEnabled && senderInfo.logoUrl) {
+    const publicLogoUrl = resolvePublicLogoUrl(senderInfo.logoUrl);
+    if (publicLogoUrl) {
+      finalHtml = html.replace(/src="cid:company-logo"/g, `src="${publicLogoUrl}"`);
+    } else {
+      // Local dev fallback: read file from disk and embed as base64
+      const logoFile = readLogoFromDisk(senderInfo.logoUrl);
+      if (logoFile) {
+        const base64 = logoFile.content.toString("base64");
+        const dataUri = `data:${logoFile.contentType};base64,${base64}`;
+        finalHtml = html.replace(/src="cid:company-logo"/g, `src="${dataUri}"`);
+        // Also attach the file so email clients that support attachments can reference it
+        attachments = [{
+          filename: logoFile.filename,
+          content: logoFile.content,
+          content_type: logoFile.contentType,
+        }];
+      }
+    }
+  }
+
+  // Resend requires a verified domain for From.
+  // Free mail domains (gmail, hotmail, etc.) cannot be used as From.
+  // Strategy: use company name + verified domain as From, contactEmail as Reply-To.
+  const contactEmail = senderInfo.replyTo
+    || senderInfo.from.match(/<(.+)>/)?.[1]
+    || senderInfo.from;
+  const contactDomain = contactEmail.split("@")[1] || "";
+  const freeMailDomains = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com", "icloud.com", "aol.com"];
+  const isFreeMail = !contactEmail || freeMailDomains.includes(contactDomain.toLowerCase());
+  const companyName = senderInfo.companyInfo.name || "LeadNova";
+
+  // If the contactEmail domain is verified on Resend, use it directly.
+  // Otherwise, use onboarding@resend.dev with the company name as display name.
+  const resendFrom = isFreeMail
+    ? `${companyName} <onboarding@resend.dev>`
+    : senderInfo.from;
+
   await resend.emails.send({
-    from: senderInfo.from,
+    from: resendFrom,
     to,
     subject,
-    html,
+    html: finalHtml,
     text,
-    ...(senderInfo.replyTo ? { replyTo: senderInfo.replyTo } : {}),
+    attachments,
+    // Reply-To always points to the real contactEmail from Settings
+    replyTo: contactEmail || undefined,
     headers: unsubscribeUrl ? {
       "List-Unsubscribe": `<${unsubscribeUrl}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     } : undefined,
   });
+}
+
+/**
+ * Reads a logo file from disk (public/ directory).
+ */
+function readLogoFromDisk(logoUrl: string): { filename: string; content: Buffer; contentType: string } | null {
+  try {
+    let filePath: string;
+    if (logoUrl.startsWith("/") && !logoUrl.startsWith("//")) {
+      filePath = pathMod.join(process.cwd(), "public", logoUrl.slice(1));
+    } else {
+      filePath = pathMod.join(process.cwd(), "public", "leadnova-logo.png");
+    }
+    if (!fs.existsSync(filePath)) return null;
+    const ext = pathMod.extname(filePath).slice(1).toLowerCase() || "png";
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+    };
+    return {
+      filename: `logo.${ext}`,
+      content: fs.readFileSync(filePath),
+      contentType: mimeMap[ext] || "image/png",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a logo path (e.g. "/upload-123.jpeg") to a fully public URL.
+ * Required because email clients (especially Gmail) strip base64 data URIs
+ * and CID attachments don't work with Resend.
+ */
+function resolvePublicLogoUrl(logoUrl: string): string | null {
+  if (!logoUrl) return null;
+  // Already a full URL
+  if (logoUrl.startsWith("http://") || logoUrl.startsWith("https://")) return logoUrl;
+  // Local path like "/upload-123.jpeg" — prepend APP_URL
+  const appUrl = process.env.APP_URL
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+  if (!appUrl) return null;
+  const base = appUrl.endsWith("/") ? appUrl.slice(0, -1) : appUrl;
+  const path = logoUrl.startsWith("/") ? logoUrl : `/${logoUrl}`;
+  return `${base}${path}`;
 }
 
 async function sendViaSmtp(
@@ -130,15 +258,28 @@ async function sendViaSmtp(
   senderInfo: SenderInfo
 ): Promise<void> {
   const transporter = nodemailer.createTransport(senderInfo.smtp);
-  const logoAttachment = getLogoAttachment(senderInfo.logoUrl);
+
+  // SMTP: use CID inline attachment (file embedded in email — works offline, no public URL needed).
+  // Nodemailer natively supports CID, and the template already uses src="cid:company-logo".
+  let finalHtml = html;
+  let attachments: object[] = [];
+
+  if (senderInfo.logoEnabled && senderInfo.logoUrl) {
+    const logoAttachment = getLogoAttachment(senderInfo.logoUrl);
+    if (logoAttachment) {
+      // Keep src="cid:company-logo" as-is — nodemailer resolves it via the attachment CID
+      attachments = [logoAttachment];
+    }
+  }
+
   await transporter.sendMail({
     from: senderInfo.from,
     ...(senderInfo.replyTo ? { replyTo: senderInfo.replyTo } : {}),
     to,
     subject,
     text,
-    html,
-    attachments: logoAttachment ? [logoAttachment] : [],
+    html: finalHtml,
+    attachments,
   });
 }
 
@@ -211,12 +352,29 @@ export async function sendEmail(
     return { success: false, error: reason };
   }
 
-  const senderInfo = await getSenderInfo();
+  const senderInfo = await getSenderInfo(prospect.workspaceId);
+
+  // Block if no sender email configured
+  const senderEmail = senderInfo.replyTo || senderInfo.from.match(/<(.+)>/)?.[1] || senderInfo.from;
+  if (!senderEmail || !senderEmail.includes("@")) {
+    return { success: false, error: "Aucun email de contact configuré. Allez dans Paramètres → Entreprise." };
+  }
+
+  // Auto-detect campaign if not provided
+  let resolvedCampaignId = campaignId || null;
+  if (!resolvedCampaignId) {
+    const campaignContact = await prisma.campaignContact.findFirst({
+      where: { prospectId },
+      orderBy: { createdAt: "desc" },
+      select: { campaignId: true },
+    });
+    if (campaignContact) resolvedCampaignId = campaignContact.campaignId;
+  }
 
   const activity = await prisma.emailActivity.create({
     data: {
       prospectId,
-      campaignId: campaignId || null,
+      campaignId: resolvedCampaignId,
       emailSubject: subject,
       emailBody: body,
       sentAt: new Date(),
@@ -232,7 +390,7 @@ export async function sendEmail(
     ? `${appUrl}/api/track/unsubscribe/${activity.id}`
     : undefined;
 
-  const html = wrapInEmailTemplate(body, senderInfo.companyInfo, trackingPixelUrl, unsubscribeUrl);
+  const html = wrapInEmailTemplate(body, senderInfo.companyInfo, trackingPixelUrl, unsubscribeUrl, senderInfo.logoEnabled);
   const text = body + getTextFooter(senderInfo.companyInfo, unsubscribeUrl);
 
   try {

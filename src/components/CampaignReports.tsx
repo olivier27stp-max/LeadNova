@@ -5,7 +5,6 @@ import { motion } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/empty-state";
 import {
   Send,
   MailCheck,
@@ -347,8 +346,6 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const isEmpty = !loading && data && data.kpis.sent === 0;
-
   return (
     <div className="space-y-6">
 
@@ -377,12 +374,6 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
           <Skeleton className="h-48 rounded-xl" />
           <Skeleton className="h-64 rounded-xl" />
         </div>
-      ) : isEmpty ? (
-        <EmptyState
-          icon={<BarChart2 />}
-          title="Pas encore de données"
-          description="Les statistiques apparaîtront dès que des emails auront été envoyés dans cette campagne."
-        />
       ) : data ? (
         <>
           {/* ── KPI Cards ── */}

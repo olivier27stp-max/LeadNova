@@ -52,10 +52,13 @@ export async function GET(
     });
   }
 
-  // Email activities — query by campaignId directly for accuracy
+  // Email activities — match by campaignId OR by prospectId for contacts without campaignId
   const activities = await prisma.emailActivity.findMany({
     where: {
-      campaignId,
+      OR: [
+        { campaignId },
+        { prospectId: { in: prospectIds }, campaignId: null },
+      ],
       ...(dateFrom ? { sentAt: { gte: dateFrom } } : {}),
     },
     select: {

@@ -247,7 +247,24 @@ export async function POST(request: NextRequest) {
     const batchId = generateBatchId();
     let created = 0;
     let skipped = 0;
+    let blocked = 0;
     const errors: string[] = [];
+
+    // Load blocked keywords
+    let blockedKeywords: string[] = [];
+    try {
+      const settingsRow = await prisma.appSettings.findFirst({
+        where: workspaceId ? { workspaceId } : { workspaceId: null },
+        select: { data: true },
+      });
+      if (settingsRow?.data && typeof settingsRow.data === "object") {
+        const d = settingsRow.data as Record<string, unknown>;
+        const t = d.targeting as Record<string, unknown> | undefined;
+        if (t?.blockedKeywords && Array.isArray(t.blockedKeywords)) {
+          blockedKeywords = (t.blockedKeywords as string[]).map((k) => k.toLowerCase().trim()).filter(Boolean);
+        }
+      }
+    } catch { /* ignore */ }
 
     for (const p of prospects) {
       if (!p.companyName) {
@@ -274,6 +291,16 @@ export async function POST(request: NextRequest) {
         if (dedupMode && dedupMode !== "none") {
           const isDup = await checkDuplicate(raw, dedupMode);
           if (isDup) {
+            skipped++;
+            continue;
+          }
+        }
+
+        // Blocked keywords check
+        if (blockedKeywords.length > 0) {
+          const textToCheck = [raw.companyName, raw.industry, raw.website, raw.address].filter(Boolean).join(" ").toLowerCase();
+          if (blockedKeywords.some((bk) => textToCheck.includes(bk))) {
+            blocked++;
             skipped++;
             continue;
           }
@@ -316,7 +343,7 @@ export async function POST(request: NextRequest) {
       action: importFileName ? "import_csv" : "import_text",
       type: errors.length > 0 ? "warning" : "success",
       title: `Import ${importFileName ? "CSV" : "texte"} complété`,
-      details: `${created} nouveau${created > 1 ? "x" : ""} prospect${created > 1 ? "s" : ""} importé${created > 1 ? "s" : ""}, ${skipped} ignoré${skipped > 1 ? "s" : ""}`,
+      details: `${created} nouveau${created > 1 ? "x" : ""} prospect${created > 1 ? "s" : ""} importé${created > 1 ? "s" : ""}, ${skipped} ignoré${skipped > 1 ? "s" : ""}${blocked > 0 ? `, ${blocked} bloqué${blocked > 1 ? "s" : ""}` : ""}`,
       importBatchId: created > 0 ? batchId : undefined,
       metadata: {
         prospects_created: created,

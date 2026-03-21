@@ -39,9 +39,11 @@ export async function POST() {
       return NextResponse.json({ success: true });
     }
 
-    // ── SMTP ──
-    const host = emailSettings?.smtpHost || process.env.SMTP_HOST || "";
-    const port = parseInt(emailSettings?.smtpPort || process.env.SMTP_PORT || "587", 10);
+    // ── SMTP ── (gmail/outlook providers auto-configure host/port)
+    let host = emailSettings?.smtpHost || process.env.SMTP_HOST || "";
+    let port = parseInt(emailSettings?.smtpPort || process.env.SMTP_PORT || "587", 10);
+    if (provider === "gmail") { host = "smtp.gmail.com"; port = 587; }
+    else if (provider === "outlook") { host = "smtp.office365.com"; port = 587; }
     const user = emailSettings?.smtpUser || process.env.SMTP_USER || "";
     const pass = decrypt(emailSettings?.smtpPass || "") || process.env.SMTP_PASS || "";
 

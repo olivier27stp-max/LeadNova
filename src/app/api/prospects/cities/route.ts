@@ -18,9 +18,15 @@ export async function GET() {
       orderBy: { city: "asc" },
     });
 
-    const cities = results
-      .map((r) => r.city)
-      .filter((c): c is string => !!c);
+    const seen = new Map<string, string>();
+    for (const r of results) {
+      if (!r.city) continue;
+      const key = r.city.toLowerCase().trim();
+      if (!seen.has(key)) seen.set(key, r.city);
+    }
+    const cities = Array.from(seen.values()).sort((a, b) =>
+      a.localeCompare(b, "fr", { sensitivity: "base" })
+    );
 
     return NextResponse.json(cities);
   } catch (error) {

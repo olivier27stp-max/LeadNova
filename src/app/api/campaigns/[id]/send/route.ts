@@ -16,6 +16,10 @@ interface CompanySettings {
   country?: string;
 }
 
+function titleCase(str: string): string {
+  return str.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function interpolate(
   template: string,
   prospect: { companyName: string; city?: string | null },
@@ -23,7 +27,7 @@ function interpolate(
 ): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
-    .replace(/\{\{city\}\}/g, prospect.city || "votre région")
+    .replace(/\{\{city\}\}/g, titleCase(prospect.city || "votre région"))
     .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
     .replace(/\{\{company_email\}\}/g, company.email || "")
     .replace(/\{\{company_phone\}\}/g, company.phone || "")
@@ -74,6 +78,14 @@ export async function POST(
   });
   const settingsData = settingsRecord?.data as Record<string, unknown> | null;
   const companySettings = (settingsData?.company || {}) as CompanySettings;
+
+  // Block sending if contact email is not configured
+  if (!companySettings.email) {
+    return NextResponse.json(
+      { error: "Aucun email de contact configuré. Allez dans Paramètres → Entreprise pour renseigner votre email avant d'envoyer." },
+      { status: 400 }
+    );
+  }
 
   const prospects = campaign.contacts.map((c) => c.prospect);
   const withEmail = prospects.filter((p) => p.email);

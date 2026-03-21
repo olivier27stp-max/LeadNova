@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = { archivedAt: null };
     if (workspaceId) where.workspaceId = workspaceId;
     if (status) where.status = status;
-    if (city) where.city = city;
+    if (city) where.city = { equals: city, mode: "insensitive" };
     if (source) where.source = source;
     if (contactType) where.contactType = contactType;
     if (emailStatus === "unknown") where.OR = [{ emailStatus: "unknown" }, { emailStatus: null }];
@@ -74,8 +74,7 @@ export async function GET(request: NextRequest) {
     const enrichedToday = await prisma.prospect.count({
       where: {
         archivedAt: null,
-        status: "ENRICHED",
-        updatedAt: {
+        enrichedAt: {
           gte: getStartOfToday(),
         },
       },

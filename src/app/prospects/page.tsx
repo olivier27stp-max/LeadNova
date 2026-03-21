@@ -72,6 +72,7 @@ const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     NEW: "bg-primary-subtle text-primary border border-primary/20",
     ENRICHED: "bg-background-muted text-foreground-secondary border border-border",
+    SCHEDULED: "bg-warning-subtle text-warning border border-warning/20",
     CONTACTED: "bg-warning-subtle text-warning border border-warning/20",
     REPLIED: "bg-success-subtle text-success border border-success/20",
     QUALIFIED: "bg-success-subtle text-success border border-success/20",
