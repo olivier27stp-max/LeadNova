@@ -406,8 +406,8 @@ export const translations = {
     campaignPaused: { fr: "Campagne en pause", en: "Campaign paused" },
     errorStatus: { fr: "Erreur lors du changement de statut", en: "Error changing status" },
     errorUpdate: { fr: "Erreur lors de la mise à jour", en: "Error updating" },
-    contactsAdded: { fr: "contacts ajoutés", en: "contacts added" },
-    contactsRemoved: { fr: "contacts retirés", en: "contacts removed" },
+    contactsAdded: { fr: "contacts sélectionnés", en: "contacts selected" },
+    contactsRemoved: { fr: "contacts désélectionnés", en: "contacts deselected" },
     errorSelection: { fr: "Erreur lors de la sélection", en: "Error during selection" },
     errorDeselection: { fr: "Erreur lors de la désélection", en: "Error during deselection" },
 

@@ -18,9 +18,10 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
   const [ready, setReady] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<React.CSSProperties>({});
 
-  // ── Compute position from trigger rect ──
+  // ── Position popover relative to trigger ──
   const reposition = useCallback(() => {
     const el = triggerRef.current;
     const pop = popoverRef.current;
@@ -40,66 +41,79 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
     setReady(true);
   }, []);
 
-  // ── Open lifecycle ──
+  // Mount → measure → show
   useEffect(() => {
     if (!open) { setReady(false); return; }
-    // Wait one frame for the popover to mount, then measure
     const id = requestAnimationFrame(reposition);
     return () => cancelAnimationFrame(id);
   }, [open, reposition]);
 
-  // ── Reposition on scroll or resize ──
+  // Reposition on scroll/resize
   useEffect(() => {
     if (!open) return;
-    const onScroll = () => requestAnimationFrame(reposition);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
-    };
+    const h = () => requestAnimationFrame(reposition);
+    window.addEventListener("scroll", h, true);
+    window.addEventListener("resize", h);
+    return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); };
   }, [open, reposition]);
 
-  // ── Close on outside click ──
+  // Close on outside click
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    const h = (e: MouseEvent) => {
       const t = e.target as Node;
       if (triggerRef.current?.contains(t) || popoverRef.current?.contains(t)) return;
       setOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  // ── Close on Escape ──
+  // Close on Escape
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
   }, [open]);
 
-  // ── Prevent wheel from leaking to page/table ──
+  // ── Scroll isolation: handler directly on the scrollable list ──
   useEffect(() => {
     if (!open) return;
-    const el = popoverRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => {
-      // Find the scrollable list inside
-      const list = el.querySelector("[data-citylist]") as HTMLElement | null;
-      if (!list) { e.preventDefault(); e.stopPropagation(); return; }
-
+    const list = listRef.current;
+    if (!list) return;
+    const h = (e: WheelEvent) => {
       const max = list.scrollHeight - list.clientHeight;
-      if (max <= 0) { e.preventDefault(); e.stopPropagation(); return; }
-
-      // Only block at boundaries
-      if (e.deltaY < 0 && list.scrollTop <= 0) e.preventDefault();
-      else if (e.deltaY > 0 && list.scrollTop >= max - 1) e.preventDefault();
+      if (max <= 0) {
+        // List not scrollable — block so page doesn't scroll
+        e.preventDefault();
+      } else if (e.deltaY < 0 && list.scrollTop <= 0) {
+        // At top, scrolling up — block
+        e.preventDefault();
+      } else if (e.deltaY > 0 && list.scrollTop >= max - 1) {
+        // At bottom, scrolling down — block
+        e.preventDefault();
+      }
+      // Always stop propagation so table/page never gets the event
       e.stopPropagation();
     };
-    el.addEventListener("wheel", handler, { passive: false });
-    return () => el.removeEventListener("wheel", handler);
+    list.addEventListener("wheel", h, { passive: false });
+    return () => list.removeEventListener("wheel", h);
+  }, [open]);
+
+  // Block wheel on the header area (outside the list)
+  useEffect(() => {
+    if (!open) return;
+    const pop = popoverRef.current;
+    if (!pop) return;
+    const h = (e: WheelEvent) => {
+      // If event is from inside the list, the list handler already dealt with it
+      if (listRef.current?.contains(e.target as Node)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    pop.addEventListener("wheel", h, { passive: false });
+    return () => pop.removeEventListener("wheel", h);
   }, [open]);
 
   function pick(city: string) { onChange(city); setOpen(false); }
@@ -144,8 +158,12 @@ export function CityDropdown({ value, onChange, cities, placeholder = "Ville", c
 
             {cities.length > 0 && <div className="border-t border-border" />}
 
-            {/* List */}
-            <div data-citylist className="max-h-[240px] overflow-y-auto overscroll-contain" style={{ WebkitOverflowScrolling: "touch" }}>
+            {/* Scrollable list */}
+            <div
+              ref={listRef}
+              className="max-h-[240px] overflow-y-auto overscroll-contain"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
               {cities.map(city => (
                 <div
                   key={city}
