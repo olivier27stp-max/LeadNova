@@ -184,6 +184,7 @@ export async function POST(request: NextRequest) {
       type: "success",
       title: "Mots-clés générés",
       details: `${totalKw} mots-clés générés pour "${prompt.trim().substring(0, 50)}"`,
+      workspaceId: workspaceId ?? undefined,
       metadata: { keyword: prompt.trim().substring(0, 100), count: totalKw },
     });
 
@@ -202,7 +203,11 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
+    const ctx = await getWorkspaceContext();
+    const workspaceId = ctx?.workspaceId ?? null;
+
     const generations = await prisma.keywordGeneration.findMany({
+      where: workspaceId ? { workspaceId } : {},
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {

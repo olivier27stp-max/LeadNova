@@ -79,6 +79,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Clear any stale dismissed follow-ups for this campaign so they appear fresh
+    if (campaignId && workspaceId) {
+      try {
+        await prisma.dismissedFollowUp.deleteMany({
+          where: {
+            workspaceId,
+            eventKey: { startsWith: `fu_${campaignId}_` },
+          },
+        });
+      } catch {
+        // table may not exist yet
+      }
+    }
+
     return NextResponse.json(scheduledEmail, { status: 201 });
   } catch (e) {
     console.error("[scheduled-emails POST]", e);

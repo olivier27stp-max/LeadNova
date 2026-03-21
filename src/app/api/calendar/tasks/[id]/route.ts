@@ -9,7 +9,17 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await getWorkspaceContext();
     const { id } = await params;
+
+    // Verify workspace ownership
+    const existing = await prisma.calendarTask.findFirst({
+      where: { id, ...(ctx ? { workspaceId: ctx.workspaceId } : {}) },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Tâche introuvable" }, { status: 404 });
+    }
+
     const body = await request.json();
     const { title, description, dueAt, priority, status, prospectId, campaignId } = body;
 
@@ -45,6 +55,14 @@ export async function DELETE(
   try {
     const { id } = await params;
     const ctx = await getWorkspaceContext();
+
+    // Verify workspace ownership
+    const existing = await prisma.calendarTask.findFirst({
+      where: { id, ...(ctx ? { workspaceId: ctx.workspaceId } : {}) },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Tâche introuvable" }, { status: 404 });
+    }
 
     await prisma.calendarTask.delete({ where: { id } });
 

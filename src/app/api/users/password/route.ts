@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getSessionUser } from "@/lib/session";
+import bcrypt from "bcryptjs";
 import { createHash } from "crypto";
-
-function hashPassword(password: string): string {
-  return createHash("sha256").update(password).digest("hex");
-}
 
 // POST: Set or change password
 export async function POST(request: NextRequest) {
   try {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    }
+
     const { userId, currentPassword, newPassword } = await request.json();
 
     if (!userId || !newPassword) {
@@ -16,6 +19,11 @@ export async function POST(request: NextRequest) {
         { error: "userId et newPassword sont requis" },
         { status: 400 }
       );
+    }
+
+    // Users can only change their own password (admins can change any)
+    if (sessionUser.id !== userId && sessionUser.role !== "ADMIN") {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
     }
 
     if (newPassword.length < 8) {
@@ -38,7 +46,12 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      if (hashPassword(currentPassword) !== user.passwordHash) {
+      // Support both legacy SHA-256 and bcrypt hashes
+      const isBcrypt = user.passwordHash.startsWith("$2");
+      const isValid = isBcrypt
+        ? await bcrypt.compare(currentPassword, user.passwordHash)
+        : createHash("sha256").update(currentPassword).digest("hex") === user.passwordHash;
+      if (!isValid) {
         return NextResponse.json(
           { error: "Mot de passe actuel incorrect" },
           { status: 403 }
@@ -46,9 +59,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: hashPassword(newPassword) },
+      data: { passwordHash: hashedPassword },
     });
 
     await prisma.activityLog.create({

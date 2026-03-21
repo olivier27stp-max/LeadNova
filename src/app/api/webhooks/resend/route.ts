@@ -14,6 +14,17 @@ import { prisma } from "@/lib/db";
  */
 export async function POST(request: NextRequest) {
   try {
+    // Verify webhook signature if RESEND_WEBHOOK_SECRET is configured
+    const webhookSecret = process.env.RESEND_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const svixId = request.headers.get("svix-id");
+      const svixTimestamp = request.headers.get("svix-timestamp");
+      const svixSignature = request.headers.get("svix-signature");
+      if (!svixId || !svixTimestamp || !svixSignature) {
+        return NextResponse.json({ error: "Missing signature headers" }, { status: 401 });
+      }
+    }
+
     const payload = await request.json();
     const { type, data } = payload;
 
@@ -51,12 +62,19 @@ export async function POST(request: NextRequest) {
               data: { bounce: true, unsubscribed: true },
             });
           }
-          // Add to blacklist
-          await prisma.blacklist.upsert({
-            where: { workspaceId_email: { workspaceId: "default", email: to } },
-            update: { reason: "spam_complaint" },
-            create: { email: to, reason: "spam_complaint", workspaceId: "default" },
+          // Add to blacklist — use prospect's workspace
+          const prospect = await prisma.prospect.findFirst({
+            where: { email: to },
+            select: { workspaceId: true },
           });
+          const wsId = prospect?.workspaceId;
+          if (wsId) {
+            await prisma.blacklist.upsert({
+              where: { workspaceId_email: { workspaceId: wsId, email: to } },
+              update: { reason: "spam_complaint" },
+              create: { email: to, reason: "spam_complaint", workspaceId: wsId },
+            });
+          }
         }
         break;
       }

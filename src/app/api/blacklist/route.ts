@@ -63,6 +63,9 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const ctx = await getWorkspaceContext();
+    const workspaceId = ctx?.workspaceId ?? null;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -71,6 +74,12 @@ export async function DELETE(request: NextRequest) {
         { error: "id is required" },
         { status: 400 }
       );
+    }
+
+    // Verify ownership before deleting
+    const entry = await prisma.blacklist.findUnique({ where: { id } });
+    if (!entry || entry.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     await prisma.blacklist.delete({ where: { id } });

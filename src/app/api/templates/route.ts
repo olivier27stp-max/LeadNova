@@ -76,6 +76,12 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
+    // Verify ownership
+    const existing = await prisma.emailTemplate.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
     if (data.isDefault) {
       await prisma.emailTemplate.updateMany({
         where: { isDefault: true, workspaceId, id: { not: id } },
@@ -83,9 +89,17 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
+    // Only allow safe fields
+    const { name, subject, body: templateBody, type, isDefault } = data;
     const template = await prisma.emailTemplate.update({
       where: { id },
-      data,
+      data: {
+        ...(name !== undefined && { name }),
+        ...(subject !== undefined && { subject }),
+        ...(templateBody !== undefined && { body: templateBody }),
+        ...(type !== undefined && { type }),
+        ...(isDefault !== undefined && { isDefault }),
+      },
     });
 
     return NextResponse.json(template);
@@ -100,11 +114,20 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const ctx = await getWorkspaceContext();
+    const workspaceId = ctx?.workspaceId ?? null;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
     if (!id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    // Verify ownership
+    const existing = await prisma.emailTemplate.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== workspaceId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     // Soft-delete (archive)

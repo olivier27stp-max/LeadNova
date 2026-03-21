@@ -61,6 +61,7 @@ export const translations = {
     NOT_INTERESTED: { fr: "Pas intéressé", en: "Not Interested" },
     ACTIVE: { fr: "Active", en: "Active" },
     PAUSED: { fr: "En pause", en: "Paused" },
+    COMPLETED: { fr: "Terminée", en: "Completed" },
     DRAFT: { fr: "Brouillon", en: "Draft" },
   },
 
@@ -418,6 +419,14 @@ export const translations = {
     chooseImage: { fr: "Cliquer pour choisir une image", en: "Click to choose an image" },
     imageFormats: { fr: "PNG, JPG, SVG, WebP — max 5 Mo", en: "PNG, JPG, SVG, WebP — max 5 MB" },
 
+    // Test email
+    testButton: { fr: "Tester", en: "Test" },
+    testEmailPlaceholder: { fr: "Entrez un email de test...", en: "Enter a test email..." },
+    testSend: { fr: "Envoyer", en: "Send" },
+    testSent: { fr: "Email test envoyé à", en: "Test email sent to" },
+    testError: { fr: "Erreur lors de l'envoi", en: "Error sending test" },
+    testNetworkError: { fr: "Erreur réseau", en: "Network error" },
+
     // Contact tab
     searchContacts: { fr: "Rechercher par nom, entreprise, email...", en: "Search by name, company, email..." },
     allTypes: { fr: "Tous les types", en: "All types" },
@@ -617,6 +626,7 @@ export const translations = {
     followUpIntervalDays: { fr: "Intervalle entre relances (jours)", en: "Interval between follow-ups (days)" },
     stopOnReply: { fr: "Arrêter les relances si réponse reçue", en: "Stop follow-ups if reply received" },
     stopOnExcluded: { fr: "Arrêter si contact exclu", en: "Stop if contact excluded" },
+    skipWeekends: { fr: "Exclure les weekends (reporter au lundi)", en: "Skip weekends (move to Monday)" },
 
     // Targeting section
     targetingTitle: { fr: "Ciblage de recherche", en: "Search targeting" },

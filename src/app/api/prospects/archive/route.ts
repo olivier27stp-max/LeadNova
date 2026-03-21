@@ -81,9 +81,13 @@ export async function POST(request: NextRequest) {
       if (ids.length === 0) {
         return NextResponse.json({ error: "No ids" }, { status: 400 });
       }
-      await prisma.emailActivity.deleteMany({ where: { prospectId: { in: ids } } });
-      const result = await prisma.prospect.deleteMany({
-        where: { id: { in: ids }, archivedAt: { not: null }, ...workspaceFilter },
+      const result = await prisma.$transaction(async (tx) => {
+        await tx.campaignContact.deleteMany({ where: { prospectId: { in: ids } } });
+        await tx.emailActivity.deleteMany({ where: { prospectId: { in: ids } } });
+        await tx.calendarTask.updateMany({ where: { prospectId: { in: ids } }, data: { prospectId: null } });
+        return tx.prospect.deleteMany({
+          where: { id: { in: ids }, archivedAt: { not: null }, ...workspaceFilter },
+        });
       });
       return NextResponse.json({ deleted: result.count });
     }
@@ -100,8 +104,12 @@ export async function POST(request: NextRequest) {
       const ids = toDelete.map((p) => p.id);
 
       if (ids.length > 0) {
-        await prisma.emailActivity.deleteMany({ where: { prospectId: { in: ids } } });
-        await prisma.prospect.deleteMany({ where: { id: { in: ids } } });
+        await prisma.$transaction(async (tx) => {
+          await tx.campaignContact.deleteMany({ where: { prospectId: { in: ids } } });
+          await tx.emailActivity.deleteMany({ where: { prospectId: { in: ids } } });
+          await tx.calendarTask.updateMany({ where: { prospectId: { in: ids } }, data: { prospectId: null } });
+          await tx.prospect.deleteMany({ where: { id: { in: ids } } });
+        });
       }
 
       return NextResponse.json({ deleted: ids.length });

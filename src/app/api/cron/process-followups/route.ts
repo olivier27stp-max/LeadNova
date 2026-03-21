@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processScheduledEmails } from "@/lib/process-scheduled-emails";
+import { processAutoFollowUps } from "@/lib/process-scheduled-emails";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -11,12 +11,12 @@ function isAuthorized(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const result = await processScheduledEmails();
+  const result = await processAutoFollowUps();
   return NextResponse.json(result);
 }
 
 export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const result = await processScheduledEmails();
+  const result = await processAutoFollowUps();
   return NextResponse.json(result);
 }

@@ -255,7 +255,8 @@ async function sendViaSmtp(
   subject: string,
   html: string,
   text: string,
-  senderInfo: SenderInfo
+  senderInfo: SenderInfo,
+  unsubscribeUrl?: string
 ): Promise<void> {
   const transporter = nodemailer.createTransport(senderInfo.smtp);
 
@@ -280,6 +281,12 @@ async function sendViaSmtp(
     text,
     html: finalHtml,
     attachments,
+    ...(unsubscribeUrl ? {
+      headers: {
+        "List-Unsubscribe": `<${unsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+    } : {}),
   });
 }
 
@@ -297,12 +304,13 @@ async function getTodaySentCount(): Promise<number> {
   });
 }
 
-async function isBlacklisted(email: string): Promise<boolean> {
+async function isBlacklisted(email: string, workspaceId?: string | null): Promise<boolean> {
   const domain = email.split("@")[1];
 
   const match = await prisma.blacklist.findFirst({
     where: {
       OR: [{ email }, { domain }],
+      ...(workspaceId ? { workspaceId } : {}),
     },
   });
 
@@ -343,7 +351,7 @@ export async function sendEmail(
     return { success: false, error: "Prospect has no email address" };
   }
 
-  if (await isBlacklisted(prospect.email)) {
+  if (await isBlacklisted(prospect.email, prospect.workspaceId)) {
     return { success: false, error: "Email is blacklisted" };
   }
 
@@ -397,13 +405,21 @@ export async function sendEmail(
     if (senderInfo.provider === "resend") {
       await sendViaResend(prospect.email, subject, html, text, senderInfo, unsubscribeUrl);
     } else {
-      await sendViaSmtp(prospect.email, subject, html, text, senderInfo);
+      await sendViaSmtp(prospect.email, subject, html, text, senderInfo, unsubscribeUrl);
     }
 
     await prisma.prospect.update({
       where: { id: prospectId },
       data: { status: "CONTACTED" },
     });
+
+    // Update campaign lastSentAt so follow-ups appear in calendar (section 2a)
+    if (resolvedCampaignId) {
+      await prisma.campaign.update({
+        where: { id: resolvedCampaignId },
+        data: { lastSentAt: new Date(), status: "ACTIVE" },
+      });
+    }
 
     return { success: true };
   } catch (error) {

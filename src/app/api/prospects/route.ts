@@ -43,14 +43,22 @@ export async function GET(request: NextRequest) {
     if (emailStatus === "unknown") where.OR = [{ emailStatus: "unknown" }, { emailStatus: null }];
     else if (emailStatus) where.emailStatus = emailStatus;
 
-    // Text search across multiple fields
+    // Text search across multiple fields — use AND to avoid overwriting emailStatus OR
     if (search) {
-      where.OR = [
+      const searchConditions = [
         { companyName: { contains: search, mode: "insensitive" } },
         { email: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
         { city: { contains: search, mode: "insensitive" } },
       ];
+      if (where.OR) {
+        // emailStatus OR already set — wrap both in AND
+        const emailStatusOr = where.OR;
+        delete where.OR;
+        where.AND = [{ OR: emailStatusOr as Record<string, unknown>[] }, { OR: searchConditions }];
+      } else {
+        where.OR = searchConditions;
+      }
     }
 
     // Build orderBy

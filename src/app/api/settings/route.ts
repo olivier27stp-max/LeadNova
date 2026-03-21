@@ -68,6 +68,7 @@ const DEFAULT_SETTINGS = {
     followUpIntervalDays: 5,
     stopOnReply: true,
     stopOnExcluded: true,
+    skipWeekends: true,
   },
   targeting: {
     keywords: [],

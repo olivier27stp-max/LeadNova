@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getWorkspaceContext } from "@/lib/workspace";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getWorkspaceContext();
+    const workspaceId = ctx?.workspaceId ?? null;
+
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "day"; // day | week | month
 
@@ -23,18 +27,30 @@ export async function GET(request: NextRequest) {
       since.setHours(0, 0, 0, 0);
     }
 
+    // Get campaigns belonging to this workspace
+    const workspaceCampaignIds = workspaceId
+      ? (await prisma.campaign.findMany({
+          where: { workspaceId },
+          select: { id: true },
+        })).map((c) => c.id)
+      : [];
+
     const stats = await prisma.emailActivity.groupBy({
       by: ["campaignId"],
       where: {
-        campaignId: { not: null },
+        campaignId: { not: null, in: workspaceCampaignIds },
         sentAt: { gte: since },
       },
       _count: { id: true },
     });
 
-    // Also count emails with no campaign (individual sends)
     const totalCount = await prisma.emailActivity.count({
-      where: { sentAt: { gte: since } },
+      where: {
+        sentAt: { gte: since },
+        ...(workspaceCampaignIds.length > 0
+          ? { OR: [{ campaignId: { in: workspaceCampaignIds } }, { campaignId: null }] }
+          : {}),
+      },
     });
 
     const byCampaign: Record<string, number> = {};

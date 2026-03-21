@@ -11,10 +11,12 @@ export async function GET(
     // Find the email activity to get the prospect's email
     const activity = await prisma.emailActivity.findUnique({
       where: { id: activityId },
-      include: { prospect: { select: { email: true, companyName: true } } },
+      include: { prospect: { select: { email: true, companyName: true, workspaceId: true } } },
     });
 
-    if (activity?.prospect?.email) {
+    if (activity?.prospect?.email && activity.prospect.workspaceId) {
+      const wsId = activity.prospect.workspaceId;
+
       // Mark this activity as unsubscribed
       await prisma.emailActivity.update({
         where: { id: activityId },
@@ -25,7 +27,7 @@ export async function GET(
       await prisma.blacklist.upsert({
         where: {
           workspaceId_email: {
-            workspaceId: "default",
+            workspaceId: wsId,
             email: activity.prospect.email,
           },
         },
@@ -33,7 +35,7 @@ export async function GET(
         create: {
           email: activity.prospect.email,
           reason: "unsubscribed",
-          workspaceId: "default",
+          workspaceId: wsId,
         },
       });
     }

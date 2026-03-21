@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendEmail, canSendEmail } from "@/lib/email-sender";
+import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
 export async function POST(request: NextRequest) {
   try {
-  await requireWorkspaceContext();
+  const ctx = await requireWorkspaceContext();
   const body = await request.json();
   const { prospectId, subject, body: emailBody } = body;
 
@@ -14,6 +15,15 @@ export async function POST(request: NextRequest) {
       { error: "prospectId, subject, and body are required" },
       { status: 400 }
     );
+  }
+
+  // Verify prospect belongs to workspace
+  const prospect = await prisma.prospect.findFirst({
+    where: { id: prospectId, workspaceId: ctx.workspaceId },
+    select: { id: true },
+  });
+  if (!prospect) {
+    return NextResponse.json({ error: "Prospect introuvable" }, { status: 404 });
   }
 
   const { allowed, reason, sentToday } = await canSendEmail();

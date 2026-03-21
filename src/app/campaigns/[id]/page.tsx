@@ -22,6 +22,8 @@ import {
   ImageIcon,
   CalendarClock,
   ChevronDown,
+  FlaskConical,
+  Loader2,
 } from "lucide-react";
 import ScheduleModal from "@/components/ScheduleModal";
 
@@ -134,6 +136,35 @@ export default function CampaignDetailPage() {
   });
   const [editingLogo, setEditingLogo] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
+
+  // Test email state
+  const [testEmailTarget, setTestEmailTarget] = useState<"main" | "followup" | null>(null);
+  const [testEmailAddress, setTestEmailAddress] = useState("");
+  const [testEmailSending, setTestEmailSending] = useState(false);
+
+  async function handleSendTestEmail(type: "main" | "followup") {
+    if (!testEmailAddress || !testEmailAddress.includes("@")) return;
+    setTestEmailSending(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/test-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: testEmailAddress, type }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setToast({ message: `${t("campaignDetail", "testSent")} ${testEmailAddress}`, type: "success" });
+        setTestEmailTarget(null);
+        setTestEmailAddress("");
+      } else {
+        setToast({ message: data.error || t("campaignDetail", "testError"), type: "error" });
+      }
+    } catch {
+      setToast({ message: t("campaignDetail", "testNetworkError"), type: "error" });
+    } finally {
+      setTestEmailSending(false);
+    }
+  }
 
   async function saveLogo(url: string, enabled: boolean) {
     await fetch("/api/settings", {
@@ -1293,7 +1324,51 @@ export default function CampaignDetailPage() {
                     <Send className="size-4 text-primary" />
                     <CardTitle className="text-lg">{t("campaignDetail", "previewMain")}</CardTitle>
                   </div>
+                  {emailSubject && emailBody && (
+                    <button
+                      onClick={() => setTestEmailTarget(testEmailTarget === "main" ? null : "main")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/15 text-amber-600 ring-1 ring-amber-400/30 hover:bg-amber-400/25 hover:ring-amber-400/50 dark:text-amber-400 dark:bg-amber-400/10 dark:ring-amber-400/20 dark:hover:bg-amber-400/20 transition-all"
+                    >
+                      <FlaskConical className="size-3.5" />
+                      {t("campaignDetail", "testButton")}
+                    </button>
+                  )}
                 </CardHeader>
+                <AnimatePresence>
+                  {testEmailTarget === "main" && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 mx-5 mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <Input
+                          type="email"
+                          value={testEmailAddress}
+                          onChange={(e) => setTestEmailAddress(e.target.value)}
+                          placeholder={t("campaignDetail", "testEmailPlaceholder")}
+                          className="flex-1 h-9 text-sm"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => handleSendTestEmail("main")}
+                          disabled={testEmailSending || !testEmailAddress.includes("@")}
+                          className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
+                        >
+                          {testEmailSending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                          {t("campaignDetail", "testSend")}
+                        </Button>
+                        <button
+                          onClick={() => { setTestEmailTarget(null); setTestEmailAddress(""); }}
+                          className="p-1.5 rounded-md text-amber-600 hover:text-amber-800 hover:bg-amber-100 dark:text-amber-400 dark:hover:text-amber-200 dark:hover:bg-amber-900/30 transition-colors"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <CardContent className="p-0 overflow-hidden">
                   {!emailSubject && !emailBody ? (
                     <p className="text-muted text-sm p-4">
@@ -1410,7 +1485,51 @@ export default function CampaignDetailPage() {
                     <RefreshCw className="size-4 text-accent" />
                     <CardTitle className="text-lg">{t("campaignDetail", "previewFollowUp")}</CardTitle>
                   </div>
+                  {followUpSubject && followUpBody && (
+                    <button
+                      onClick={() => setTestEmailTarget(testEmailTarget === "followup" ? null : "followup")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/15 text-amber-600 ring-1 ring-amber-400/30 hover:bg-amber-400/25 hover:ring-amber-400/50 dark:text-amber-400 dark:bg-amber-400/10 dark:ring-amber-400/20 dark:hover:bg-amber-400/20 transition-all"
+                    >
+                      <FlaskConical className="size-3.5" />
+                      {t("campaignDetail", "testButton")}
+                    </button>
+                  )}
                 </CardHeader>
+                <AnimatePresence>
+                  {testEmailTarget === "followup" && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 mx-5 mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <Input
+                          type="email"
+                          value={testEmailAddress}
+                          onChange={(e) => setTestEmailAddress(e.target.value)}
+                          placeholder={t("campaignDetail", "testEmailPlaceholder")}
+                          className="flex-1 h-9 text-sm"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => handleSendTestEmail("followup")}
+                          disabled={testEmailSending || !testEmailAddress.includes("@")}
+                          className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
+                        >
+                          {testEmailSending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                          {t("campaignDetail", "testSend")}
+                        </Button>
+                        <button
+                          onClick={() => { setTestEmailTarget(null); setTestEmailAddress(""); }}
+                          className="p-1.5 rounded-md text-amber-600 hover:text-amber-800 hover:bg-amber-100 dark:text-amber-400 dark:hover:text-amber-200 dark:hover:bg-amber-900/30 transition-colors"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <CardContent className="p-0 overflow-hidden">
                   {!followUpSubject && !followUpBody ? (
                     <p className="text-muted text-sm p-4">

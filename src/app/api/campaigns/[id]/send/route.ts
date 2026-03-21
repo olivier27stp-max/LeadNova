@@ -129,6 +129,18 @@ export async function POST(
         status: "ACTIVE",
       },
     });
+
+    // Clear old dismissed follow-ups for this campaign so new ones appear in calendar
+    try {
+      await prisma.dismissedFollowUp.deleteMany({
+        where: {
+          workspaceId: ctx.workspaceId,
+          eventKey: { startsWith: `fu_${id}_` },
+        },
+      });
+    } catch {
+      // Not critical
+    }
   }
 
   await logActivity({

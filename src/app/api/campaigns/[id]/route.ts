@@ -8,10 +8,16 @@ export async function GET(
 ) {
   try {
     const ctx = await getWorkspaceContext();
+    if (!ctx) {
+      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    }
     const { id } = await params;
 
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
+    const campaign = await prisma.campaign.findFirst({
+      where: {
+        id,
+        workspaceId: ctx.workspaceId,
+      },
       include: {
         contacts: {
           include: {
@@ -35,11 +41,6 @@ export async function GET(
         { error: "Campaign not found" },
         { status: 404 }
       );
-    }
-
-    // Verify workspace ownership if user is authenticated
-    if (ctx && campaign.workspaceId && campaign.workspaceId !== ctx.workspaceId) {
-      return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
     }
 
     return NextResponse.json(campaign);

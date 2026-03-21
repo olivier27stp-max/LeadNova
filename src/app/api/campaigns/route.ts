@@ -14,7 +14,7 @@ export async function GET() {
   try {
     const workspaceId = await getWorkspaceId();
     const campaigns = await prisma.campaign.findMany({
-      where: workspaceId ? { workspaceId } : undefined,
+      where: { workspaceId: workspaceId ?? null },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(campaigns);
@@ -66,6 +66,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const workspaceId = await getWorkspaceId();
     const body = await request.json();
     const { id, ...data } = body;
 
@@ -76,9 +77,24 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // Verify workspace ownership
+    const existing = await prisma.campaign.findFirst({
+      where: { id, workspaceId: workspaceId ?? null },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+    }
+
+    // Only allow safe fields
+    const allowedFields = ["name", "status", "emailSubject", "emailBody", "followUpSubject", "followUpBody", "maxPerDay", "delayMinSeconds", "delayMaxSeconds", "requireApproval"];
+    const safeData: Record<string, unknown> = {};
+    for (const key of allowedFields) {
+      if (data[key] !== undefined) safeData[key] = data[key];
+    }
+
     const campaign = await prisma.campaign.update({
       where: { id },
-      data,
+      data: safeData,
     });
 
     if (data.status) {

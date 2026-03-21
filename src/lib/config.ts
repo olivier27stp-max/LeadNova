@@ -33,7 +33,7 @@ export const SEARCH_QUERIES = [
 ];
 
 export const DAILY_EMAIL_LIMIT = parseInt(
-  process.env.DAILY_EMAIL_LIMIT || "30",
+  process.env.DAILY_EMAIL_LIMIT || "100",
   10
 );
 

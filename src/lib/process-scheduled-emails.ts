@@ -18,6 +18,14 @@ function titleCase(str: string): string {
   return str.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** If date falls on Saturday or Sunday, push to the next Monday */
+function skipWeekend(date: Date): Date {
+  const day = date.getDay();
+  if (day === 6) date.setDate(date.getDate() + 2); // Saturday → Monday
+  else if (day === 0) date.setDate(date.getDate() + 1); // Sunday → Monday
+  return date;
+}
+
 function interpolate(
   template: string,
   prospect: { companyName: string; city?: string | null },
@@ -99,7 +107,7 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
 
           const subject = interpolate(campaign.emailSubject, prospect, companySettings);
           const body = interpolate(campaign.emailBody, prospect, companySettings);
-          const result = await sendEmail(prospect.id, subject, body);
+          const result = await sendEmail(prospect.id, subject, body, campaign.id);
           if (result.success) sent++;
           else failed++;
 
@@ -112,6 +120,14 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
           where: { id: scheduled.id },
           data: { status: "SENT", sentAt: new Date(), sentCount: sent, failedCount: failed },
         });
+
+        // Update campaign lastSentAt so follow-ups can be scheduled correctly
+        if (sent > 0) {
+          await prisma.campaign.update({
+            where: { id: campaign.id },
+            data: { lastSentAt: new Date(), status: "ACTIVE" },
+          });
+        }
 
         await logActivity({
           action: "campaign_sent",
@@ -199,10 +215,20 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
 
     const followUpDelayDays = (automation.followUpDelayDays as number) || 3;
     const maxFollowUps = (automation.maxFollowUps as number) || 3;
+    const followUpIntervalDays = (automation.followUpIntervalDays as number) || 5;
     const stopOnReply = automation.stopOnReply !== false;
+    const shouldSkipWeekends = automation.skipWeekends !== false;
+
+    // If skipWeekends is enabled and today is a weekend, skip this campaign entirely
+    const todayDay = new Date().getDay();
+    if (shouldSkipWeekends && (todayDay === 0 || todayDay === 6)) continue;
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - followUpDelayDays);
+
+    // Interval cutoff: prevent sending another follow-up too soon after the last email
+    const intervalCutoff = new Date();
+    intervalCutoff.setDate(intervalCutoff.getDate() - followUpIntervalDays);
 
     // Get campaign contacts
     const campaignContacts = await prisma.campaignContact.findMany({
@@ -236,7 +262,11 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       if (emails.length === 0) continue;
       if (emails.length > maxFollowUps) continue;
       if (stopOnReply && emails.some((e) => e.replyReceived)) continue;
-      if (emails[0].sentAt > cutoffDate) continue;
+      // First email must be older than followUpDelayDays
+      const firstEmail = emails[emails.length - 1]; // oldest (ordered desc)
+      if (firstEmail.sentAt > cutoffDate) continue;
+      // Last email must be older than followUpIntervalDays (prevent rapid follow-ups)
+      if (emails[0].sentAt > intervalCutoff) continue;
 
       const subject = interpolate(campaign.followUpSubject!, prospect, companySettings);
       const body = interpolate(campaign.followUpBody!, prospect, companySettings);

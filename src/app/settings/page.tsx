@@ -111,6 +111,7 @@ interface Settings {
     followUpIntervalDays: number;
     stopOnReply: boolean;
     stopOnExcluded: boolean;
+    skipWeekends: boolean;
   };
   appearance: {
     language: string;
@@ -2001,6 +2002,13 @@ export default function SettingsPage() {
                       updateField("automation", "stopOnExcluded", v)
                     }
                     label={t("settings", "stopOnExcluded")}
+                  />
+                  <Toggle
+                    checked={settings.automation.skipWeekends}
+                    onChange={(v) =>
+                      updateField("automation", "skipWeekends", v)
+                    }
+                    label={t("settings", "skipWeekends")}
                   />
                 </div>
               </div>

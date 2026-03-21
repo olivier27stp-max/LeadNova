@@ -34,9 +34,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const gen = await prisma.keywordGeneration.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
     if (!gen) return NextResponse.json({ error: "Non trouvé" }, { status: 404 });
     const body = await req.json();
+    const allowedFields: Record<string, unknown> = {};
+    if (body.insertedCount !== undefined) allowedFields.insertedCount = body.insertedCount;
     const updated = await prisma.keywordGeneration.update({
       where: { id },
-      data: body,
+      data: allowedFields,
     });
     return NextResponse.json(updated);
   } catch (error) {

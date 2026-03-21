@@ -61,6 +61,7 @@ model Workspace {
   scrapeWorkflows ScrapeWorkflow[]
   keywordGenerations KeywordGeneration[]
   calendarTasks   CalendarTask[]
+  dismissedFollowUps DismissedFollowUp[]
 
   @@map("workspaces")
 }
@@ -170,6 +171,7 @@ model EmailActivity {
   @@index([prospectId])
   @@index([campaignId])
   @@index([sentAt])
+  @@index([campaignId, sentAt])
   @@map("email_activity")
 }
 
@@ -213,6 +215,8 @@ model Campaign {
   updatedAt           DateTime       @updatedAt
 
   @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
   @@map("campaigns")
 }
 
@@ -493,4 +497,17 @@ model ScheduledEmail {
   @@index([campaignId])
   @@index([prospectId])
   @@map("scheduled_emails")
+}
+
+model DismissedFollowUp {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  eventKey    String   // e.g. "fu_cuid123_2" — unique key matching calendar event id
+  createdAt   DateTime @default(now())
+
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, eventKey])
+  @@index([workspaceId])
+  @@map("dismissed_follow_ups")
 }
