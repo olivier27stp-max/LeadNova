@@ -396,67 +396,55 @@ export default function CampaignDetailPage() {
   }
 
   async function handleSelectAll() {
-    const unselectedIds = contacts
-      .filter((c) => !localSelected.has(c.id))
-      .map((c) => c.id);
-    if (unselectedIds.length === 0) return;
-
-    // Optimistic update
+    // Optimistic: select all visible contacts
     setLocalSelected((prev) => {
       const next = new Set(prev);
-      unselectedIds.forEach((id) => next.add(id));
+      contacts.forEach((c) => next.add(c.id));
       return next;
     });
-    setSelectedCount((prev) => prev + unselectedIds.length);
+    const prevSelectedCount = selectedCount;
+    setSelectedCount(contactsTotal);
 
     try {
       const res = await fetch(`/api/campaigns/${campaignId}/contacts`, {
-        method: "POST",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prospectIds: unselectedIds }),
+        body: JSON.stringify({
+          action: "selectAll",
+          contactType: contactTypeFilter || undefined,
+          search: search || undefined,
+        }),
       });
       if (!res.ok) throw new Error("Failed");
-      showToast(`${unselectedIds.length} ${t("campaignDetail", "contactsAdded")}`, "success");
+      const data = await res.json();
+      showToast(`${data.total} ${t("campaignDetail", "contactsAdded")}`, "success");
+      fetchContacts();
     } catch {
-      // Revert
-      setLocalSelected((prev) => {
-        const next = new Set(prev);
-        unselectedIds.forEach((id) => next.delete(id));
-        return next;
-      });
-      setSelectedCount((prev) => prev - unselectedIds.length);
+      setLocalSelected(new Set());
+      setSelectedCount(prevSelectedCount);
       showToast(t("campaignDetail", "errorSelection"), "error");
     }
   }
 
   async function handleDeselectAll() {
-    const selectedIds = contacts
-      .filter((c) => localSelected.has(c.id))
-      .map((c) => c.id);
-    if (selectedIds.length === 0) return;
-
-    setLocalSelected((prev) => {
-      const next = new Set(prev);
-      selectedIds.forEach((id) => next.delete(id));
-      return next;
-    });
-    setSelectedCount((prev) => prev - selectedIds.length);
+    const prevSelected = new Set(localSelected);
+    const prevCount = selectedCount;
+    setLocalSelected(new Set());
+    setSelectedCount(0);
 
     try {
       const res = await fetch(`/api/campaigns/${campaignId}/contacts`, {
-        method: "DELETE",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prospectIds: selectedIds }),
+        body: JSON.stringify({ action: "deselectAll" }),
       });
       if (!res.ok) throw new Error("Failed");
-      showToast(`${selectedIds.length} ${t("campaignDetail", "contactsRemoved")}`, "success");
+      const data = await res.json();
+      showToast(`${data.removed} ${t("campaignDetail", "contactsRemoved")}`, "success");
+      fetchContacts();
     } catch {
-      setLocalSelected((prev) => {
-        const next = new Set(prev);
-        selectedIds.forEach((id) => next.add(id));
-        return next;
-      });
-      setSelectedCount((prev) => prev + selectedIds.length);
+      setLocalSelected(prevSelected);
+      setSelectedCount(prevCount);
       showToast(t("campaignDetail", "errorDeselection"), "error");
     }
   }

@@ -120,6 +120,68 @@ export async function POST(
   }
 }
 
+// PUT: select all / deselect all contacts
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const ctx = await requireWorkspaceContext();
+    const { id } = await params;
+    const body = await request.json();
+    const { action, contactType, search } = body as {
+      action: "selectAll" | "deselectAll";
+      contactType?: string;
+      search?: string;
+    };
+
+    // Verify campaign belongs to workspace
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
+      select: { id: true },
+    });
+    if (!campaign) {
+      return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
+    }
+
+    if (action === "selectAll") {
+      // Build same filter as GET
+      const where: Record<string, unknown> = { archivedAt: null, workspaceId: ctx.workspaceId };
+      if (contactType) where.contactType = contactType;
+      if (search) {
+        where.OR = [
+          { companyName: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          { city: { contains: search, mode: "insensitive" } },
+        ];
+      }
+
+      const allProspects = await prisma.prospect.findMany({
+        where,
+        select: { id: true },
+      });
+
+      const result = await prisma.campaignContact.createMany({
+        data: allProspects.map((p) => ({
+          campaignId: id,
+          prospectId: p.id,
+        })),
+        skipDuplicates: true,
+      });
+
+      return NextResponse.json({ added: result.count, total: allProspects.length });
+    } else {
+      // deselectAll
+      const result = await prisma.campaignContact.deleteMany({
+        where: { campaignId: id },
+      });
+      return NextResponse.json({ removed: result.count });
+    }
+  } catch (error) {
+    return handleWorkspaceError(error);
+  }
+}
+
 // DELETE: remove contacts from campaign
 export async function DELETE(
   request: NextRequest,
