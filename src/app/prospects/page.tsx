@@ -328,7 +328,12 @@ export default function ProspectsPage() {
     if (sortOrder) params.set("sortOrder", sortOrder);
 
     try {
-      const res = await fetch(`/api/prospects?${params}`);
+      let res = await fetch(`/api/prospects?${params}`);
+      // Retry once on 500 (transient DB connection errors)
+      if (res.status === 500) {
+        await new Promise((r) => setTimeout(r, 1000));
+        res = await fetch(`/api/prospects?${params}`);
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setProspects(data.prospects || []);

@@ -712,6 +712,44 @@ export default function SettingsPage() {
     }
   }
 
+  // ─── Auto-save for targeting ──────────────────────
+  const targetingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevTargetingRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!settings) return;
+    const json = JSON.stringify(settings.targeting);
+    // Skip initial load (prevRef is empty)
+    if (prevTargetingRef.current === "") {
+      prevTargetingRef.current = json;
+      return;
+    }
+    // Skip if nothing changed
+    if (json === prevTargetingRef.current) return;
+    prevTargetingRef.current = json;
+
+    // Debounce: auto-save 800ms after last change
+    if (targetingTimerRef.current) clearTimeout(targetingTimerRef.current);
+    targetingTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/settings", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targeting: settings.targeting }),
+        });
+        if (res.ok) {
+          setHasUnsaved(false);
+        }
+      } catch {
+        // silent — user can still manually save if auto-save fails
+      }
+    }, 800);
+
+    return () => {
+      if (targetingTimerRef.current) clearTimeout(targetingTimerRef.current);
+    };
+  }, [settings?.targeting]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function updateField(
     section: keyof Settings,
     field: string,
@@ -2028,17 +2066,6 @@ export default function SettingsPage() {
             <SectionCard
               title={t("settings", "targetingTitle")}
               description={t("settings", "targetingDesc")}
-              unsavedLabel={t("settings", "unsaved")}
-              savingLabel={t("settings", "savingBtn")}
-              saveLabel={t("settings", "saveBtn")}
-              onSave={() =>
-                saveSection(
-                  "targeting",
-                  settings.targeting as unknown as Record<string, unknown>
-                )
-              }
-              saving={saving}
-              hasUnsaved={hasUnsaved}
             >
               {/* Mots-cles */}
               <div>
