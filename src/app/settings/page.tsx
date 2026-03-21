@@ -699,13 +699,14 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [section]: data }),
       });
-      if (!res.ok) throw new Error("Save failed");
-      const updated = await res.json();
-      setSettings(updated as Settings);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Save failed");
+      setSettings(json as Settings);
       setHasUnsaved(false);
       showToast(t("settings", "settingsSaved"), "success");
-    } catch {
-      showToast(t("settings", "saveError"), "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      showToast(msg || t("settings", "saveError"), "error");
     } finally {
       setSaving(false);
     }

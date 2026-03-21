@@ -5,10 +5,10 @@ const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 const PREFIX = "enc:";
 
-function getKey(): Buffer {
+function getKey(): Buffer | null {
   const hex = process.env.ENCRYPTION_KEY;
   if (!hex || hex.length !== 64) {
-    throw new Error("ENCRYPTION_KEY manquant ou invalide (doit être 64 caractères hex)");
+    return null;
   }
   return Buffer.from(hex, "hex");
 }
@@ -16,6 +16,7 @@ function getKey(): Buffer {
 export function encrypt(plaintext: string): string {
   if (!plaintext) return plaintext;
   const key = getKey();
+  if (!key) return plaintext; // No encryption key configured — store as-is
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -28,6 +29,7 @@ export function decrypt(value: string): string {
   if (!value || !value.startsWith(PREFIX)) return value;
   try {
     const key = getKey();
+    if (!key) return value; // No encryption key configured
     const parts = value.slice(PREFIX.length).split(":");
     if (parts.length !== 3) return value;
     const iv = Buffer.from(parts[0], "base64");

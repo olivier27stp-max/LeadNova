@@ -162,8 +162,12 @@ export async function PATCH(request: NextRequest) {
     });
 
     const currentData = (existing?.data || DEFAULT_SETTINGS) as Record<string, unknown>;
-    // Encrypt sensitive fields before saving to DB
-    encryptSensitiveFields(body);
+    // Encrypt sensitive fields before saving to DB (skip gracefully if encryption unavailable)
+    try {
+      encryptSensitiveFields(body);
+    } catch (e) {
+      console.warn("Encryption skipped:", e instanceof Error ? e.message : e);
+    }
     const merged = deepMerge(currentData, body);
 
     const record = await prisma.appSettings.upsert({
