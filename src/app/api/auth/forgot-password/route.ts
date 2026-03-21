@@ -5,6 +5,30 @@ import { prisma } from "@/lib/db";
 const SECRET = process.env.SESSION_SECRET ?? "freeleads-dev-secret-change-in-prod";
 const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+// ─── Rate limiting (in-memory, per IP) ────────────────────
+const RATE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_REQUESTS = 5; // max 5 requests per window
+const rateMap = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  entry.count++;
+  return entry.count > MAX_REQUESTS;
+}
+
+// Clean up stale entries every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateMap) {
+    if (now > entry.resetAt) rateMap.delete(ip);
+  }
+}, 10 * 60 * 1000);
+
 function generateResetToken(userId: string, passwordHash: string): string {
   const expires = (Date.now() + TOKEN_TTL_MS).toString(36);
   const payload = `${userId}|${expires}`;
@@ -18,6 +42,15 @@ function generateResetToken(userId: string, passwordHash: string): string {
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting by IP
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || request.headers.get("x-real-ip")
+      || "unknown";
+    if (isRateLimited(ip)) {
+      // Still return success to prevent enumeration — but don't send email
+      return NextResponse.json({ success: true });
+    }
+
     const { email } = await request.json();
 
     if (!email) {
