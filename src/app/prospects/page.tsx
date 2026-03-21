@@ -351,9 +351,10 @@ export default function ProspectsPage() {
   const availableCities = useMemo(() => {
     const seen = new Map<string, string>();
     for (const p of prospects) {
-      if (p.city) {
-        const key = p.city.trim().toLowerCase();
-        if (!seen.has(key)) seen.set(key, p.city.trim());
+      const city = p.city?.trim();
+      if (city) {
+        const key = city.toLowerCase().normalize("NFC");
+        if (!seen.has(key)) seen.set(key, city);
       }
     }
     return Array.from(seen.values()).sort((a, b) => a.localeCompare(b, locale));
@@ -1864,12 +1865,13 @@ export default function ProspectsPage() {
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">
                 <select
+                  key={`city-select-${availableCities.length}`}
                   value={cityFilter}
                   onChange={(e) => { setCityFilter(e.target.value); }}
                   className="bg-transparent border-none cursor-pointer font-medium text-foreground-muted text-xs uppercase tracking-wide p-0 focus:ring-0 focus:outline-none"
                 >
                   <option value="">{t("prospects", "city")} ▾</option>
-                  {availableCities.sort((a, b) => a.localeCompare(b, locale)).map((c) => (
+                  {availableCities.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
