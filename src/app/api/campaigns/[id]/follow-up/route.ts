@@ -103,7 +103,7 @@ export async function GET(
 
     const allEmails = prospectIds.length > 0
       ? await prisma.emailActivity.findMany({
-          where: { prospectId: { in: prospectIds }, bounce: false },
+          where: { prospectId: { in: prospectIds }, campaignId: id, bounce: false },
           orderBy: { sentAt: "desc" },
           select: { prospectId: true, sentAt: true, replyReceived: true },
         })
@@ -217,6 +217,26 @@ export async function POST(
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - followUpDelayDays);
 
+    // Batch fetch all email activities for these contacts
+    const postProspectIds = campaignContacts
+      .filter((cc) => cc.prospect.email)
+      .map((cc) => cc.prospect.id);
+
+    const allPostEmails = postProspectIds.length > 0
+      ? await prisma.emailActivity.findMany({
+          where: { prospectId: { in: postProspectIds }, campaignId: id, bounce: false },
+          orderBy: { sentAt: "desc" },
+          select: { prospectId: true, sentAt: true, replyReceived: true },
+        })
+      : [];
+
+    const postEmailsByProspect = new Map<string, typeof allPostEmails>();
+    for (const email of allPostEmails) {
+      const list = postEmailsByProspect.get(email.prospectId) || [];
+      list.push(email);
+      postEmailsByProspect.set(email.prospectId, list);
+    }
+
     let sent = 0;
     let skipped = 0;
     let failed = 0;
@@ -235,11 +255,7 @@ export async function POST(
         break;
       }
 
-      const emails = await prisma.emailActivity.findMany({
-        where: { prospectId: prospect.id, campaignId: id, bounce: false },
-        orderBy: { sentAt: "desc" },
-        select: { sentAt: true, replyReceived: true },
-      });
+      const emails = postEmailsByProspect.get(prospect.id) || [];
 
       if (emails.length === 0) { skipped++; continue; }
       if (emails.length > maxFollowUps) { skipped++; continue; }

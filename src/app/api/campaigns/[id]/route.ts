@@ -59,15 +59,19 @@ export async function PATCH(
 ) {
   try {
     const ctx = await getWorkspaceContext();
+    if (!ctx) {
+      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    }
     const { id } = await params;
     const body = await request.json();
 
     // Verify workspace ownership
-    if (ctx) {
-      const existing = await prisma.campaign.findUnique({ where: { id }, select: { workspaceId: true } });
-      if (existing?.workspaceId && existing.workspaceId !== ctx.workspaceId) {
-        return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
-      }
+    const existing = await prisma.campaign.findFirst({
+      where: { id, workspaceId: ctx.workspaceId },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
     const campaign = await prisma.campaign.update({
