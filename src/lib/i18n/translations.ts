@@ -895,6 +895,7 @@ export const translations = {
     emailsVerified: { fr: "emails vérifiés", en: "emails verified" },
     errorFetchProspects: { fr: "Impossible de récupérer les prospects", en: "Unable to fetch prospects" },
     errorDeletion: { fr: "Erreur lors de la suppression", en: "Error during deletion" },
+    verificationCancelled: { fr: "Vérification annulée", en: "Verification cancelled" },
 
     // Table headers
     tableCompany: { fr: "Entreprise", en: "Company" },

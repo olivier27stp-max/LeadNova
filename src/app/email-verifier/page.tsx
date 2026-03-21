@@ -252,7 +252,16 @@ function EmailVerifierPage() {
   // Data state
   const [verifyStats, setVerifyStats] = useState<VerifyStats | null>(null);
   const [verifying, setVerifying] = useState(false);
-  const [verifyProgress, setVerifyProgress] = useState<{ verified: number; total: number; startedAt: number } | null>(null);
+  const [verifyProgress, setVerifyProgress] = useState<{
+    verified: number;
+    total: number;
+    startedAt: number;
+    stepLabel: string;
+    stats: { valid: number; risky: number; invalid: number; disposable: number; unknown: number };
+    done: boolean;
+    cancelled: boolean;
+  } | null>(null);
+  const verifyAbortRef = useRef(false);
   const [prospects, setProspects] = useState<VerifyProspect[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -318,21 +327,43 @@ function EmailVerifierPage() {
 
   async function runBulkVerify() {
     setVerifying(true);
-    setVerifyProgress(null);
-    let totalVerified = 0;
+    verifyAbortRef.current = false;
     const BATCH = 25;
+    const runningStats = { valid: 0, risky: 0, invalid: 0, disposable: 0, unknown: 0 };
+    let totalVerified = 0;
     try {
       const r = await fetch("/api/verify-emails?ids=1");
       if (!r.ok) throw new Error(t("emailVerifier", "errorFetchProspects"));
       const { ids } = (await r.json()) as { ids: string[] };
       if (ids.length === 0) {
         showToast(t("emailVerifier", "noEmailsToVerify"), "success");
+        setVerifying(false);
         return;
       }
-      setVerifyProgress({ verified: 0, total: ids.length, startedAt: Date.now() });
+      setVerifyProgress({
+        verified: 0, total: ids.length, startedAt: Date.now(),
+        stepLabel: "", stats: { ...runningStats }, done: false, cancelled: false,
+      });
 
       for (let i = 0; i < ids.length; i += BATCH) {
+        if (verifyAbortRef.current) {
+          setVerifyProgress((prev) => prev ? { ...prev, cancelled: true } : prev);
+          showToast(t("emailVerifier", "verificationCancelled"), "success");
+          break;
+        }
         const batch = ids.slice(i, i + BATCH);
+        const batchNum = Math.floor(i / BATCH) + 1;
+        const totalBatches = Math.ceil(ids.length / BATCH);
+        setVerifyProgress((prev) => ({
+          verified: prev?.verified ?? 0,
+          total: ids.length,
+          startedAt: prev?.startedAt ?? Date.now(),
+          stepLabel: `Lot ${batchNum} / ${totalBatches}`,
+          stats: { ...runningStats },
+          done: false,
+          cancelled: false,
+        }));
+
         const res = await fetch("/api/verify-emails", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -341,26 +372,47 @@ function EmailVerifierPage() {
         if (!res.ok) {
           const d = await res.json();
           showToast(d.error || t("emailVerifier", "errorVerification"), "error");
-          return;
+          setVerifyProgress((prev) => prev ? { ...prev, done: true } : prev);
+          break;
         }
         const data = await res.json();
         totalVerified += data.verified ?? 0;
+        // Accumulate stats
+        if (data.stats) {
+          for (const k of Object.keys(runningStats) as (keyof typeof runningStats)[]) {
+            runningStats[k] += data.stats[k] ?? 0;
+          }
+        }
         setVerifyProgress((prev) => ({
           verified: Math.min(i + BATCH, ids.length),
           total: ids.length,
           startedAt: prev?.startedAt ?? Date.now(),
+          stepLabel: `Lot ${batchNum} / ${totalBatches}`,
+          stats: { ...runningStats },
+          done: false,
+          cancelled: false,
         }));
       }
 
-      showToast(`${totalVerified} ${t("emailVerifier", "emailsVerified")}`, "success");
+      if (!verifyAbortRef.current) {
+        showToast(`${totalVerified} ${t("emailVerifier", "emailsVerified")}`, "success");
+      }
       await loadStats();
       await loadProspects();
     } catch {
       showToast(t("emailVerifier", "networkErrorVerification"), "error");
     } finally {
       setVerifying(false);
-      setVerifyProgress(null);
+      setVerifyProgress((prev) => prev ? { ...prev, done: true } : null);
     }
+  }
+
+  function stopVerify() {
+    verifyAbortRef.current = true;
+  }
+
+  function dismissVerifyProgress() {
+    setVerifyProgress(null);
   }
 
   async function runDeepEnrich() {
@@ -484,13 +536,21 @@ function EmailVerifierPage() {
           <JobProgressBar
             data={{
               type: "enrichment",
-              status: verifying ? "running" : "completed",
+              status: verifyProgress.cancelled ? "cancelled" : verifying ? "running" : verifyProgress.done ? "completed" : "running",
               title: t("emailVerifier", "verificationTitle"),
-              stepLabel: "",
+              stepLabel: verifyProgress.stepLabel,
               processed: verifyProgress.verified,
               total: verifyProgress.total,
               startedAt: verifyProgress.startedAt,
+              secondaryLabel: [
+                verifyProgress.stats.valid > 0 ? `${verifyProgress.stats.valid} ${t("emailVerifier", "statusValid").toLowerCase()}` : null,
+                verifyProgress.stats.risky > 0 ? `${verifyProgress.stats.risky} ${t("emailVerifier", "statusRisky").toLowerCase()}` : null,
+                verifyProgress.stats.invalid > 0 ? `${verifyProgress.stats.invalid} ${t("emailVerifier", "statusInvalid").toLowerCase()}` : null,
+                verifyProgress.stats.disposable > 0 ? `${verifyProgress.stats.disposable} ${t("emailVerifier", "statusDisposable").toLowerCase()}` : null,
+              ].filter(Boolean).join(", ") || undefined,
             }}
+            onStop={verifying ? stopVerify : undefined}
+            onDismiss={!verifying && verifyProgress.done ? dismissVerifyProgress : undefined}
           />
         )}
 
