@@ -1,21 +1,33 @@
 import { prisma } from "./db";
-import { SEARCH_QUERIES } from "./config";
 import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
 import { isCancelRequested } from "./discovery-progress";
 
-// ─── Blocked keywords loader ────────────────────────────
-async function loadBlockedKeywords(workspaceId?: string | null): Promise<string[]> {
+// ─── Targeting settings loader ────────────────────────────
+interface TargetingSettings {
+  keywords: string[];
+  blockedKeywords: string[];
+  cities: string[];
+  searchQueries: string[];
+}
+
+export async function loadTargetingSettings(workspaceId?: string | null): Promise<TargetingSettings> {
+  const empty: TargetingSettings = { keywords: [], blockedKeywords: [], cities: [], searchQueries: [] };
   try {
     const where = workspaceId ? { workspaceId } : { workspaceId: null };
     const row = await prisma.appSettings.findFirst({ where, select: { data: true } });
-    if (!row?.data || typeof row.data !== "object") return [];
+    if (!row?.data || typeof row.data !== "object") return empty;
     const data = row.data as Record<string, unknown>;
     const targeting = data.targeting as Record<string, unknown> | undefined;
-    if (!targeting?.blockedKeywords || !Array.isArray(targeting.blockedKeywords)) return [];
-    return (targeting.blockedKeywords as string[]).map((k) => k.toLowerCase().trim()).filter(Boolean);
+    if (!targeting) return empty;
+    return {
+      keywords: Array.isArray(targeting.keywords) ? (targeting.keywords as string[]).filter(Boolean) : [],
+      blockedKeywords: Array.isArray(targeting.blockedKeywords) ? (targeting.blockedKeywords as string[]).map((k) => (k as string).toLowerCase().trim()).filter(Boolean) : [],
+      cities: Array.isArray(targeting.cities) ? (targeting.cities as string[]).filter(Boolean) : [],
+      searchQueries: Array.isArray(targeting.searchQueries) ? (targeting.searchQueries as string[]).filter(Boolean) : [],
+    };
   } catch {
-    return [];
+    return empty;
   }
 }
 
@@ -170,8 +182,21 @@ export async function discoverProspects(
   workspaceId?: string | null
 ): Promise<DiscoveryOutcome> {
   const normalizedCity = normalizeCityName(city);
-  const queries = SEARCH_QUERIES.map((q) => q.replace("{city}", city));
-  const blockedKeywords = await loadBlockedKeywords(workspaceId);
+  const settings = await loadTargetingSettings(workspaceId);
+
+  // Build queries from user settings: searchQueries (with {city} replacement) + keyword × city combinations
+  const queries: string[] = [];
+  for (const sq of settings.searchQueries) {
+    queries.push(sq.replace(/\{city\}/gi, city));
+  }
+  for (const kw of settings.keywords) {
+    queries.push(`${kw} ${city}`);
+  }
+  if (queries.length === 0) {
+    return { found: 0, new: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
+  }
+
+  const blockedKeywords = settings.blockedKeywords;
 
   const allResults: SearchResult[] = [];
   const errors: string[] = [];

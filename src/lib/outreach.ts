@@ -14,15 +14,14 @@ interface OutreachEmail {
   body: string;
 }
 
-const SYSTEM_PROMPT = `Tu es un rédacteur d'emails professionnels pour ${COMPANY_INFO.name}, une entreprise spécialisée dans:
-- ${COMPANY_INFO.services.join("\n- ")}
+const SYSTEM_PROMPT = `Tu es un rédacteur d'emails professionnels pour ${COMPANY_INFO.name}${COMPANY_INFO.services.length > 0 ? `, une entreprise spécialisée dans:\n- ${COMPANY_INFO.services.join("\n- ")}` : ""}
 
 Tu dois générer des emails de prospection personnalisés, professionnels et concis en français.
 L'email doit:
 - Être court (max 150 mots)
 - Mentionner le nom de l'entreprise prospect
 - Mentionner la ville si disponible
-- Présenter brièvement les services
+- Présenter brièvement les services si disponibles
 - Proposer une soumission ou une collaboration
 - Avoir un ton professionnel mais amical
 - Se terminer avec "Cordialement,\\n${COMPANY_INFO.contactName}\\n${COMPANY_INFO.name}"
@@ -36,9 +35,9 @@ export async function generateOutreachEmail(
   const userPrompt = `Génère un email de prospection pour:
 - Entreprise: ${input.companyName}
 - Ville: ${input.city || "Non spécifiée"}
-- Industrie: ${input.industry || "Gestion immobilière"}
+- Industrie: ${input.industry || "Non spécifiée"}
 
-L'email doit proposer nos services d'entretien extérieur pour leurs propriétés.`;
+L'email doit proposer nos services de manière professionnelle et personnalisée.`;
 
   const message = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
@@ -67,7 +66,7 @@ L'email doit proposer nos services d'entretien extérieur pour leurs propriété
     // Fallback: try to extract from response
     const lines = content.text.split("\n");
     return {
-      subject: `Services d'entretien pour vos propriétés à ${input.city || "votre région"}`,
+      subject: `Proposition de services pour ${input.companyName}`,
       body: content.text,
     };
   }
@@ -75,20 +74,18 @@ L'email doit proposer nos services d'entretien extérieur pour leurs propriété
 
 export function generateFallbackEmail(input: OutreachInput): OutreachEmail {
   const city = input.city || "votre région";
+  const servicesBlock = COMPANY_INFO.services.length > 0
+    ? `\n\nNous offrons des services tels que:\n${COMPANY_INFO.services.map((s) => `• ${s}`).join("\n")}\n`
+    : "";
 
   return {
-    subject: `Services d'entretien pour vos propriétés à ${city}`,
+    subject: `Proposition de services pour ${input.companyName}`,
     body: `Bonjour,
 
-J'ai remarqué que ${input.companyName} gère des propriétés dans la région de ${city}.
+J'ai remarqué que ${input.companyName} est basée dans la région de ${city}.
 
-Chez ${COMPANY_INFO.name}, nous aidons les gestionnaires immobiliers à maintenir leurs bâtiments avec des services tels que:
-
-• Nettoyage de vitres
-• Nettoyage de gouttières
-• Lavage de surfaces extérieures
-
-Si vous gérez des propriétés dans la région, je serais heureux de vous fournir une soumission rapide ou de discuter d'une collaboration potentielle.
+Chez ${COMPANY_INFO.name}, nous serions ravis de collaborer avec vous.${servicesBlock}
+Je serais heureux de vous fournir une soumission rapide ou de discuter d'une collaboration potentielle.
 
 Cordialement,
 ${COMPANY_INFO.contactName}

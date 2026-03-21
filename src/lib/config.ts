@@ -1,37 +1,3 @@
-export const TARGET_INDUSTRIES = [
-  "Property Management",
-  "Condominium Management",
-  "Commercial Property Management",
-  "Facility Management",
-  "Real Estate Asset Management",
-  "Building Maintenance",
-  "Gestion immobilière",
-  "Gestion de copropriété",
-  "Gestion de propriétés commerciales",
-  "Gestion d'immeubles",
-  "Entretien de bâtiments",
-];
-
-export const TARGET_CITIES = [
-  "Montréal",
-  "Québec",
-  "Sherbrooke",
-  "Drummondville",
-  "Trois-Rivières",
-  "Granby",
-];
-
-export const SEARCH_QUERIES = [
-  "property management {city}",
-  "gestion immobilière {city}",
-  "condo management {city}",
-  "gestion de copropriété {city}",
-  "building management {city}",
-  "facility management {city}",
-  "gestion d'immeubles {city}",
-  "commercial property management {city}",
-];
-
 export const DAILY_EMAIL_LIMIT = parseInt(
   process.env.DAILY_EMAIL_LIMIT || "100",
   10

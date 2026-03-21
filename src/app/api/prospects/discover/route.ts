@@ -1,6 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
-import { discoverProspects, discoverAllCities } from "@/lib/discovery";
-import { TARGET_CITIES } from "@/lib/config";
+import { discoverProspects, discoverAllCities, loadTargetingSettings } from "@/lib/discovery";
 import { getDiscoveryProgress, setDiscoveryProgress, updateDiscoveryProgress, requestCancelDiscovery, isCancelRequested } from "@/lib/discovery-progress";
 import { logActivity, generateBatchId } from "@/lib/activity";
 import { getWorkspaceContext } from "@/lib/workspace";
@@ -26,14 +25,25 @@ export async function POST(request: NextRequest) {
   try {
     const maxToFind = target;
 
+    // Load cities from user targeting settings
+    const targeting = await loadTargetingSettings(workspaceId);
+    const settingsCities = targeting.cities;
+
+    if (city === "all" && settingsCities.length === 0) {
+      return NextResponse.json(
+        { error: "Aucune ville configurée dans Ciblage. Allez dans Paramètres > Ciblage pour ajouter des villes." },
+        { status: 400 }
+      );
+    }
+
     // Initialize progress tracking
-    const totalCities = city === "all" ? TARGET_CITIES.length : 1;
+    const totalCities = city === "all" ? settingsCities.length : 1;
     setDiscoveryProgress({
       status: "running",
       target: maxToFind,
       found: 0,
       newCount: 0,
-      currentCity: city === "all" ? TARGET_CITIES[0] || "" : city,
+      currentCity: city === "all" ? settingsCities[0] || "" : city,
       round: 1,
       startedAt: Date.now(),
       totalCities,
@@ -60,7 +70,7 @@ export async function POST(request: NextRequest) {
           const newBeforeRound = totalNew;
           updateDiscoveryProgress({ round: rounds });
 
-          for (const targetCity of TARGET_CITIES) {
+          for (const targetCity of settingsCities) {
             if (totalNew >= maxToFind || isCancelRequested()) break;
 
             updateDiscoveryProgress({ currentCity: targetCity });
