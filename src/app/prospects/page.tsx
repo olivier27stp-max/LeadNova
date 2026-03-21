@@ -220,9 +220,9 @@ export default function ProspectsPage() {
   const [editData, setEditData] = useState<Record<string, string | number>>({});
 
   // Discover & Enrich
-  const [discoverTarget, setDiscoverTarget] = useState(10);
+  const [discoverTarget, setDiscoverTarget] = useState(100);
   const [targetingCities, setTargetingCities] = useState<string[]>([]);
-  const [enrichTarget, setEnrichTarget] = useState(10);
+  const [enrichTarget, setEnrichTarget] = useState(100);
   const [showEnrichConfirm, setShowEnrichConfirm] = useState(false);
   const [discoverProgress, setDiscoverProgress] = useState<{
     status: string;
@@ -1344,7 +1344,7 @@ export default function ProspectsPage() {
               <div>
                 <p className="text-xs font-semibold text-foreground-muted mb-2 uppercase tracking-wide">{t("prospects", "prospectCount")}</p>
                 <div className="grid grid-cols-4 gap-1.5 mb-2">
-                  {[10, 25, 50, 100, 150, 200, 300, 500].map((n) => (
+                  {[100, 250, 500, 1000, 2000, 3000, 4000, 5000].map((n) => (
                     <button
                       key={n}
                       onClick={() => setDiscoverTarget(n)}
@@ -1354,7 +1354,7 @@ export default function ProspectsPage() {
                           : "bg-background-subtle text-foreground-secondary hover:bg-background-muted"
                       }`}
                     >
-                      {n}
+                      {n >= 1000 ? `${n / 1000}k` : n}
                     </button>
                   ))}
                 </div>
@@ -1363,9 +1363,9 @@ export default function ProspectsPage() {
                   <input
                     type="number"
                     min={1}
-                    max={500}
+                    max={5000}
                     value={discoverTarget}
-                    onChange={(e) => setDiscoverTarget(Math.min(500, Math.max(1, parseInt(e.target.value) || 1)))}
+                    onChange={(e) => setDiscoverTarget(Math.min(5000, Math.max(1, parseInt(e.target.value) || 1)))}
                     className="w-24 border border-border rounded px-2 py-1 text-sm bg-background text-foreground"
                   />
                 </div>
@@ -1507,7 +1507,7 @@ export default function ProspectsPage() {
                 <div>
                   <p className="text-xs font-semibold text-foreground-muted mb-2 uppercase tracking-wide">{t("prospects", "prospectsToEnrichCount")}</p>
                   <div className="grid grid-cols-4 gap-1.5 mb-2">
-                    {[10, 25, 50, 100, 150, 200, 300, 500].map((n) => (
+                    {[100, 250, 500, 1000, 2000, 3000, 4000, 5000].map((n) => (
                       <button
                         key={n}
                         onClick={() => setEnrichTarget(n)}
@@ -1517,7 +1517,7 @@ export default function ProspectsPage() {
                             : "bg-background-subtle text-foreground-secondary hover:bg-background-muted"
                         }`}
                       >
-                        {n}
+                        {n >= 1000 ? `${n / 1000}k` : n}
                       </button>
                     ))}
                   </div>
@@ -1526,9 +1526,9 @@ export default function ProspectsPage() {
                     <input
                       type="number"
                       min={1}
-                      max={newCount || 500}
+                      max={newCount || 5000}
                       value={enrichTarget}
-                      onChange={(e) => setEnrichTarget(Math.min(newCount || 500, Math.max(1, parseInt(e.target.value) || 1)))}
+                      onChange={(e) => setEnrichTarget(Math.min(newCount || 5000, Math.max(1, parseInt(e.target.value) || 1)))}
                       className="w-24 border border-border rounded px-2 py-1 text-sm bg-background text-foreground"
                     />
                   </div>

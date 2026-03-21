@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
         let totalQueriesFailed = 0;
         const allErrors: string[] = [];
         let rounds = 0;
-        const maxRounds = 5;
+        const maxRounds = 20;
 
         while (totalNew < maxToFind && rounds < maxRounds) {
           if (isCancelRequested()) break;
