@@ -32,7 +32,6 @@ import { Select } from "@/components/ui/select";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
 import { ToastContainer } from "@/components/ui/toast";
-import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import CampaignReports from "@/components/CampaignReports";
@@ -207,8 +206,6 @@ export default function CampaignDetailPage() {
   // Contact tab state
   const [contacts, setContacts] = useState<ContactProspect[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
-  const [contactsPage, setContactsPage] = useState(1);
-  const [contactsTotalPages, setContactsTotalPages] = useState(1);
   const [selectedCount, setSelectedCount] = useState(0);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -273,8 +270,8 @@ export default function CampaignDetailPage() {
   const fetchContacts = useCallback(async () => {
     setContactsLoading(true);
     const params = new URLSearchParams({
-      page: String(contactsPage),
-      limit: "25",
+      page: "1",
+      limit: "10000",
     });
     if (search) params.set("search", search);
     if (contactTypeFilter) params.set("contactType", contactTypeFilter);
@@ -287,7 +284,6 @@ export default function CampaignDetailPage() {
       const data = await res.json();
       setContacts(data.prospects || []);
       setContactsTotal(data.total || 0);
-      setContactsTotalPages(data.totalPages || 1);
       setSelectedCount(data.selectedCount || 0);
 
       // Merge server selection into local
@@ -306,7 +302,7 @@ export default function CampaignDetailPage() {
     } finally {
       setContactsLoading(false);
     }
-  }, [campaignId, contactsPage, search, contactTypeFilter]);
+  }, [campaignId, search, contactTypeFilter]);
 
   useEffect(() => {
     if (activeTab === "contact") {
@@ -1266,7 +1262,6 @@ export default function CampaignDetailPage() {
                       value={search}
                       onChange={(e) => {
                         setSearch(e.target.value);
-                        setContactsPage(1);
                       }}
                       placeholder={t("campaignDetail", "searchContacts")}
                       className="pl-9"
@@ -1278,7 +1273,6 @@ export default function CampaignDetailPage() {
                     value={contactTypeFilter}
                     onChange={(e) => {
                       setContactTypeFilter(e.target.value);
-                      setContactsPage(1);
                     }}
                   >
                     <option value="">{t("campaignDetail", "allTypes")}</option>
@@ -1321,8 +1315,9 @@ export default function CampaignDetailPage() {
               </div>
 
               {/* Table */}
+              <div className="max-h-[600px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead className="bg-background-subtle border-b border-border">
+                <thead className="bg-background-subtle border-b border-border sticky top-0 z-10">
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-foreground-muted w-10">
                       <input
@@ -1420,17 +1415,7 @@ export default function CampaignDetailPage() {
                   )}
                 </tbody>
               </table>
-
-              {/* Pagination */}
-              {contactsTotalPages > 1 && (
-                <div className="p-4 border-t border-border">
-                  <Pagination
-                    page={contactsPage}
-                    totalPages={contactsTotalPages}
-                    onPageChange={setContactsPage}
-                  />
-                </div>
-              )}
+              </div>
             </Card>
           </motion.div>
         )}
