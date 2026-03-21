@@ -62,9 +62,16 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
     const replyTo = companySettings?.email || emailSettings?.replyToEmail || undefined;
 
     const logoUrl = emailSettings?.logoUrl || undefined;
-    const provider = (emailSettings?.provider === "resend" || emailSettings?.provider === "smtp")
-      ? emailSettings.provider
-      : fallbackProvider;
+    // Use explicit provider setting, or auto-detect: if SMTP host is configured use smtp, otherwise fall back to resend
+    const smtpHost = emailSettings?.smtpHost || process.env.SMTP_HOST || "";
+    let provider: "resend" | "smtp";
+    if (emailSettings?.provider === "resend" || emailSettings?.provider === "smtp") {
+      provider = emailSettings.provider;
+    } else if (smtpHost) {
+      provider = "smtp";
+    } else {
+      provider = fallbackProvider;
+    }
     const smtp = buildSmtpConfig(emailSettings);
 
     // Build company info from DB settings — source of truth for templates
