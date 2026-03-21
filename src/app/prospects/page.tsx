@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, memo, useMemo, useTransition } from "react";
 import { ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
+import { CityDropdown } from "@/components/ui/city-dropdown";
 import JobProgressBar from "@/components/prospects/JobProgressBar";
 import { useEnrichment } from "@/components/EnrichmentProvider";
 import { useTranslation } from "@/components/LanguageProvider";
@@ -1865,17 +1866,12 @@ export default function ProspectsPage() {
                 {t("prospects", "company")} <SortIcon field="companyName" />
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">
-                <select
-                  key={`city-select-${availableCities.length}`}
+                <CityDropdown
                   value={cityFilter}
-                  onChange={(e) => { setCityFilter(e.target.value); }}
-                  className="bg-transparent border-none cursor-pointer font-medium text-foreground-muted text-xs uppercase tracking-wide p-0 focus:ring-0 focus:outline-none"
-                >
-                  <option value="">{t("prospects", "city")} ▾</option>
-                  {availableCities.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                  onChange={setCityFilter}
+                  cities={availableCities}
+                  placeholder={t("prospects", "city")}
+                />
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Email</th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "phone")}</th>
