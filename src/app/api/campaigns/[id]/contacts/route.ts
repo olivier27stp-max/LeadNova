@@ -70,6 +70,75 @@ export async function GET(
     });
     const alreadyEmailedIds = new Set(alreadyEmailed.map((e) => e.prospectId));
 
+    // Fix orphaned SCHEDULED statuses: prospects marked SCHEDULED but with no pending scheduled sends
+    const scheduledProspects = prospects.filter((p) => p.status === "SCHEDULED");
+    if (scheduledProspects.length > 0) {
+      const scheduledIds = scheduledProspects.map((p) => p.id);
+
+      // Check which of these actually have pending scheduled emails (direct or via campaign)
+      const directPending = await prisma.scheduledEmail.findMany({
+        where: { prospectId: { in: scheduledIds }, status: "PENDING" },
+        select: { prospectId: true },
+      });
+      const directPendingIds = new Set(directPending.map((se) => se.prospectId));
+
+      // Check campaign-linked pending scheduled emails
+      const campaignLinks = await prisma.campaignContact.findMany({
+        where: { prospectId: { in: scheduledIds } },
+        select: { prospectId: true, campaignId: true },
+      });
+      const campaignIds = [...new Set(campaignLinks.map((cl) => cl.campaignId))];
+      const campaignPending = campaignIds.length > 0
+        ? await prisma.scheduledEmail.findMany({
+            where: { campaignId: { in: campaignIds }, status: "PENDING" },
+            select: { campaignId: true },
+          })
+        : [];
+      const pendingCampaignIds = new Set(campaignPending.map((se) => se.campaignId));
+      const campaignPendingProspectIds = new Set(
+        campaignLinks
+          .filter((cl) => pendingCampaignIds.has(cl.campaignId))
+          .map((cl) => cl.prospectId)
+      );
+
+      // Find orphans: SCHEDULED but no pending sends anywhere
+      const orphanIds = scheduledIds.filter(
+        (pid) => !directPendingIds.has(pid) && !campaignPendingProspectIds.has(pid)
+      );
+
+      if (orphanIds.length > 0) {
+        // Determine correct status per orphan: CONTACTED if has email activity, else ENRICHED
+        const emailedOrphans = await prisma.emailActivity.findMany({
+          where: { prospectId: { in: orphanIds } },
+          select: { prospectId: true },
+          distinct: ["prospectId"],
+        });
+        const emailedOrphanIds = new Set(emailedOrphans.map((e) => e.prospectId));
+
+        const toContacted = orphanIds.filter((pid) => emailedOrphanIds.has(pid));
+        const toEnriched = orphanIds.filter((pid) => !emailedOrphanIds.has(pid));
+
+        if (toContacted.length > 0) {
+          await prisma.prospect.updateMany({
+            where: { id: { in: toContacted }, status: "SCHEDULED" },
+            data: { status: "CONTACTED" },
+          });
+        }
+        if (toEnriched.length > 0) {
+          await prisma.prospect.updateMany({
+            where: { id: { in: toEnriched }, status: "SCHEDULED" },
+            data: { status: "ENRICHED" },
+          });
+        }
+
+        // Update in-memory data for this response
+        for (const p of prospects) {
+          if (toContacted.includes(p.id)) (p as Record<string, unknown>).status = "CONTACTED";
+          if (toEnriched.includes(p.id)) (p as Record<string, unknown>).status = "ENRICHED";
+        }
+      }
+    }
+
     const prospectsWithSelection = prospects.map((p) => ({
       ...p,
       selected: selectedIds.has(p.id),
