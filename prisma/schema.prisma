@@ -130,6 +130,9 @@ model Prospect {
   emailEnrichmentAttempts   Int       @default(0)
   enrichedAt                DateTime?
   reviewCount               Int?
+  rawCompanyName            String?
+  companyNameConfidence     Float?
+  companyNameNeedsReview    Boolean   @default(false)
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]

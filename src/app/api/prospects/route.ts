@@ -114,6 +114,7 @@ export async function GET(request: NextRequest) {
         emailStatus: true,
         emailVerifiedAt: true,
         reviewCount: true,
+        companyNameNeedsReview: true,
         createdAt: true,
         campaignContacts: {
           select: {

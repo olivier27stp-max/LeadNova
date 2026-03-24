@@ -23,6 +23,7 @@ interface ProspectListItem {
   industry: string | null;
   emailGuessed: boolean;
   reviewCount: number | null;
+  companyNameNeedsReview?: boolean;
   createdAt: string;
   campaignId: string | null;
   campaignNumber: number | null;
@@ -150,7 +151,12 @@ const ProspectRow = memo(function ProspectRow({
         />
       </td>
       <td className="px-4 py-3 overflow-hidden">
-        <p className="font-medium text-foreground truncate">{prospect.companyName}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="font-medium text-foreground truncate">{prospect.companyName}</p>
+          {prospect.companyNameNeedsReview && (
+            <span className="text-[10px] bg-warning-subtle text-warning px-1.5 py-0.5 rounded shrink-0 font-medium" title="Nom à vérifier">Review</span>
+          )}
+        </div>
         {prospect.industry && <p className="text-xs text-foreground-muted truncate">{prospect.industry}</p>}
       </td>
       <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.city || "—"}</td>

@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
 import { isCancelRequested } from "./discovery-progress";
+import { validateCompanyNames, localCleanCompanyName } from "./company-name-validation";
 
 // ─── Targeting settings loader ────────────────────────────
 interface TargetingSettings {
@@ -262,17 +263,62 @@ export async function discoverProspects(
       })
     : afterBlocked;
 
+  // ─── Company name validation (Layer 1 local + Layer 2 AI) ───
+  // First pass: local rules to reject obvious garbage and clean names
+  const localChecked = filtered.map((result) => {
+    const local = localCleanCompanyName(result.companyName);
+    return { result, local };
+  });
+
+  // Remove locally-rejected entries (invalid with no review needed)
+  const afterLocalFilter = localChecked.filter(({ local }) => local.isValid || local.needsReview);
+
+  // Collect entries that need AI validation
+  const needsAIValidation = afterLocalFilter.filter(
+    ({ local }) => local.confidence < 0.85 || local.needsReview
+  );
+
+  // Batch AI validation for entries that need it
+  if (needsAIValidation.length > 0) {
+    try {
+      const aiInputs = needsAIValidation.map(({ result }) => ({
+        rawName: result.companyName,
+        website: result.website,
+        city: result.city,
+        industry: result.industry,
+      }));
+      const aiResults = await validateCompanyNames(aiInputs);
+
+      // Merge AI results back into the local results
+      for (let i = 0; i < needsAIValidation.length; i++) {
+        if (aiResults[i]) {
+          needsAIValidation[i].local = aiResults[i];
+        }
+      }
+    } catch (error) {
+      console.error("[discovery] AI company name validation failed, using local results:", error);
+    }
+  }
+
   let newCount = 0;
 
-  for (const result of filtered) {
+  for (const { result, local } of afterLocalFilter) {
     if (newCount >= maxNew || isCancelRequested()) break;
+
+    // Skip entries marked invalid by AI
+    if (!local.isValid && !local.needsReview) continue;
+
+    const finalName = local.cleanName || result.companyName;
 
     try {
       const score = calculateLeadScore(result);
 
       await prisma.prospect.create({
         data: {
-          companyName: result.companyName,
+          companyName: finalName,
+          rawCompanyName: result.companyName !== finalName ? result.companyName : null,
+          companyNameConfidence: local.confidence,
+          companyNameNeedsReview: local.needsReview,
           website: result.website,
           address: result.address,
           phone: result.phone,
