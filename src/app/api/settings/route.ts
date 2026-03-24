@@ -66,6 +66,7 @@ const DEFAULT_SETTINGS = {
     followUpDelayDays: 3,
     maxFollowUps: 3,
     followUpIntervalDays: 5,
+    followUpDelays: [3, 5, 7, 10, 14],
     stopOnReply: true,
     stopOnExcluded: true,
     skipWeekends: true,

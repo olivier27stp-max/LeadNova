@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, memo, useMemo, useTransition } from "react";
+import Link from "next/link";
 import { ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import { CityDropdown } from "@/components/ui/city-dropdown";
 import JobProgressBar from "@/components/prospects/JobProgressBar";
@@ -21,7 +22,16 @@ interface ProspectListItem {
   contactType: string | null;
   industry: string | null;
   emailGuessed: boolean;
+  reviewCount: number | null;
   createdAt: string;
+  campaignId: string | null;
+  campaignNumber: number | null;
+}
+
+interface CampaignOption {
+  id: string;
+  number: number;
+  name: string;
 }
 
 interface ProspectDetail extends ProspectListItem {
@@ -51,13 +61,6 @@ const STATUS_LABELS: Record<string, string> = {
   NOT_INTERESTED: "Pas intéressé",
 };
 const SOURCE_OPTIONS = ["google_search", "duckduckgo_search", "manual", "import", "referral"];
-const SOURCE_LABELS: Record<string, string> = {
-  google_search: "Google",
-  duckduckgo_search: "DuckDuckGo",
-  manual: "Manuel",
-  import: "Import",
-  referral: "Référence",
-};
 const CONTACT_TYPE_OPTIONS = ["prospect", "client", "nouveau_client"];
 const CONTACT_TYPE_LABELS: Record<string, string> = {
   prospect: "Prospect",
@@ -94,6 +97,7 @@ function SkeletonRow() {
       <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-36" /></td>
       <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-24" /></td>
       <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-10" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-8" /></td>
       <td className="px-4 py-3"><div className="h-5 bg-background-muted rounded w-16" /></td>
       <td className="px-4 py-3"><div className="h-6 bg-background-muted rounded w-14" /></td>
     </tr>
@@ -105,21 +109,25 @@ const ProspectRow = memo(function ProspectRow({
   rowIndex,
   actionLoading,
   selected,
+  campaigns,
   onSelect,
   onToggleSelect,
   onEnrich,
   onEmail,
   onDragStart,
+  onCampaignChange,
 }: {
   prospect: ProspectListItem;
   rowIndex: number;
   actionLoading: string | null;
   selected: boolean;
+  campaigns: CampaignOption[];
   onSelect: (p: ProspectListItem) => void;
   onToggleSelect: (id: string) => void;
   onEnrich: (id: string) => void;
   onEmail: (p: ProspectListItem) => void;
   onDragStart: (id: string, e?: React.MouseEvent) => void;
+  onCampaignChange: (prospectId: string, campaignId: string | null) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -155,7 +163,21 @@ const ProspectRow = memo(function ProspectRow({
         ) : "—"}
       </td>
       <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.phone || "—"}</td>
-      <td className="px-4 py-3 text-xs text-foreground-muted truncate overflow-hidden">{prospect.source || "—"}</td>
+      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+        <select
+          value={prospect.campaignId || ""}
+          onChange={(e) => onCampaignChange(prospect.id, e.target.value || null)}
+          className="w-14 text-xs border border-border rounded px-1 py-0.5 bg-background text-foreground cursor-pointer"
+        >
+          <option value="">—</option>
+          {campaigns.map((c) => (
+            <option key={c.id} value={c.id}>{c.number}</option>
+          ))}
+        </select>
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap text-foreground-secondary tabular-nums text-sm">
+        {prospect.reviewCount != null ? prospect.reviewCount : "—"}
+      </td>
       <td className="px-4 py-3 whitespace-nowrap">
         <span className="font-mono font-medium text-foreground tabular-nums">{prospect.leadScore}</span>
       </td>
@@ -195,6 +217,7 @@ export default function ProspectsPage() {
   const [enrichedToday, setEnrichedToday] = useState(0);
   const [dailyDiscoveryLimit, setDailyDiscoveryLimit] = useState(50);
   const [loading, setLoading] = useState(true);
+  const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("");
@@ -270,6 +293,9 @@ export default function ProspectsPage() {
   const [showDiscoverConfirm, setShowDiscoverConfirm] = useState(false);
   const [targetingKeywords, setTargetingKeywords] = useState<string[]>([]);
   const [targetingQueries, setTargetingQueries] = useState<string[]>([]);
+
+  // Campaign assignment on discover
+  const [discoverCampaignId, setDiscoverCampaignId] = useState("");
 
   // Province-based discovery
   const [provinces, setProvinces] = useState<{ code: string; name: string }[]>([]);
@@ -354,6 +380,38 @@ export default function ProspectsPage() {
     fetchProspects();
   }, [fetchProspects]);
 
+  // Fetch campaigns for dropdown
+  useEffect(() => {
+    fetch("/api/campaigns")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: CampaignOption[]) => {
+        const list = Array.isArray(data) ? data : [];
+        setCampaigns(list.map((c) => ({ id: c.id, number: c.number, name: c.name })).sort((a, b) => a.number - b.number));
+      })
+      .catch(console.error);
+  }, []);
+
+  // Assign campaign to prospect
+  const handleCampaignChange = useCallback(async (prospectId: string, campaignId: string | null) => {
+    // Optimistic update
+    setProspects((prev) =>
+      prev.map((p) =>
+        p.id === prospectId
+          ? { ...p, campaignId, campaignNumber: campaigns.find((c) => c.id === campaignId)?.number ?? null }
+          : p
+      )
+    );
+    try {
+      await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: prospectId, campaignId }),
+      });
+    } catch (error) {
+      console.error("Failed to assign campaign:", error);
+    }
+  }, [campaigns]);
+
   // Derive available cities from loaded prospects (dynamic, no static list)
   const availableCities = useMemo(() => {
     const seen = new Map<string, string>();
@@ -373,14 +431,22 @@ export default function ProspectsPage() {
     if (cityFilter) result = result.filter((p) => p.city?.trim().toLowerCase() === cityFilter.trim().toLowerCase());
     const q = searchQuery.toLowerCase();
     if (!q) return result;
-    return result.filter((p) =>
-      p.companyName.toLowerCase().includes(q) ||
-      (p.email && p.email.toLowerCase().includes(q)) ||
-      (p.phone && p.phone.includes(q)) ||
-      (p.city && p.city.toLowerCase().includes(q)) ||
-      (p.industry && p.industry.toLowerCase().includes(q)) ||
-      (p.website && p.website.toLowerCase().includes(q))
-    );
+    // Normalize phone search: strip non-digit chars for comparison
+    const qDigits = q.replace(/\D/g, "");
+    const isPhoneSearch = qDigits.length >= 3;
+    return result.filter((p) => {
+      if (p.companyName.toLowerCase().includes(q)) return true;
+      if (p.email && p.email.toLowerCase().includes(q)) return true;
+      if (p.city && p.city.toLowerCase().includes(q)) return true;
+      if (p.industry && p.industry.toLowerCase().includes(q)) return true;
+      if (p.website && p.website.toLowerCase().includes(q)) return true;
+      // Phone: match both raw and normalized (digits only)
+      if (p.phone) {
+        if (p.phone.includes(q)) return true;
+        if (isPhoneSearch && p.phone.replace(/\D/g, "").includes(qDigits)) return true;
+      }
+      return false;
+    });
   }, [prospects, searchQuery, cityFilter]);
 
   // Fetch targeting cities from settings + provinces list
@@ -515,7 +581,7 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ city: city || "all", targetCount }),
+        body: JSON.stringify({ city: city || "all", targetCount, campaignId: discoverCampaignId || undefined }),
       });
       const data = await res.json();
       stopProgressPolling();
@@ -824,7 +890,11 @@ export default function ProspectsPage() {
     if (!confirm(`${t("common", "delete")} ${selectedIds.size} prospect${selectedIds.size > 1 ? "s" : ""} ? ${t("prospects", "confirmDelete")}`)) return;
     setActionLoading("bulk-delete");
     try {
-      const res = await fetch(`/api/prospects?ids=${Array.from(selectedIds).join(",")}`, { method: "DELETE" });
+      const res = await fetch("/api/prospects", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
       if (!res.ok) throw new Error("Delete failed");
       const data = await res.json();
       alert(`${data.deleted} prospect${data.deleted > 1 ? "s" : ""} ${data.deleted > 1 ? t("prospects", "removedPlural") : t("prospects", "removed")}`);
@@ -1296,9 +1366,17 @@ export default function ProspectsPage() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex gap-2 mr-2">
-            <div className="rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs">
+            <div className="relative group rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs cursor-default">
               <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "discoveriesToday")}</p>
               <p className="text-sm font-semibold text-foreground tabular-nums">{scrapedToday}</p>
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-50">
+                <div className="bg-card border border-border rounded-lg shadow-lg px-4 py-3 whitespace-nowrap text-xs text-foreground-muted">
+                  <p className="mb-1.5">{scrapedToday} / {dailyDiscoveryLimit} {t("prospects", "discoveriesToday").toLowerCase()}</p>
+                  <Link href="/settings?section=subscription" className="text-primary hover:underline font-medium">
+                    {t("prospects", "seePlans")}
+                  </Link>
+                </div>
+              </div>
             </div>
             <div className="rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs">
               <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "enrichedToday")}</p>
@@ -1417,6 +1495,26 @@ export default function ProspectsPage() {
                 ) : (
                   <p className="text-xs text-foreground-muted">{t("prospects", "noCustomQueries")}</p>
                 )}
+              </div>
+
+              {/* Add to campaign */}
+              <div>
+                <p className="text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">
+                  {t("prospects", "addToCampaign")}
+                </p>
+                <select
+                  value={discoverCampaignId}
+                  onChange={(e) => setDiscoverCampaignId(e.target.value)}
+                  className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                >
+                  <option value="">{t("prospects", "noCampaignSelected")}</option>
+                  {campaigns.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      #{c.number} — {c.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-foreground-muted mt-1">{t("prospects", "addToCampaignDesc")}</p>
               </div>
 
               {/* Google Maps manual */}
@@ -1723,7 +1821,7 @@ export default function ProspectsPage() {
         >
           <option value="">{t("prospects", "allSources")}</option>
           {SOURCE_OPTIONS.map((s) => (
-            <option key={s} value={s}>{t("source", s as "google_search") || s}</option>
+            <option key={s} value={s}>{s}</option>
           ))}
         </select>
         <select
@@ -1880,7 +1978,8 @@ export default function ProspectsPage() {
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Email</th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "phone")}</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "source")}</th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Campagne</th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "reviews")}</th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("leadScore")}>
                 {t("prospects", "score")} <SortIcon field="leadScore" />
               </th>
@@ -1923,11 +2022,13 @@ export default function ProspectsPage() {
                   rowIndex={i + 1}
                   actionLoading={actionLoading}
                   selected={selectedIds.has(p.id)}
+                  campaigns={campaigns}
                   onSelect={handleSelectProspect}
                   onToggleSelect={toggleSelect}
                   onDragStart={handleDragStart}
                   onEnrich={handleEnrichOne}
                   onEmail={handleEmailClick}
+                  onCampaignChange={handleCampaignChange}
                 />
               ))
             )}
@@ -2079,6 +2180,12 @@ export default function ProspectsPage() {
                     <p className="text-xs text-foreground-muted uppercase">{t("prospects", "score")}</p>
                     <p className="text-sm font-mono font-semibold text-foreground tabular-nums">{selectedProspect.leadScore}</p>
                   </div>
+                  {selectedProspect.reviewCount != null && (
+                    <div>
+                      <p className="text-xs text-foreground-muted uppercase">{t("prospects", "reviews")}</p>
+                      <p className="text-sm font-mono font-semibold text-foreground tabular-nums">{selectedProspect.reviewCount}</p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-xs text-foreground-muted uppercase">{t("prospects", "status")}</p>
                     <StatusBadge status={selectedProspect.status} />
@@ -2088,8 +2195,10 @@ export default function ProspectsPage() {
                     <p className="text-sm text-foreground">{selectedProspect.address || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-foreground-muted uppercase">{t("prospects", "source")}</p>
-                    <p className="text-sm text-foreground">{selectedProspect.source || "—"}</p>
+                    <p className="text-xs text-foreground-muted uppercase">Campagne</p>
+                    <p className="text-sm text-foreground">
+                      {selectedProspect.campaignNumber ? `#${selectedProspect.campaignNumber}` : "—"}
+                    </p>
                   </div>
                 </div>
                 )}

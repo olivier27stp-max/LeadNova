@@ -113,6 +113,7 @@ interface Settings {
     followUpDelayDays: number;
     maxFollowUps: number;
     followUpIntervalDays: number;
+    followUpDelays: number[];
     stopOnReply: boolean;
     stopOnExcluded: boolean;
     skipWeekends: boolean;
@@ -145,6 +146,8 @@ interface Settings {
     blockedKeywords: string[];
     cities: string[];
     searchQueries: string[];
+    minReviews?: number;
+    maxReviews?: number;
   };
   subscription: {
     plan: "starter" | "growth" | "pro";
@@ -2015,7 +2018,7 @@ export default function SettingsPage() {
                         )
                       }
                       min={0}
-                      max={10}
+                      max={5}
                     />
                   </FieldGroup>
                   <FieldGroup label={t("settings", "followUpIntervalDays")}>
@@ -2033,6 +2036,44 @@ export default function SettingsPage() {
                       max={30}
                     />
                   </FieldGroup>
+                </div>
+
+                {/* Per-follow-up delay configuration */}
+                <div className="mt-4 pt-4 border-t border-border">
+                  <p className="text-sm font-medium text-foreground-secondary mb-1">
+                    {t("settings", "followUpDelaysTitle")}
+                  </p>
+                  <p className="text-xs text-muted mb-3">
+                    {t("settings", "followUpDelaysDesc")}
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    {Array.from({ length: 5 }).map((_, idx) => {
+                      const delays = settings.automation.followUpDelays || [3, 5, 7, 10, 14];
+                      return (
+                        <div key={idx}>
+                          <label className="text-xs text-foreground-muted block mb-1">
+                            Follow-up {idx + 1}
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              min={1}
+                              max={60}
+                              value={delays[idx] ?? (idx + 1) * 3}
+                              onChange={(e) => {
+                                const updated = [...delays];
+                                updated[idx] = Math.max(1, Number(e.target.value) || 1);
+                                updateField("automation", "followUpDelays", updated);
+                              }}
+                              disabled={idx >= (settings.automation.maxFollowUps || 5)}
+                              className={idx >= (settings.automation.maxFollowUps || 5) ? "opacity-40" : ""}
+                            />
+                            <span className="text-xs text-foreground-muted shrink-0">{t("settings", "daysUnit")}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="mt-3">
                   <Toggle
@@ -2831,6 +2872,61 @@ export default function SettingsPage() {
                     : t("settings", "combinationLabel")}{" "}
                   {t("settings", "ofSearch")}
                 </p>
+              </div>
+
+              {/* Review count filter */}
+              <div className="pt-4 border-t border-border">
+                <p className="text-sm font-medium text-foreground-secondary mb-1">
+                  {t("settings", "reviewFilter")}
+                </p>
+                <p className="text-xs text-muted mb-3">
+                  {t("settings", "reviewFilterDesc")}
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-foreground-muted mb-1 block">Min</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={(settings.targeting as Record<string, unknown>).minReviews as number ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value) || 0);
+                        setSettings({
+                          ...settings,
+                          targeting: { ...settings.targeting, minReviews: val } as typeof settings.targeting,
+                        });
+                        setHasUnsaved(true);
+                      }}
+                    />
+                  </div>
+                  <span className="text-foreground-muted text-sm mt-5">—</span>
+                  <div className="flex-1">
+                    <label className="text-xs text-foreground-muted mb-1 block">Max</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder={t("settings", "noLimit")}
+                      value={(settings.targeting as Record<string, unknown>).maxReviews as number ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value) || 0);
+                        setSettings({
+                          ...settings,
+                          targeting: { ...settings.targeting, maxReviews: val } as typeof settings.targeting,
+                        });
+                        setHasUnsaved(true);
+                      }}
+                    />
+                  </div>
+                </div>
+                {(() => {
+                  const t_min = (settings.targeting as Record<string, unknown>).minReviews as number | undefined;
+                  const t_max = (settings.targeting as Record<string, unknown>).maxReviews as number | undefined;
+                  if (t_min != null && t_max != null && t_min > t_max) {
+                    return <p className="text-xs text-danger mt-1">{t("settings", "reviewFilterError")}</p>;
+                  }
+                  return null;
+                })()}
               </div>
             </SectionCard>
           </motion.div>

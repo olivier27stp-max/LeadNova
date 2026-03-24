@@ -62,9 +62,18 @@ export async function GET(
 
     const selectedIds = new Set(selectedContacts.map((c) => c.prospectId));
 
+    // Find prospects already emailed in this campaign (for "double" detection)
+    const alreadyEmailed = await prisma.emailActivity.findMany({
+      where: { campaignId: id },
+      select: { prospectId: true },
+      distinct: ["prospectId"],
+    });
+    const alreadyEmailedIds = new Set(alreadyEmailed.map((e) => e.prospectId));
+
     const prospectsWithSelection = prospects.map((p) => ({
       ...p,
       selected: selectedIds.has(p.id),
+      alreadyEmailed: alreadyEmailedIds.has(p.id),
     }));
 
     return NextResponse.json({

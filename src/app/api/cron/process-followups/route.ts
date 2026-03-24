@@ -11,12 +11,30 @@ function isAuthorized(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const result = await processAutoFollowUps();
-  return NextResponse.json(result);
+  console.log("[cron/process-followups] Triggered (POST) at", new Date().toISOString());
+  try {
+    const result = await processAutoFollowUps();
+    if (result.sent > 0 || result.errors.length > 0) {
+      console.log("[cron/process-followups] Result:", JSON.stringify(result));
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("[cron/process-followups] Fatal error:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Internal error" }, { status: 500 });
+  }
 }
 
 export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const result = await processAutoFollowUps();
-  return NextResponse.json(result);
+  console.log("[cron/process-followups] Triggered at", new Date().toISOString());
+  try {
+    const result = await processAutoFollowUps();
+    if (result.sent > 0 || result.errors.length > 0) {
+      console.log("[cron/process-followups] Result:", JSON.stringify(result));
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("[cron/process-followups] Fatal error:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Internal error" }, { status: 500 });
+  }
 }

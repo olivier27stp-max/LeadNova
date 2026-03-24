@@ -11,12 +11,30 @@ function isAuthorized(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const result = await processScheduledEmails();
-  return NextResponse.json(result);
+  console.log("[cron/process-scheduled] Triggered (POST) at", new Date().toISOString());
+  try {
+    const result = await processScheduledEmails();
+    if (result.processed > 0 || result.errors.length > 0) {
+      console.log("[cron/process-scheduled] Result:", JSON.stringify(result));
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("[cron/process-scheduled] Fatal error:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Internal error" }, { status: 500 });
+  }
 }
 
 export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const result = await processScheduledEmails();
-  return NextResponse.json(result);
+  console.log("[cron/process-scheduled] Triggered at", new Date().toISOString());
+  try {
+    const result = await processScheduledEmails();
+    if (result.processed > 0 || result.errors.length > 0) {
+      console.log("[cron/process-scheduled] Result:", JSON.stringify(result));
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error("[cron/process-scheduled] Fatal error:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Internal error" }, { status: 500 });
+  }
 }

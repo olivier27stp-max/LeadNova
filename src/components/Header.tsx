@@ -23,6 +23,7 @@ import ActivityBell from "@/components/ActivityBell";
 import AccountButton from "@/components/AccountButton";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
 import DiscoveryCounter from "@/components/DiscoveryCounter";
+import SupportButton from "@/components/SupportButton";
 
 const NAV_KEYS = [
   { href: "/", labelKey: "dashboard" as const, icon: LayoutDashboard },
@@ -78,10 +79,10 @@ export default function Header() {
   return (
     <nav className="sticky top-0 z-40 bg-card/80 backdrop-blur-lg border-b border-border">
       <div className="max-w-7xl mx-auto flex items-center justify-between h-12 px-6">
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4 min-w-0">
           <Link
             href="/"
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 shrink-0"
           >
             <Logo variant="icon" size={22} />
             <span className="text-[15px] font-semibold tracking-tight">
@@ -90,20 +91,21 @@ export default function Header() {
             </span>
           </Link>
 
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 min-w-0 overflow-hidden">
             {NAV_KEYS.map(({ href, labelKey, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
+                title={t("nav", labelKey)}
                 className={cn(
-                  "relative flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-md transition-colors",
+                  "relative flex items-center gap-1.5 text-[13px] font-medium px-2.5 py-1.5 rounded-md transition-colors shrink-0",
                   isActive(href)
                     ? "text-foreground bg-background-muted"
                     : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
                 )}
               >
-                <Icon className="size-3.5" />
-                {t("nav", labelKey)}
+                <Icon className="size-3.5 shrink-0" />
+                <span className="hidden xl:inline whitespace-nowrap">{t("nav", labelKey)}</span>
                 {href === "/settings" && unsubscribeCount > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none ring-2 ring-card/80 pointer-events-none">
                     {unsubscribeCount > 99 ? "99+" : unsubscribeCount}
@@ -114,22 +116,22 @@ export default function Header() {
             {isAdmin && (
               <Link
                 href="/notes"
+                title="Notes"
                 className={cn(
-                  "relative flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-md transition-colors",
+                  "relative flex items-center gap-1.5 text-[13px] font-medium px-2.5 py-1.5 rounded-md transition-colors shrink-0",
                   isActive("/notes")
                     ? "text-foreground bg-background-muted"
                     : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
                 )}
               >
-                <StickyNote className="size-3.5" />
-                Notes
+                <StickyNote className="size-3.5 shrink-0" />
+                <span className="hidden xl:inline whitespace-nowrap">Notes</span>
               </Link>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          <DiscoveryCounter />
+        <div className="flex items-center gap-0.5 shrink-0">
           <WorkspaceSwitcher />
           <button
             onClick={cycleTheme}
@@ -142,6 +144,8 @@ export default function Header() {
           >
             <ThemeIcon className="size-4" />
           </button>
+          <DiscoveryCounter />
+          <SupportButton />
           <ActivityBell />
           <div className="w-px h-5 bg-border mx-1" />
           <AccountButton />

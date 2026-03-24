@@ -40,6 +40,28 @@ function interpolate(
     .replace(/\{\{sender_name\}\}/g, company.name || "");
 }
 
+interface FollowUpTemplate { subject: string; body: string; }
+
+function buildFollowUpTemplates(campaign: {
+  followUps: unknown;
+  followUpSubject: string | null;
+  followUpBody: string | null;
+}): FollowUpTemplate[] {
+  const templates: FollowUpTemplate[] = [];
+  const raw = campaign.followUps as unknown;
+  if (Array.isArray(raw) && raw.length > 0) {
+    for (const fu of raw) {
+      const f = fu as { subject?: string; body?: string };
+      if (f.subject || f.body) templates.push({ subject: f.subject || "", body: f.body || "" });
+    }
+  }
+  // Fall back to legacy single follow-up fields
+  if (templates.length === 0 && campaign.followUpSubject && campaign.followUpBody) {
+    templates.push({ subject: campaign.followUpSubject, body: campaign.followUpBody });
+  }
+  return templates;
+}
+
 async function loadAutomationSettings(workspaceId: string) {
   const settingsRow = await prisma.appSettings.findUnique({ where: { workspaceId } });
   const settings = (settingsRow?.data as Record<string, unknown>) || {};
@@ -47,6 +69,8 @@ async function loadAutomationSettings(workspaceId: string) {
   return {
     followUpDelayDays: (automation.followUpDelayDays as number) || 3,
     maxFollowUps: (automation.maxFollowUps as number) || 3,
+    followUpIntervalDays: (automation.followUpIntervalDays as number) || 5,
+    followUpDelays: Array.isArray(automation.followUpDelays) ? (automation.followUpDelays as number[]) : [],
     stopOnReply: automation.stopOnReply !== false,
     companySettings: ((settings.company || {}) as CompanySettings),
   };
@@ -69,6 +93,7 @@ export async function GET(
         status: true,
         followUpSubject: true,
         followUpBody: true,
+        followUps: true,
       },
     });
 
@@ -76,7 +101,11 @@ export async function GET(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    const { followUpDelayDays, maxFollowUps, stopOnReply } = await loadAutomationSettings(ctx.workspaceId);
+    // Build follow-up templates: prefer followUps array, fall back to legacy fields
+    const followUpTemplates = buildFollowUpTemplates(campaign);
+
+    const { followUpDelayDays, maxFollowUps, stopOnReply, followUpDelays, followUpIntervalDays } = await loadAutomationSettings(ctx.workspaceId);
+    const effectiveMaxFollowUps = Math.min(maxFollowUps, followUpTemplates.length);
 
     const campaignContacts = await prisma.campaignContact.findMany({
       where: { campaignId: id },
@@ -122,6 +151,7 @@ export async function GET(
       email: string | null;
       lastEmailAt: string | null;
       emailCount: number;
+      followUpIndex: number;
       hasReply: boolean;
     }> = [];
 
@@ -132,9 +162,19 @@ export async function GET(
       const emails = emailsByProspect.get(prospect.id) || [];
 
       if (emails.length === 0) continue;
-      if (emails.length > maxFollowUps) continue;
+      const followUpIndex = emails.length - 1;
+      if (followUpIndex >= effectiveMaxFollowUps) continue;
       if (stopOnReply && emails.some((e) => e.replyReceived)) continue;
-      if (emails[0].sentAt > cutoffDate) continue;
+
+      // Check initial delay
+      const firstEmail = emails[emails.length - 1]; // oldest
+      if (firstEmail.sentAt > cutoffDate) continue;
+
+      // Check per-follow-up interval delay
+      const delayForThis = followUpDelays[followUpIndex] || followUpIntervalDays;
+      const intervalCutoff = new Date();
+      intervalCutoff.setDate(intervalCutoff.getDate() - delayForThis);
+      if (emails[0].sentAt > intervalCutoff) continue;
 
       eligible.push({
         prospectId: prospect.id,
@@ -142,6 +182,7 @@ export async function GET(
         email: prospect.email,
         lastEmailAt: emails[0].sentAt.toISOString(),
         emailCount: emails.length,
+        followUpIndex,
         hasReply: false,
       });
     }
@@ -149,9 +190,9 @@ export async function GET(
     return NextResponse.json({
       campaignId: id,
       campaignName: campaign.name,
-      hasFollowUpTemplate: !!(campaign.followUpSubject && campaign.followUpBody),
+      hasFollowUpTemplate: followUpTemplates.length > 0,
       followUpDelayDays,
-      maxFollowUps,
+      maxFollowUps: effectiveMaxFollowUps,
       eligible,
       total: eligible.length,
     });
@@ -179,6 +220,7 @@ export async function POST(
         status: true,
         followUpSubject: true,
         followUpBody: true,
+        followUps: true,
       },
     });
 
@@ -186,14 +228,18 @@ export async function POST(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    if (!campaign.followUpSubject || !campaign.followUpBody) {
+    // Build follow-up templates: prefer followUps array, fall back to legacy fields
+    const followUpTemplates = buildFollowUpTemplates(campaign);
+
+    if (followUpTemplates.length === 0) {
       return NextResponse.json(
         { error: "Aucun template de follow-up configuré pour cette campagne" },
         { status: 400 }
       );
     }
 
-    const { followUpDelayDays, maxFollowUps, stopOnReply, companySettings } = await loadAutomationSettings(ctx.workspaceId);
+    const { followUpDelayDays, maxFollowUps, stopOnReply, companySettings, followUpDelays, followUpIntervalDays } = await loadAutomationSettings(ctx.workspaceId);
+    const effectiveMaxFollowUps = Math.min(maxFollowUps, followUpTemplates.length);
 
     const whereClause: Record<string, unknown> = { campaignId: id };
     if (prospectIds?.length) {
@@ -258,12 +304,23 @@ export async function POST(
       const emails = postEmailsByProspect.get(prospect.id) || [];
 
       if (emails.length === 0) { skipped++; continue; }
-      if (emails.length > maxFollowUps) { skipped++; continue; }
+      const followUpIndex = emails.length - 1;
+      if (followUpIndex >= effectiveMaxFollowUps) { skipped++; continue; }
       if (stopOnReply && emails.some((e) => e.replyReceived)) { skipped++; continue; }
-      if (emails[0].sentAt > cutoffDate) { skipped++; continue; }
 
-      const subject = interpolate(campaign.followUpSubject!, prospect, companySettings);
-      const emailBody = interpolate(campaign.followUpBody!, prospect, companySettings);
+      // Check initial delay
+      const firstEmail = emails[emails.length - 1]; // oldest
+      if (firstEmail.sentAt > cutoffDate) { skipped++; continue; }
+
+      // Check per-follow-up interval delay
+      const delayForThis = followUpDelays[followUpIndex] || followUpIntervalDays;
+      const intervalCutoff = new Date();
+      intervalCutoff.setDate(intervalCutoff.getDate() - delayForThis);
+      if (emails[0].sentAt > intervalCutoff) { skipped++; continue; }
+
+      const template = followUpTemplates[followUpIndex];
+      const subject = interpolate(template.subject, prospect, companySettings);
+      const emailBody = interpolate(template.body, prospect, companySettings);
 
       const result = await sendEmail(prospect.id, subject, emailBody, id);
 

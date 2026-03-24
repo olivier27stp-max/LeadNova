@@ -32,6 +32,7 @@ enum UserRole {
 
 enum ScheduledEmailStatus {
   PENDING
+  PROCESSING
   SENT
   CANCELLED
   FAILED
@@ -128,6 +129,7 @@ model Prospect {
   emailVerificationResult   Json?
   emailEnrichmentAttempts   Int       @default(0)
   enrichedAt                DateTime?
+  reviewCount               Int?
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
@@ -194,12 +196,14 @@ model Blacklist {
 model Campaign {
   id                  String         @id @default(cuid())
   workspaceId         String?
+  number              Int            @default(0)
   name                String
   status              CampaignStatus @default(DRAFT)
   emailSubject        String?
   emailBody           String?
   followUpSubject     String?
   followUpBody        String?
+  followUps           Json           @default("[]")
   maxPerDay           Int            @default(30)
   delayMinSeconds     Int            @default(120)
   delayMaxSeconds     Int            @default(300)

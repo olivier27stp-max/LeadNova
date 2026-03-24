@@ -9,6 +9,8 @@ interface TargetingSettings {
   blockedKeywords: string[];
   cities: string[];
   searchQueries: string[];
+  minReviews?: number;
+  maxReviews?: number;
 }
 
 export async function loadTargetingSettings(workspaceId?: string | null): Promise<TargetingSettings> {
@@ -25,6 +27,8 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
       blockedKeywords: Array.isArray(targeting.blockedKeywords) ? (targeting.blockedKeywords as string[]).map((k) => (k as string).toLowerCase().trim()).filter(Boolean) : [],
       cities: Array.isArray(targeting.cities) ? (targeting.cities as string[]).filter(Boolean) : [],
       searchQueries: Array.isArray(targeting.searchQueries) ? (targeting.searchQueries as string[]).filter(Boolean) : [],
+      minReviews: typeof targeting.minReviews === "number" ? targeting.minReviews : undefined,
+      maxReviews: typeof targeting.maxReviews === "number" ? targeting.maxReviews : undefined,
     };
   } catch {
     return empty;
@@ -99,6 +103,7 @@ interface SearchResult {
   city: string;
   industry: string;
   source: string;
+  reviewCount?: number;
 }
 
 interface DiscoveryDiagnostics {
@@ -122,6 +127,7 @@ interface PlacesResult {
   nationalPhoneNumber?: string;
   websiteUri?: string;
   googleMapsUri?: string;
+  userRatingCount?: number;
 }
 
 async function searchPlaces(query: string, city: string): Promise<SearchResult[]> {
@@ -135,7 +141,7 @@ async function searchPlaces(query: string, city: string): Promise<SearchResult[]
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri",
+      "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.userRatingCount",
     },
     body: JSON.stringify({
       textQuery: query,
@@ -170,6 +176,7 @@ async function searchPlaces(query: string, city: string): Promise<SearchResult[]
         city: normalizeCityName(city),
         industry: query.replace(city, "").trim(),
         source: "google_places",
+        reviewCount: p.userRatingCount,
       };
     });
 }
@@ -236,12 +243,24 @@ export async function discoverProspects(
   });
 
   // Filter out prospects matching blocked keywords
-  const filtered = blockedKeywords.length > 0
+  const afterBlocked = blockedKeywords.length > 0
     ? unique.filter((r) => {
         const textToCheck = [r.companyName, r.industry, r.website, r.address].filter(Boolean).join(" ");
         return !matchesBlockedKeyword(textToCheck, blockedKeywords);
       })
     : unique;
+
+  // Filter by review count (from targeting settings)
+  const { minReviews, maxReviews } = settings;
+  const filtered = (minReviews != null || maxReviews != null)
+    ? afterBlocked.filter((r) => {
+        // If place has no review data, skip it only when a min is set
+        if (r.reviewCount == null) return minReviews == null;
+        if (minReviews != null && r.reviewCount < minReviews) return false;
+        if (maxReviews != null && r.reviewCount > maxReviews) return false;
+        return true;
+      })
+    : afterBlocked;
 
   let newCount = 0;
 
@@ -264,6 +283,7 @@ export async function discoverProspects(
           leadScore: score,
           importBatchId: batchId,
           workspaceId: workspaceId ?? null,
+          reviewCount: result.reviewCount ?? null,
         },
       });
       newCount++;

@@ -47,25 +47,42 @@ function interpolate(
 }
 
 export async function processScheduledEmails(): Promise<{ processed: number; errors: string[] }> {
+  // Recovery: reset emails stuck in PROCESSING for more than 10 minutes (crashed previous run)
+  const stuckCutoff = new Date(Date.now() - 10 * 60 * 1000);
+  const recovered = await prisma.scheduledEmail.updateMany({
+    where: {
+      status: "PROCESSING",
+      updatedAt: { lte: stuckCutoff },
+    },
+    data: { status: "PENDING" },
+  });
+  if (recovered.count > 0) {
+    console.log(`[cron] Recovered ${recovered.count} stuck PROCESSING email(s)`);
+  }
+
   const due = await prisma.scheduledEmail.findMany({
     where: {
       status: "PENDING",
       scheduledFor: { lte: new Date() },
     },
     orderBy: { scheduledFor: "asc" },
-    take: 20,
+    take: 10,
   });
+
+  if (due.length > 0) {
+    console.log(`[cron] Found ${due.length} scheduled email(s) to process`);
+  }
 
   let processed = 0;
   const errors: string[] = [];
 
   for (const scheduled of due) {
-    // Mark as processing (optimistic lock — prevents duplicate sends)
+    // Mark as PROCESSING (optimistic lock — prevents duplicate sends)
     const locked = await prisma.scheduledEmail.updateMany({
       where: { id: scheduled.id, status: "PENDING" },
-      data: { status: "SENT" }, // will update with real result below
+      data: { status: "PROCESSING" },
     });
-    if (locked.count === 0) continue; // already processed by another worker
+    if (locked.count === 0) continue; // already picked up by another worker
 
     try {
       if (scheduled.campaignId) {
@@ -97,7 +114,19 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         const settingsData = settingsRecord?.data as Record<string, unknown> | null;
         const companySettings = (settingsData?.company || {}) as CompanySettings;
 
-        const prospects = campaign.contacts.map((c) => c.prospect).filter((p) => p.email);
+        const allProspects = campaign.contacts.map((c) => c.prospect).filter((p) => p.email);
+
+        // Skip prospects already emailed in this campaign (prevents duplicates across batches)
+        const alreadySentIds = new Set<string>();
+        for (const p of allProspects) {
+          const existing = await prisma.emailActivity.findFirst({
+            where: { prospectId: p.id, campaignId: campaign.id },
+            select: { id: true },
+          });
+          if (existing) alreadySentIds.add(p.id);
+        }
+        const prospects = allProspects.filter((p) => !alreadySentIds.has(p.id));
+
         let sent = 0;
         let failed = 0;
 
@@ -183,12 +212,10 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
   let totalSent = 0;
   const allErrors: string[] = [];
 
-  // Find all active campaigns with follow-up templates
+  // Find all active campaigns with follow-up templates (legacy or new array)
   const campaigns = await prisma.campaign.findMany({
     where: {
       status: "ACTIVE",
-      followUpSubject: { not: null },
-      followUpBody: { not: null },
     },
     select: {
       id: true,
@@ -196,11 +223,26 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       workspaceId: true,
       followUpSubject: true,
       followUpBody: true,
+      followUps: true,
     },
   });
 
   for (const campaign of campaigns) {
-    if (!campaign.followUpSubject || !campaign.followUpBody) continue;
+    // Build ordered follow-up templates: prefer new followUps array, fall back to legacy fields
+    interface FollowUpTemplate { subject: string; body: string; }
+    const followUpTemplates: FollowUpTemplate[] = [];
+    const rawFollowUps = campaign.followUps as unknown;
+    if (Array.isArray(rawFollowUps) && rawFollowUps.length > 0) {
+      for (const fu of rawFollowUps) {
+        const f = fu as { subject?: string; body?: string };
+        if (f.subject || f.body) followUpTemplates.push({ subject: f.subject || "", body: f.body || "" });
+      }
+    }
+    // Fall back to legacy single follow-up fields
+    if (followUpTemplates.length === 0 && campaign.followUpSubject && campaign.followUpBody) {
+      followUpTemplates.push({ subject: campaign.followUpSubject, body: campaign.followUpBody });
+    }
+    if (followUpTemplates.length === 0) continue; // No follow-up configured
 
     // Load workspace automation + company settings
     const settingsRow = campaign.workspaceId
@@ -214,7 +256,8 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
     if (!autoFollowUp) continue; // Auto follow-up disabled for this workspace
 
     const followUpDelayDays = (automation.followUpDelayDays as number) || 3;
-    const maxFollowUps = (automation.maxFollowUps as number) || 3;
+    const maxFollowUps = Math.min((automation.maxFollowUps as number) || 3, followUpTemplates.length);
+    const followUpDelays = Array.isArray(automation.followUpDelays) ? (automation.followUpDelays as number[]) : [];
     const followUpIntervalDays = (automation.followUpIntervalDays as number) || 5;
     const stopOnReply = automation.stopOnReply !== false;
     const shouldSkipWeekends = automation.skipWeekends !== false;
@@ -225,10 +268,6 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - followUpDelayDays);
-
-    // Interval cutoff: prevent sending another follow-up too soon after the last email
-    const intervalCutoff = new Date();
-    intervalCutoff.setDate(intervalCutoff.getDate() - followUpIntervalDays);
 
     // Get campaign contacts
     const campaignContacts = await prisma.campaignContact.findMany({
@@ -259,17 +298,29 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
         select: { sentAt: true, replyReceived: true },
       });
 
-      if (emails.length === 0) continue;
-      if (emails.length > maxFollowUps) continue;
+      if (emails.length === 0) continue; // No initial email sent yet
       if (stopOnReply && emails.some((e) => e.replyReceived)) continue;
-      // First email must be older than followUpDelayDays
+
+      // Determine which follow-up number this would be
+      // emails.length = 1 → need follow-up #1 (index 0), emails.length = 2 → follow-up #2 (index 1), etc.
+      const followUpIndex = emails.length - 1;
+      if (followUpIndex >= maxFollowUps) continue; // Already sent all follow-ups
+      if (followUpIndex >= followUpTemplates.length) continue; // No template for this follow-up
+
+      // First email must be older than followUpDelayDays (initial delay before any follow-up starts)
       const firstEmail = emails[emails.length - 1]; // oldest (ordered desc)
       if (firstEmail.sentAt > cutoffDate) continue;
-      // Last email must be older than followUpIntervalDays (prevent rapid follow-ups)
+
+      // Per-follow-up delay: use followUpDelays[followUpIndex] if available, else fallback to followUpIntervalDays
+      const delayForThisFollowUp = followUpDelays[followUpIndex] || followUpIntervalDays;
+      const intervalCutoff = new Date();
+      intervalCutoff.setDate(intervalCutoff.getDate() - delayForThisFollowUp);
+      // Last email must be older than the interval for this follow-up
       if (emails[0].sentAt > intervalCutoff) continue;
 
-      const subject = interpolate(campaign.followUpSubject!, prospect, companySettings);
-      const body = interpolate(campaign.followUpBody!, prospect, companySettings);
+      const template = followUpTemplates[followUpIndex];
+      const subject = interpolate(template.subject, prospect, companySettings);
+      const body = interpolate(template.body, prospect, companySettings);
       const result = await sendEmail(prospect.id, subject, body, campaign.id);
 
       if (result.success) {

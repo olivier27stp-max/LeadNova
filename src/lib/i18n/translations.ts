@@ -51,6 +51,32 @@ export const translations = {
     themeDark: { fr: "Sombre", en: "Dark" },
   },
 
+  // ─── Discovery Counter ─────────────────────────────────
+  discovery: {
+    monthlyTitle: { fr: "Découvertes ce mois", en: "Discoveries this month" },
+    discoveries: { fr: "découvertes", en: "discoveries" },
+    usageMessage: { fr: "Vous utilisez {percent}% de votre plan actuel.", en: "You are using {percent}% of your current plan." },
+    approachingLimit: { fr: "Vous approchez de votre limite. Passez au plan supérieur pour augmenter votre capacité.", en: "You're approaching your limit. Upgrade your plan to increase capacity." },
+    limitReached: { fr: "Limite atteinte. Passez au plan supérieur pour continuer vos découvertes.", en: "Limit reached. Upgrade your plan to continue discovering." },
+    seePlans: { fr: "Voir les plans", en: "See plans" },
+  },
+
+  // ─── Support ──────────────────────────────────────────────
+  support: {
+    title: { fr: "Aide & Support", en: "Help & Support" },
+    aiChat: { fr: "Chat IA", en: "AI Chat" },
+    aiChatDesc: { fr: "Obtenez une réponse instantanée", en: "Get an instant answer" },
+    talkToHuman: { fr: "Parler à un humain", en: "Talk to a human" },
+    talkToHumanDesc: { fr: "Contactez notre équipe", en: "Contact our team" },
+    aiWelcome: { fr: "Bonjour ! Comment puis-je vous aider ?", en: "Hello! How can I help you?" },
+    chatPlaceholder: { fr: "Écrivez votre question...", en: "Type your question..." },
+    chatError: { fr: "Erreur. Veuillez réessayer.", en: "Error. Please try again." },
+    thinking: { fr: "Réflexion...", en: "Thinking..." },
+    humanMessage: { fr: "Notre équipe vous répondra dans les meilleurs délais.", en: "Our team will get back to you as soon as possible." },
+    emailUs: { fr: "Nous envoyer un email", en: "Email us" },
+    responseTime: { fr: "Temps de réponse habituel : moins de 24h", en: "Usual response time: under 24h" },
+  },
+
   // ─── Status Labels ──────────────────────────────────────
   status: {
     NEW: { fr: "Nouveau", en: "New" },
@@ -126,7 +152,8 @@ export const translations = {
     totalCountPlural: { fr: "prospects", en: "prospects" },
     importBtn: { fr: "Importer", en: "Import" },
     quickSearch: { fr: "Recherche rapide", en: "Quick search" },
-    discoveriesToday: { fr: "Découvertes du jour", en: "Today's discoveries" },
+    discoveriesToday: { fr: "Découvertes du jour", en: "Discoveries today" },
+    seePlans: { fr: "Voir les plans", en: "See plans" },
     enrichedToday: { fr: "Enrichis du jour", en: "Enriched today" },
     discover: { fr: "Découvrir", en: "Discover" },
     discovering: { fr: "Recherche...", en: "Searching..." },
@@ -158,6 +185,7 @@ export const translations = {
     phone: { fr: "Téléphone", en: "Phone" },
     source: { fr: "Source", en: "Source" },
     score: { fr: "Score", en: "Score" },
+    reviews: { fr: "Avis", en: "Reviews" },
     status: { fr: "Statut", en: "Status" },
     actions: { fr: "Actions", en: "Actions" },
     type: { fr: "Type", en: "Type" },
@@ -189,6 +217,9 @@ export const translations = {
     searchQueries: { fr: "Requêtes de recherche", en: "Search queries" },
     noCustomQueries: { fr: "Aucune requête personnalisée (les mots-clés seront utilisés).", en: "No custom queries (keywords will be used)." },
     launchDiscovery: { fr: "Lancer la découverte", en: "Launch discovery" },
+    addToCampaign: { fr: "Ajouter à une campagne", en: "Add to campaign" },
+    noCampaignSelected: { fr: "Aucune campagne (optionnel)", en: "No campaign (optional)" },
+    addToCampaignDesc: { fr: "Les prospects découverts seront automatiquement ajoutés à la campagne sélectionnée.", en: "Discovered prospects will be automatically added to the selected campaign." },
     orGoogleMaps: { fr: "ou Google Maps (manuel)", en: "or Google Maps (manual)" },
     googleMapsDesc: { fr: "Générer des liens Google Maps par province, scraper manuellement, puis importer le CSV.", en: "Generate Google Maps links by province, scrape manually, then import the CSV." },
     keywordPlaceholder: { fr: "Mot-clé (ex: lavage de vitres)", en: "Keyword (e.g., window cleaning)" },
@@ -354,6 +385,7 @@ export const translations = {
     followUpMessage: { fr: "Message de relance (follow-up)", en: "Follow-up message" },
     followUpSubject: { fr: "Sujet du follow-up", en: "Follow-up subject" },
     followUpBody: { fr: "Corps du follow-up", en: "Follow-up body" },
+    addFollowUp: { fr: "Ajouter un follow-up", en: "Add follow-up" },
     saveMessages: { fr: "Enregistrer les messages", en: "Save messages" },
     savingMessages: { fr: "Sauvegarde...", en: "Saving..." },
     messageSaved: { fr: "Message sauvegardé", en: "Message saved" },
@@ -400,6 +432,22 @@ export const translations = {
     scheduledSuccess: { fr: "Envoi planifié avec succès", en: "Send scheduled successfully" },
     errorSchedule: { fr: "Erreur lors de la planification", en: "Error scheduling" },
     errorCancel: { fr: "Erreur lors de l'annulation", en: "Error cancelling" },
+    scheduledSendsTitle: { fr: "Envois planifiés", en: "Scheduled sends" },
+    scheduledSendsEmpty: { fr: "Aucun envoi planifié pour cette campagne", en: "No scheduled sends for this campaign" },
+    scheduledSendsEmptyDesc: { fr: "Planifiez un envoi via le bouton d'envoi ci-dessus", en: "Schedule a send using the send button above" },
+    scheduledContacts: { fr: "contacts", en: "contacts" },
+    scheduledContact: { fr: "contact", en: "contact" },
+    scheduledPending: { fr: "En attente", en: "Pending" },
+    scheduledReschedule: { fr: "Replanifier", en: "Reschedule" },
+
+    // Cancel confirmation
+    cancelConfirmTitle: { fr: "Annuler cet envoi planifié ?", en: "Cancel this scheduled send?" },
+    cancelConfirmDesc: { fr: "Voulez-vous vraiment annuler cet envoi planifié ? Cette action supprimera également toutes les relances associées.", en: "Do you really want to cancel this scheduled send? This will also remove all associated follow-ups." },
+    cancelConfirmDate: { fr: "Date prévue", en: "Scheduled date" },
+    cancelConfirmAt: { fr: "à", en: "at" },
+    cancelConfirmContacts: { fr: "Contacts inclus", en: "Included contacts" },
+    cancelConfirmFollowUps: { fr: "Relances associées", en: "Associated follow-ups" },
+    cancelConfirmFollowUpWarning: { fr: "Toutes les relances associées à cet envoi seront également supprimées.", en: "All follow-ups associated with this send will also be removed." },
 
     // Status toasts
     campaignActivated: { fr: "Campagne activée", en: "Campaign activated" },
@@ -627,6 +675,9 @@ export const translations = {
     stopOnReply: { fr: "Arrêter les relances si réponse reçue", en: "Stop follow-ups if reply received" },
     stopOnExcluded: { fr: "Arrêter si contact exclu", en: "Stop if contact excluded" },
     skipWeekends: { fr: "Exclure les weekends (reporter au lundi)", en: "Skip weekends (move to Monday)" },
+    followUpDelaysTitle: { fr: "Délais par relance (jours)", en: "Per-follow-up delays (days)" },
+    followUpDelaysDesc: { fr: "Définissez le nombre de jours à attendre avant chaque relance successive.", en: "Set the number of days to wait before each successive follow-up." },
+    daysUnit: { fr: "jours", en: "days" },
 
     // Targeting section
     targetingTitle: { fr: "Ciblage de recherche", en: "Search targeting" },
@@ -662,6 +713,10 @@ export const translations = {
     combinationLabel: { fr: "combinaison", en: "combination" },
     combinationLabelPlural: { fr: "combinaisons", en: "combinations" },
     ofSearch: { fr: "de recherche", en: "of search" },
+    reviewFilter: { fr: "Filtre par nombre de reviews Google", en: "Google review count filter" },
+    reviewFilterDesc: { fr: "Filtrer les prospects découverts selon leur nombre de reviews Google My Business. Laissez vide pour ne pas filtrer.", en: "Filter discovered prospects by their Google My Business review count. Leave empty to disable." },
+    reviewFilterError: { fr: "Le minimum ne peut pas être supérieur au maximum.", en: "Minimum cannot be greater than maximum." },
+    noLimit: { fr: "Aucune limite", en: "No limit" },
     addedKeywords: { fr: "mot-clé ajouté", en: "keyword added" },
     addedKeywordsPlural: { fr: "mots-clés ajoutés", en: "keywords added" },
     addedCities: { fr: "ville ajoutée", en: "city added" },

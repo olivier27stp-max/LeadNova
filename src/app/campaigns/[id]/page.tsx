@@ -42,6 +42,11 @@ import { useTranslation } from "@/components/LanguageProvider";
 
 // ─── Types ───────────────────────────────────────────────
 
+interface FollowUpItem {
+  subject: string;
+  body: string;
+}
+
 interface Campaign {
   id: string;
   name: string;
@@ -50,6 +55,7 @@ interface Campaign {
   emailBody: string | null;
   followUpSubject: string | null;
   followUpBody: string | null;
+  followUps: FollowUpItem[];
   maxPerDay: number;
   delayMinSeconds: number;
   delayMaxSeconds: number;
@@ -71,6 +77,7 @@ interface ContactProspect {
   contactType: string;
   leadScore: number;
   selected: boolean;
+  alreadyEmailed?: boolean;
 }
 
 // ─── Badge Variant Mappings ─────────────────────────────
@@ -120,10 +127,13 @@ export default function CampaignDetailPage() {
   // Message tab state
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
-  const [followUpSubject, setFollowUpSubject] = useState("");
-  const [followUpBody, setFollowUpBody] = useState("");
+  const [followUps, setFollowUps] = useState<FollowUpItem[]>([{ subject: "", body: "" }]);
   const [hasUnsaved, setHasUnsaved] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Convenience aliases for backward compat (follow-up 1)
+  const followUpSubject = followUps[0]?.subject || "";
+  const followUpBody = followUps[0]?.body || "";
 
   // Logo state
   const [logoUrl, setLogoUrl] = useState("/leadnova-logo.png");
@@ -228,12 +238,23 @@ export default function CampaignDetailPage() {
   // Send dropdown + schedule state
   const [showSendDropdown, setShowSendDropdown] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [scheduledEmail, setScheduledEmail] = useState<{
+  const [scheduledEmails, setScheduledEmails] = useState<{
     id: string;
     scheduledFor: string;
     timezone: string;
     status: string;
+    subject: string | null;
+    contactCount: number;
+    followUpCount: number;
+  }[]>([]);
+  const [cancelConfirm, setCancelConfirm] = useState<{
+    id: string;
+    scheduledFor: string;
+    timezone: string;
+    contactCount: number;
+    followUpCount: number;
   } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const sendDropdownRef = useRef<HTMLDivElement>(null);
 
   // Contact tab state
@@ -464,8 +485,14 @@ export default function CampaignDetailPage() {
           setCampaign(data);
           setEmailSubject(data.emailSubject || "");
           setEmailBody(data.emailBody || "");
-          setFollowUpSubject(data.followUpSubject || "");
-          setFollowUpBody(data.followUpBody || "");
+          // Load follow-ups: prefer new array, fall back to legacy fields
+          if (Array.isArray(data.followUps) && data.followUps.length > 0) {
+            setFollowUps(data.followUps);
+          } else if (data.followUpSubject || data.followUpBody) {
+            setFollowUps([{ subject: data.followUpSubject || "", body: data.followUpBody || "" }]);
+          } else {
+            setFollowUps([{ subject: "", body: "" }]);
+          }
           // Pre-fill selected from campaign contacts
           const ids = new Set<string>(
             data.contacts?.map((c: { prospect: { id: string } }) => c.prospect.id) || []
@@ -576,7 +603,7 @@ export default function CampaignDetailPage() {
       const res = await fetch(`/api/campaigns/${campaignId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailSubject, emailBody, followUpSubject, followUpBody }),
+        body: JSON.stringify({ emailSubject, emailBody, followUpSubject: followUps[0]?.subject || "", followUpBody: followUps[0]?.body || "", followUps }),
       });
       if (!res.ok) throw new Error("Save failed");
       const updated = await res.json();
@@ -732,18 +759,18 @@ export default function CampaignDetailPage() {
     }
   }
 
-  const loadScheduledEmail = useCallback(async () => {
+  const loadScheduledEmails = useCallback(async () => {
     try {
       const res = await fetch(`/api/scheduled-emails?campaignId=${campaignId}&status=PENDING`);
       if (!res.ok) return;
       const data = await res.json();
-      setScheduledEmail(data.length > 0 ? data[0] : null);
+      setScheduledEmails(Array.isArray(data) ? data : []);
     } catch {
       // ignore
     }
   }, [campaignId]);
 
-  useEffect(() => { loadScheduledEmail(); }, [loadScheduledEmail]);
+  useEffect(() => { loadScheduledEmails(); }, [loadScheduledEmails]);
 
   // Close send dropdown on outside click
   useEffect(() => {
@@ -757,13 +784,8 @@ export default function CampaignDetailPage() {
   }, []);
 
   async function handleSchedule(date: Date, timezone: string) {
-    // If there's already a pending scheduled email, patch it; otherwise create new
-    const isEdit = !!scheduledEmail;
-    const url = isEdit
-      ? `/api/scheduled-emails/${scheduledEmail!.id}`
-      : "/api/scheduled-emails";
-    const res = await fetch(url, {
-      method: isEdit ? "PATCH" : "POST",
+    const res = await fetch("/api/scheduled-emails", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ campaignId, scheduledFor: date.toISOString(), timezone }),
     });
@@ -773,27 +795,77 @@ export default function CampaignDetailPage() {
       try { msg = JSON.parse(text).error || msg; } catch { if (text) msg = text; }
       throw new Error(msg);
     }
-    const saved = await res.json();
-    setScheduledEmail(saved);
+    await loadScheduledEmails();
     setShowScheduleModal(false);
-    showToast(isEdit ? t("campaignDetail", "rescheduled") : t("campaignDetail", "scheduledSuccess"), "success");
+    showToast(t("campaignDetail", "scheduledSuccess"), "success");
   }
 
-  async function handleCancelScheduled() {
-    if (!scheduledEmail) return;
+  function handleCancelScheduledClick(se: typeof scheduledEmails[0]) {
+    setCancelConfirm({
+      id: se.id,
+      scheduledFor: se.scheduledFor,
+      timezone: se.timezone,
+      contactCount: se.contactCount,
+      followUpCount: se.followUpCount,
+    });
+  }
+
+  async function handleConfirmCancel() {
+    if (!cancelConfirm) return;
+    setCancelling(true);
     try {
-      const res = await fetch(`/api/scheduled-emails/${scheduledEmail.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/scheduled-emails/${cancelConfirm.id}?dismissFollowUps=true`, { method: "DELETE" });
       if (!res.ok) throw new Error();
-      setScheduledEmail(null);
+      setScheduledEmails((prev) => prev.filter((se) => se.id !== cancelConfirm.id));
+      setCancelConfirm(null);
       showToast(t("campaignDetail", "scheduledCancelled"), "success");
+      // Refresh contacts to update statuses
+      if (activeTab === "contact") {
+        fetchContacts();
+      }
     } catch {
       showToast(t("campaignDetail", "errorCancel"), "error");
+    } finally {
+      setCancelling(false);
     }
   }
 
-  async function handleSendNowFromScheduled() {
-    await handleCancelScheduled();
+  async function handleSendNowFromScheduled(id: string) {
+    // Send now: silently cancel the scheduled send (no confirmation needed) then trigger send
+    try {
+      const res = await fetch(`/api/scheduled-emails/${id}?dismissFollowUps=true`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      setScheduledEmails((prev) => prev.filter((se) => se.id !== id));
+      if (activeTab === "contact") fetchContacts();
+    } catch {
+      showToast(t("campaignDetail", "errorCancel"), "error");
+      return;
+    }
     setShowSendConfirm(true);
+  }
+
+  const [rescheduleId, setRescheduleId] = useState<string | null>(null);
+
+  async function handleReschedule(date: Date, timezone: string) {
+    if (!rescheduleId) return;
+    try {
+      const res = await fetch(`/api/scheduled-emails/${rescheduleId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledFor: date.toISOString(), timezone }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = t("campaignDetail", "errorSchedule");
+        try { msg = JSON.parse(text).error || msg; } catch { if (text) msg = text; }
+        throw new Error(msg);
+      }
+      await loadScheduledEmails();
+      setRescheduleId(null);
+      showToast(t("campaignDetail", "rescheduled"), "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : t("campaignDetail", "errorSchedule"), "error");
+    }
   }
 
   // ─── Loading State ─────────────────────────────────
@@ -943,6 +1015,81 @@ export default function CampaignDetailPage() {
         />
       )}
 
+      {/* Cancel Scheduled Send Confirmation Modal */}
+      {cancelConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.15 }}
+            className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center size-10 rounded-full bg-danger-subtle">
+                <AlertTriangle className="size-5 text-danger" />
+              </div>
+              <h2 className="text-lg font-semibold text-foreground">
+                {t("campaignDetail", "cancelConfirmTitle")}
+              </h2>
+            </div>
+
+            <p className="text-sm text-foreground-secondary">
+              {t("campaignDetail", "cancelConfirmDesc")}
+            </p>
+
+            <div className="rounded-lg border border-border bg-background-subtle p-4 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-foreground-muted">{t("campaignDetail", "cancelConfirmDate")}</span>
+                <span className="font-medium text-foreground">
+                  {new Date(cancelConfirm.scheduledFor).toLocaleDateString(locale === "en" ? "en-CA" : "fr-CA", {
+                    timeZone: cancelConfirm.timezone,
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  })}{" "}
+                  {t("campaignDetail", "cancelConfirmAt")}{" "}
+                  {new Date(cancelConfirm.scheduledFor).toLocaleTimeString(locale === "en" ? "en-CA" : "fr-CA", {
+                    timeZone: cancelConfirm.timezone,
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-foreground-muted">{t("campaignDetail", "cancelConfirmContacts")}</span>
+                <span className="font-medium text-foreground">
+                  {cancelConfirm.contactCount} {cancelConfirm.contactCount !== 1 ? t("campaignDetail", "contactPlural") : t("campaignDetail", "contact")}
+                </span>
+              </div>
+              {cancelConfirm.followUpCount > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-foreground-muted">{t("campaignDetail", "cancelConfirmFollowUps")}</span>
+                  <span className="font-medium text-foreground">
+                    {cancelConfirm.followUpCount} {cancelConfirm.followUpCount !== 1 ? "relances" : "relance"}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {cancelConfirm.followUpCount > 0 && (
+              <p className="text-xs text-warning">
+                {t("campaignDetail", "cancelConfirmFollowUpWarning")}
+              </p>
+            )}
+
+            <div className="flex gap-3 justify-end pt-2">
+              <Button variant="secondary" onClick={() => setCancelConfirm(null)} disabled={cancelling}>
+                {t("common", "no")}
+              </Button>
+              <Button variant="danger" onClick={handleConfirmCancel} disabled={cancelling}>
+                {cancelling && <Loader2 className="size-4 animate-spin" />}
+                {t("common", "yes")}
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* Send Confirm Modal — with smart verification gate */}
       {showSendConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -1043,46 +1190,13 @@ export default function CampaignDetailPage() {
         </div>
       )}
 
-      {/* Scheduled Email Banner */}
-      {scheduledEmail && (
-        <div className="mb-4 rounded-lg px-4 py-3 text-sm flex items-center justify-between gap-4 bg-accent-subtle border border-accent/20">
-          <div className="flex items-center gap-2">
-            <CalendarClock className="size-4 text-accent shrink-0" />
-            <div>
-              <span className="font-medium text-foreground">{t("campaignDetail", "scheduledSend")} — </span>
-              <span className="text-foreground-secondary">
-                {new Date(scheduledEmail.scheduledFor).toLocaleString(locale === "en" ? "en-CA" : "fr-CA", {
-                  timeZone: scheduledEmail.timezone,
-                  weekday: "long", month: "long", day: "numeric",
-                  hour: "2-digit", minute: "2-digit",
-                })}
-              </span>
-              <span className="text-foreground-muted text-xs ml-1">({scheduledEmail.timezone})</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => setShowScheduleModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-card border border-border hover:bg-card-hover text-foreground transition-colors"
-            >
-              <Pencil className="size-3.5" />
-              {t("common", "edit")}
-            </button>
-            <button
-              onClick={handleSendNowFromScheduled}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <Send className="size-3.5" />
-              {t("campaignDetail", "sendNow")}
-            </button>
-            <button
-              onClick={handleCancelScheduled}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-card border border-border hover:bg-danger-subtle hover:text-danger hover:border-danger/30 text-foreground-muted transition-colors"
-            >
-              <X className="size-3.5" />
-              {t("common", "cancel")}
-            </button>
-          </div>
+      {/* Scheduled email banners — only shown outside contacts tab (thin reminder) */}
+      {activeTab !== "contact" && scheduledEmails.length > 0 && (
+        <div className="mb-4 rounded-lg px-4 py-3 text-sm flex items-center gap-3 bg-accent-subtle border border-accent/20">
+          <CalendarClock className="size-4 text-accent shrink-0" />
+          <span className="text-foreground-secondary">
+            {scheduledEmails.length} {t("campaignDetail", "scheduledSendsTitle").toLowerCase()}
+          </span>
         </div>
       )}
 
@@ -1259,91 +1373,127 @@ export default function CampaignDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* Follow-up email editor */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <RefreshCw className="size-4 text-accent" />
-                    <CardTitle className="text-lg">{t("campaignDetail", "followUpMessage")}</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground-secondary mb-1">
-                      {t("campaignDetail", "followUpSubject")}
-                    </label>
-                    <Input
-                      type="text"
-                      value={followUpSubject}
-                      onChange={(e) => {
-                        setFollowUpSubject(e.target.value);
-                        setHasUnsaved(true);
-                      }}
-                      placeholder="Ex: Re: Services d'entretien pour [Nom de l'entreprise]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-foreground-secondary mb-1">
-                      {t("campaignDetail", "followUpBody")}
-                    </label>
-                    <textarea
-                      value={followUpBody}
-                      onChange={(e) => {
-                        setFollowUpBody(e.target.value);
-                        setHasUnsaved(true);
-                      }}
-                      rows={8}
-                      placeholder="Bonjour,&#10;&#10;Je me permets de faire suite à mon message précédent concernant nos services pour [Nom de l'entreprise]..."
-                      className="flex w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
-                    />
-                  </div>
-
-                  {/* Variables */}
-                  <div className="bg-background-subtle rounded-md p-3">
-                    <p className="text-xs font-medium text-foreground-muted mb-2">
-                      {t("campaignDetail", "clickToInsertVariable")}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {TEMPLATE_VARIABLES.map((v) => (
+              {/* Follow-up emails editor (up to 5) */}
+              {followUps.map((fu, idx) => (
+                <Card key={idx}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className="size-4 text-accent" />
+                        <CardTitle className="text-lg">Follow-up {idx + 1}</CardTitle>
+                      </div>
+                      {followUps.length > 1 && (
                         <button
-                          key={v.key}
-                          type="button"
                           onClick={() => {
-                            setFollowUpBody((prev) => prev + v.key);
+                            setFollowUps(followUps.filter((_, i) => i !== idx));
                             setHasUnsaved(true);
                           }}
-                          className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
-                          title={`Insère ${v.key}`}
+                          className="p-1.5 rounded-md text-foreground-muted hover:text-danger hover:bg-danger-subtle transition-colors"
+                          title={t("common", "remove")}
                         >
-                          {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : t("campaignDetail", "contactName")}
+                          <Trash2 className="size-3.5" />
                         </button>
-                      ))}
+                      )}
                     </div>
-                  </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-foreground-secondary mb-1">
+                        {t("campaignDetail", "followUpSubject")}
+                      </label>
+                      <Input
+                        type="text"
+                        value={fu.subject}
+                        onChange={(e) => {
+                          const updated = [...followUps];
+                          updated[idx] = { ...updated[idx], subject: e.target.value };
+                          setFollowUps(updated);
+                          setHasUnsaved(true);
+                        }}
+                        placeholder={`Ex: Re: Services d'entretien pour [Nom de l'entreprise]`}
+                      />
+                    </div>
 
-                  {/* Automation info */}
-                  {automationSettings && (
-                    <div className="bg-accent-subtle rounded-md p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Clock className="size-3.5 text-accent" />
-                        <p className="text-xs font-medium text-accent">{t("campaignDetail", "followUpAutomation")}</p>
-                      </div>
-                      <div className="text-xs text-foreground-secondary space-y-1">
-                        <p>
-                          {automationSettings.autoFollowUp
-                            ? <>{t("campaignDetail", "autoFollowUpEnabled")} <span className="font-medium text-success">{t("campaignDetail", "enabled")}</span></>
-                            : <>{t("campaignDetail", "autoFollowUpEnabled")} <span className="font-medium text-foreground-muted">{t("campaignDetail", "disabled")}</span> — <a href="/settings?section=automation" className="text-primary hover:underline">{t("campaignDetail", "enableInSettings")}</a></>
-                          }
-                        </p>
-                        <p>{t("campaignDetail", "delayBeforeFollowUp")} : <span className="font-medium">{automationSettings.followUpDelayDays} {automationSettings.followUpDelayDays > 1 ? t("campaignDetail", "days") : t("campaignDetail", "day")}</span></p>
-                        <p>{t("campaignDetail", "maximum")} : <span className="font-medium">{automationSettings.maxFollowUps} {automationSettings.maxFollowUps > 1 ? t("campaignDetail", "followUps") : t("campaignDetail", "followUp")}</span> {t("campaignDetail", "perContact")} <span className="font-medium">{automationSettings.followUpIntervalDays} {automationSettings.followUpIntervalDays > 1 ? t("campaignDetail", "days") : t("campaignDetail", "day")}</span></p>
-                        {automationSettings.stopOnReply && <p>{t("campaignDetail", "stopOnReply")}</p>}
+                    <div>
+                      <label className="block text-sm font-medium text-foreground-secondary mb-1">
+                        {t("campaignDetail", "followUpBody")}
+                      </label>
+                      <textarea
+                        value={fu.body}
+                        onChange={(e) => {
+                          const updated = [...followUps];
+                          updated[idx] = { ...updated[idx], body: e.target.value };
+                          setFollowUps(updated);
+                          setHasUnsaved(true);
+                        }}
+                        rows={6}
+                        placeholder="Bonjour,&#10;&#10;Je me permets de faire suite à mon message précédent..."
+                        className="flex w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
+                      />
+                    </div>
+
+                    {/* Variables */}
+                    <div className="bg-background-subtle rounded-md p-3">
+                      <p className="text-xs font-medium text-foreground-muted mb-2">
+                        {t("campaignDetail", "clickToInsertVariable")}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {TEMPLATE_VARIABLES.map((v) => (
+                          <button
+                            key={v.key}
+                            type="button"
+                            onClick={() => {
+                              const updated = [...followUps];
+                              updated[idx] = { ...updated[idx], body: updated[idx].body + v.key };
+                              setFollowUps(updated);
+                              setHasUnsaved(true);
+                            }}
+                            className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
+                            title={`Insère ${v.key}`}
+                          >
+                            {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : t("campaignDetail", "contactName")}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              ))}
+
+              {/* Add follow-up button */}
+              {followUps.length < 5 && (
+                <button
+                  onClick={() => {
+                    setFollowUps([...followUps, { subject: "", body: "" }]);
+                    setHasUnsaved(true);
+                  }}
+                  className="w-full py-3 border-2 border-dashed border-border rounded-lg text-sm font-medium text-foreground-muted hover:text-foreground hover:border-primary/40 hover:bg-background-subtle transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="size-4" />
+                  {t("campaignDetail", "addFollowUp")} ({followUps.length}/5)
+                </button>
+              )}
+
+              {/* Automation info */}
+              {automationSettings && (
+                <div className="bg-accent-subtle rounded-md p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className="size-3.5 text-accent" />
+                    <p className="text-xs font-medium text-accent">{t("campaignDetail", "followUpAutomation")}</p>
+                  </div>
+                  <div className="text-xs text-foreground-secondary space-y-1">
+                    <p>
+                      {automationSettings.autoFollowUp
+                        ? <>{t("campaignDetail", "autoFollowUpEnabled")} <span className="font-medium text-success">{t("campaignDetail", "enabled")}</span></>
+                        : <>{t("campaignDetail", "autoFollowUpEnabled")} <span className="font-medium text-foreground-muted">{t("campaignDetail", "disabled")}</span> — <a href="/settings?section=automation" className="text-primary hover:underline">{t("campaignDetail", "enableInSettings")}</a></>
+                      }
+                    </p>
+                    <p>{t("campaignDetail", "delayBeforeFollowUp")} : <span className="font-medium">{automationSettings.followUpDelayDays} {automationSettings.followUpDelayDays > 1 ? t("campaignDetail", "days") : t("campaignDetail", "day")}</span></p>
+                    <p>{t("campaignDetail", "maximum")} : <span className="font-medium">{automationSettings.maxFollowUps} {automationSettings.maxFollowUps > 1 ? t("campaignDetail", "followUps") : t("campaignDetail", "followUp")}</span> {t("campaignDetail", "perContact")} <span className="font-medium">{automationSettings.followUpIntervalDays} {automationSettings.followUpIntervalDays > 1 ? t("campaignDetail", "days") : t("campaignDetail", "day")}</span></p>
+                    {automationSettings.stopOnReply && <p>{t("campaignDetail", "stopOnReply")}</p>}
+                  </div>
+                </div>
+              )}
 
               {/* Save button */}
               <Button
@@ -1520,82 +1670,86 @@ export default function CampaignDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* Follow-up preview */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <RefreshCw className="size-4 text-accent" />
-                    <CardTitle className="text-lg">{t("campaignDetail", "previewFollowUp")}</CardTitle>
-                  </div>
-                  {followUpSubject && followUpBody && (
-                    <button
-                      onClick={() => setTestEmailTarget(testEmailTarget === "followup" ? null : "followup")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/15 text-amber-600 ring-1 ring-amber-400/30 hover:bg-amber-400/25 hover:ring-amber-400/50 dark:text-amber-400 dark:bg-amber-400/10 dark:ring-amber-400/20 dark:hover:bg-amber-400/20 transition-all"
-                    >
-                      <FlaskConical className="size-3.5" />
-                      {t("campaignDetail", "testButton")}
-                    </button>
+              {/* Follow-up previews */}
+              {followUps.map((fu, idx) => (
+                <Card key={`preview-fu-${idx}`}>
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <RefreshCw className="size-4 text-accent" />
+                      <CardTitle className="text-lg">{t("campaignDetail", "previewFollowUp")} {idx + 1}</CardTitle>
+                    </div>
+                    {fu.subject && fu.body && idx === 0 && (
+                      <button
+                        onClick={() => setTestEmailTarget(testEmailTarget === "followup" ? null : "followup")}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/15 text-amber-600 ring-1 ring-amber-400/30 hover:bg-amber-400/25 hover:ring-amber-400/50 dark:text-amber-400 dark:bg-amber-400/10 dark:ring-amber-400/20 dark:hover:bg-amber-400/20 transition-all"
+                      >
+                        <FlaskConical className="size-3.5" />
+                        {t("campaignDetail", "testButton")}
+                      </button>
+                    )}
+                  </CardHeader>
+                  {idx === 0 && (
+                    <AnimatePresence>
+                      {testEmailTarget === "followup" && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="flex items-center gap-2 mx-5 mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                            <Input
+                              type="email"
+                              value={testEmailAddress}
+                              onChange={(e) => setTestEmailAddress(e.target.value)}
+                              placeholder={t("campaignDetail", "testEmailPlaceholder")}
+                              className="flex-1 h-9 text-sm"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => handleSendTestEmail("followup")}
+                              disabled={testEmailSending || !testEmailAddress.includes("@")}
+                              className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
+                            >
+                              {testEmailSending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                              {t("campaignDetail", "testSend")}
+                            </Button>
+                            <button
+                              onClick={() => { setTestEmailTarget(null); setTestEmailAddress(""); }}
+                              className="p-1.5 rounded-md text-amber-600 hover:text-amber-800 hover:bg-amber-100 dark:text-amber-400 dark:hover:text-amber-200 dark:hover:bg-amber-900/30 transition-colors"
+                            >
+                              <X className="size-4" />
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   )}
-                </CardHeader>
-                <AnimatePresence>
-                  {testEmailTarget === "followup" && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="flex items-center gap-2 mx-5 mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-                        <Input
-                          type="email"
-                          value={testEmailAddress}
-                          onChange={(e) => setTestEmailAddress(e.target.value)}
-                          placeholder={t("campaignDetail", "testEmailPlaceholder")}
-                          className="flex-1 h-9 text-sm"
+                  <CardContent className="p-0 overflow-hidden">
+                    {!fu.subject && !fu.body ? (
+                      <p className="text-muted text-sm p-4">
+                        {t("campaignDetail", "writeFollowUp")}
+                      </p>
+                    ) : (
+                      <>
+                        <div className="px-4 pt-4 pb-3 border-b border-border">
+                          <p className="text-xs text-muted uppercase mb-1">Sujet</p>
+                          <p className="text-sm font-medium text-foreground">
+                            {renderPreview(fu.subject) || t("campaignDetail", "noSubject")}
+                          </p>
+                        </div>
+                        <iframe
+                          srcDoc={buildEmailHtml(fu.body)}
+                          className="w-full border-0"
+                          style={{ height: "400px" }}
+                          sandbox="allow-same-origin"
+                          title={`Aperçu follow-up ${idx + 1}`}
                         />
-                        <Button
-                          size="sm"
-                          onClick={() => handleSendTestEmail("followup")}
-                          disabled={testEmailSending || !testEmailAddress.includes("@")}
-                          className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
-                        >
-                          {testEmailSending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-                          {t("campaignDetail", "testSend")}
-                        </Button>
-                        <button
-                          onClick={() => { setTestEmailTarget(null); setTestEmailAddress(""); }}
-                          className="p-1.5 rounded-md text-amber-600 hover:text-amber-800 hover:bg-amber-100 dark:text-amber-400 dark:hover:text-amber-200 dark:hover:bg-amber-900/30 transition-colors"
-                        >
-                          <X className="size-4" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                <CardContent className="p-0 overflow-hidden">
-                  {!followUpSubject && !followUpBody ? (
-                    <p className="text-muted text-sm p-4">
-                      {t("campaignDetail", "writeFollowUp")}
-                    </p>
-                  ) : (
-                    <>
-                      <div className="px-4 pt-4 pb-3 border-b border-border">
-                        <p className="text-xs text-muted uppercase mb-1">Sujet</p>
-                        <p className="text-sm font-medium text-foreground">
-                          {renderPreview(followUpSubject) || t("campaignDetail", "noSubject")}
-                        </p>
-                      </div>
-                      <iframe
-                        srcDoc={buildEmailHtml(followUpBody)}
-                        className="w-full border-0"
-                        style={{ height: "520px" }}
-                        sandbox="allow-same-origin"
-                        title="Aperçu follow-up"
-                      />
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
 
               <div className="p-3 bg-primary-subtle rounded-md">
                 <p className="text-xs text-primary">
@@ -1615,6 +1769,132 @@ export default function CampaignDetailPage() {
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2 }}
           >
+            {/* ─── Scheduled Sends Section ─── */}
+            <Card className="mb-6">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="size-4 text-accent" />
+                  <CardTitle className="text-lg">{t("campaignDetail", "scheduledSendsTitle")}</CardTitle>
+                  {scheduledEmails.length > 0 && (
+                    <Badge variant="primary">{scheduledEmails.length}</Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {scheduledEmails.length === 0 ? (
+                  <div className="text-center py-8">
+                    <CalendarClock className="size-8 text-foreground-muted mx-auto mb-3 opacity-40" />
+                    <p className="text-sm font-medium text-foreground-secondary mb-1">
+                      {t("campaignDetail", "scheduledSendsEmpty")}
+                    </p>
+                    <p className="text-xs text-foreground-muted">
+                      {t("campaignDetail", "scheduledSendsEmptyDesc")}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {scheduledEmails.map((se, idx) => (
+                      <div
+                        key={se.id}
+                        className="flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 hover:bg-card-hover transition-colors"
+                      >
+                        <div className="flex items-center gap-4 min-w-0">
+                          {/* Index badge */}
+                          <div className="flex items-center justify-center size-8 rounded-full bg-accent-subtle text-accent text-xs font-bold shrink-0">
+                            {idx + 1}
+                          </div>
+
+                          {/* Date & time */}
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">
+                              {new Date(se.scheduledFor).toLocaleDateString(locale === "en" ? "en-CA" : "fr-CA", {
+                                timeZone: se.timezone,
+                                weekday: "long",
+                                month: "long",
+                                day: "numeric",
+                              })}
+                            </p>
+                            <p className="text-xs text-foreground-muted">
+                              {new Date(se.scheduledFor).toLocaleTimeString(locale === "en" ? "en-CA" : "fr-CA", {
+                                timeZone: se.timezone,
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              <span className="ml-1 opacity-60">({se.timezone})</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Info badges */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* Contact count */}
+                          <div className="flex items-center gap-1.5 text-xs text-foreground-secondary bg-background-subtle px-2.5 py-1 rounded-md">
+                            <Users className="size-3.5" />
+                            <span className="font-medium">{se.contactCount}</span>
+                            <span>{se.contactCount !== 1 ? t("campaignDetail", "scheduledContacts") : t("campaignDetail", "scheduledContact")}</span>
+                          </div>
+
+                          {/* Follow-up count */}
+                          {se.followUpCount > 0 && (
+                            <div className="flex items-center gap-1.5 text-xs text-foreground-secondary bg-background-subtle px-2.5 py-1 rounded-md">
+                              <RefreshCw className="size-3.5" />
+                              <span className="font-medium">{se.followUpCount}</span>
+                              <span>{se.followUpCount !== 1 ? "relances" : "relance"}</span>
+                            </div>
+                          )}
+
+                          {/* Subject */}
+                          {(se.subject || emailSubject) && (
+                            <div className="hidden sm:block text-xs text-foreground-muted bg-background-subtle px-2.5 py-1 rounded-md max-w-[180px] truncate">
+                              {se.subject || emailSubject}
+                            </div>
+                          )}
+
+                          {/* Status */}
+                          <Badge variant="warning">{t("campaignDetail", "scheduledPending")}</Badge>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            onClick={() => handleSendNowFromScheduled(se.id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                            title={t("campaignDetail", "sendNow")}
+                          >
+                            <Send className="size-3.5" />
+                            {t("campaignDetail", "sendNow")}
+                          </button>
+                          <button
+                            onClick={() => setRescheduleId(se.id)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs bg-card border border-border hover:bg-accent-subtle hover:text-accent hover:border-accent/30 text-foreground-muted transition-colors"
+                            title={t("campaignDetail", "scheduledReschedule")}
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleCancelScheduledClick(se)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs bg-card border border-border hover:bg-danger-subtle hover:text-danger hover:border-danger/30 text-foreground-muted transition-colors"
+                            title={t("common", "cancel")}
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Reschedule Modal */}
+            {rescheduleId && (
+              <ScheduleModal
+                selectedCount={scheduledEmails.find((se) => se.id === rescheduleId)?.contactCount ?? selectedCount}
+                onConfirm={handleReschedule}
+                onClose={() => setRescheduleId(null)}
+              />
+            )}
+
             <Card>
               {/* Controls */}
               <div className="p-4 border-b border-border">
@@ -1793,9 +2073,13 @@ export default function CampaignDetailPage() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={c.status === "CONTACTED" || c.status === "REPLIED" || c.status === "QUALIFIED" ? "success" : c.status === "NOT_INTERESTED" ? "danger" : c.status === "SCHEDULED" ? "warning" : "default"}>
-                            {t("prospectStatus", c.status as "NEW") || c.status}
-                          </Badge>
+                          {c.status === "SCHEDULED" && c.alreadyEmailed ? (
+                            <Badge variant="danger">Double</Badge>
+                          ) : (
+                            <Badge variant={c.status === "CONTACTED" || c.status === "REPLIED" || c.status === "QUALIFIED" ? "success" : c.status === "NOT_INTERESTED" ? "danger" : c.status === "SCHEDULED" ? "warning" : "default"}>
+                              {t("prospectStatus", c.status as "NEW") || c.status}
+                            </Badge>
+                          )}
                         </td>
                       </tr>
                     ))

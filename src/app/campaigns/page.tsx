@@ -15,6 +15,7 @@ import { useTranslation } from "@/components/LanguageProvider";
 
 interface Campaign {
   id: string;
+  number: number;
   name: string;
   status: string;
   maxPerDay: number;
@@ -266,6 +267,7 @@ export default function CampaignsPage() {
                         href={`/campaigns/${c.id}`}
                         className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                       >
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-primary/10 text-primary text-xs font-bold mr-2">{c.number}</span>
                         {c.name}
                       </Link>
                       <p className="text-xs text-foreground-muted mt-0.5 flex items-center gap-3">

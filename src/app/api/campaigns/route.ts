@@ -32,9 +32,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const workspaceId = await getWorkspaceId();
 
+    // Auto-assign next sequential number
+    const lastCampaign = await prisma.campaign.findFirst({
+      where: { workspaceId: workspaceId ?? null },
+      orderBy: { number: "desc" },
+      select: { number: true },
+    });
+    const nextNumber = (lastCampaign?.number ?? 0) + 1;
+
     const campaign = await prisma.campaign.create({
       data: {
         name: body.name,
+        number: nextNumber,
         workspaceId: workspaceId ?? undefined,
         maxPerDay: body.maxPerDay || 30,
         delayMinSeconds: body.delayMinSeconds || 120,

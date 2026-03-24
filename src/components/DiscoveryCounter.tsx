@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Search } from "lucide-react";
+import Link from "next/link";
+import { Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/components/LanguageProvider";
 
 interface SubData {
   plan: string;
@@ -17,6 +19,7 @@ const PLAN_LABELS: Record<string, string> = {
 };
 
 export default function DiscoveryCounter() {
+  const { t } = useTranslation();
   const [sub, setSub] = useState<SubData | null>(null);
   const [showTooltip, setShowTooltip] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -58,28 +61,27 @@ export default function DiscoveryCounter() {
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
     >
+      {/* Compact icon trigger */}
       <div
         className={cn(
-          "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium tabular-nums cursor-default transition-colors",
+          "flex items-center justify-center size-8 rounded-md cursor-default transition-all",
           isMax
-            ? "text-danger bg-danger-subtle border border-danger/20"
+            ? "text-danger bg-danger-subtle"
             : isHigh
-              ? "text-warning bg-warning-subtle border border-warning/20"
-              : "text-foreground-muted bg-background-subtle border border-border"
+              ? "text-warning bg-warning-subtle"
+              : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
         )}
       >
-        <Search className="size-3" />
-        <span>{used.toLocaleString("fr-CA")}</span>
-        <span className="text-foreground-muted/60">/</span>
-        <span>{max.toLocaleString("fr-CA")}</span>
+        <Zap className={cn("size-4", showTooltip && "scale-110 transition-transform")} />
       </div>
 
-      {/* Tooltip */}
+      {/* Tooltip — pt-2 creates a hover bridge so the mouse can travel from icon to tooltip */}
       {showTooltip && (
-        <div className="absolute right-0 top-full mt-2 z-50 w-64 bg-card border border-border rounded-xl shadow-lg p-4 space-y-3">
+        <div className="absolute right-0 top-full pt-2 z-50">
+        <div className="w-64 bg-card border border-border rounded-xl shadow-lg p-4 space-y-3 animate-in fade-in slide-in-from-top-1 duration-150">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-foreground">Decouvertes ce mois</span>
+            <span className="text-xs font-semibold text-foreground">{t("discovery", "monthlyTitle")}</span>
             <span className={cn(
               "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
               isMax ? "bg-danger-subtle text-danger" : isHigh ? "bg-warning-subtle text-warning" : "bg-primary-subtle text-primary"
@@ -106,27 +108,35 @@ export default function DiscoveryCounter() {
               )}>
                 {percent}%
               </span>
-              <span className="text-[11px] text-foreground-muted">
-                {used.toLocaleString("fr-CA")} / {max.toLocaleString("fr-CA")} decouvertes
+              <span className="text-[11px] text-foreground-muted tabular-nums">
+                {used.toLocaleString("fr-CA")} / {max.toLocaleString("fr-CA")} {t("discovery", "discoveries")}
               </span>
             </div>
           </div>
 
-          {/* Upgrade notice */}
-          {percent >= 50 && (
-            <div className={cn(
-              "rounded-lg px-3 py-2 text-[11px] leading-relaxed",
-              isMax ? "bg-danger-subtle text-danger" : "bg-background-subtle text-foreground-muted"
-            )}>
-              {isMax ? (
-                <span><strong>Limite atteinte.</strong> Passez au plan superieur pour continuer vos decouvertes.</span>
-              ) : isHigh ? (
-                <span>Vous approchez de votre limite. <strong>Passez au plan superieur</strong> pour augmenter votre balance.</span>
-              ) : (
-                <span>Passez au plan superieur pour plus de decouvertes mensuelles.</span>
-              )}
-            </div>
-          )}
+          {/* Context message */}
+          <p className="text-[11px] leading-relaxed text-foreground-muted">
+            {isMax
+              ? t("discovery", "limitReached")
+              : isHigh
+                ? t("discovery", "approachingLimit")
+                : t("discovery", "usageMessage").replace("{percent}", String(percent))
+            }
+          </p>
+
+          {/* CTA */}
+          <Link
+            href="/settings?section=subscription"
+            className={cn(
+              "flex items-center justify-center w-full text-xs font-semibold py-2 rounded-lg transition-colors",
+              isMax || isHigh
+                ? "bg-primary text-white hover:bg-primary-hover"
+                : "bg-background-subtle text-foreground-muted hover:text-foreground hover:bg-background-muted"
+            )}
+          >
+            {t("discovery", "seePlans")}
+          </Link>
+        </div>
         </div>
       )}
     </div>

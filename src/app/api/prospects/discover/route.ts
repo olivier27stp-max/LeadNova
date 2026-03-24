@@ -20,10 +20,34 @@ export async function POST(request: NextRequest) {
   const workspaceId = ctx?.workspaceId ?? null;
 
   const body = await request.json();
-  const { city, industry, targetCount } = body;
+  const { city, industry, targetCount, campaignId } = body;
   const target = Math.max(1, targetCount || 10);
 
   try {
+    // Helper: add discovered prospects to a campaign
+    async function addProspectsToCampaign(batchId: string, campaignId: string) {
+      if (!campaignId) return 0;
+      try {
+        const prospects = await prisma.prospect.findMany({
+          where: { importBatchId: batchId },
+          select: { id: true },
+        });
+        if (prospects.length === 0) return 0;
+        let added = 0;
+        for (const p of prospects) {
+          try {
+            await prisma.campaignContact.create({
+              data: { campaignId, prospectId: p.id },
+            });
+            added++;
+          } catch {
+            // Duplicate — already in campaign, skip
+          }
+        }
+        return added;
+      } catch { return 0; }
+    }
+
     // Helper: increment discovery usage counter
     async function incrementDiscoveryUsage(count: number) {
       try {
@@ -185,6 +209,12 @@ export async function POST(request: NextRequest) {
         // Update discovery usage counter
         if (totalNew > 0) await incrementDiscoveryUsage(totalNew);
 
+        // Add to campaign if specified
+        let addedToCampaign = 0;
+        if (campaignId && totalNew > 0) {
+          addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
+        }
+
         return NextResponse.json({
           message: wasCancelled
             ? `Recherche arrêtée (${totalNew} nouveaux trouvés avant l'arrêt)`
@@ -195,6 +225,7 @@ export async function POST(request: NextRequest) {
           target: maxToFind,
           rounds,
           cancelled: wasCancelled,
+          addedToCampaign,
           diagnostics: {
             queriesAttempted: totalQueriesAttempted,
             queriesWithResults: totalQueriesWithResults,
@@ -253,10 +284,17 @@ export async function POST(request: NextRequest) {
       // Update discovery usage counter
       if (result.new > 0) await incrementDiscoveryUsage(result.new);
 
+      // Add to campaign if specified
+      let addedToCampaign = 0;
+      if (campaignId && result.new > 0) {
+        addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
+      }
+
       return NextResponse.json({
         message: `Discovery complete for ${city}`,
         ...result,
         target: maxToFind,
+        addedToCampaign,
         warning,
       });
     } catch (error) {

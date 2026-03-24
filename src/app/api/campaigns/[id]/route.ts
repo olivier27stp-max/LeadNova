@@ -83,6 +83,7 @@ export async function PATCH(
         ...(body.emailBody !== undefined && { emailBody: body.emailBody }),
         ...(body.followUpSubject !== undefined && { followUpSubject: body.followUpSubject }),
         ...(body.followUpBody !== undefined && { followUpBody: body.followUpBody }),
+        ...(body.followUps !== undefined && { followUps: body.followUps }),
         ...(body.maxPerDay !== undefined && { maxPerDay: body.maxPerDay }),
         ...(body.delayMinSeconds !== undefined && { delayMinSeconds: body.delayMinSeconds }),
         ...(body.delayMaxSeconds !== undefined && { delayMaxSeconds: body.delayMaxSeconds }),

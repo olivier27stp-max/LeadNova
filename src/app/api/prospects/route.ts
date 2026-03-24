@@ -45,12 +45,18 @@ export async function GET(request: NextRequest) {
 
     // Text search across multiple fields — use AND to avoid overwriting emailStatus OR
     if (search) {
-      const searchConditions = [
+      // Normalize phone: extract digits for format-tolerant matching
+      const searchDigits = search.replace(/\D/g, "");
+      const searchConditions: Record<string, unknown>[] = [
         { companyName: { contains: search, mode: "insensitive" } },
         { email: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
         { city: { contains: search, mode: "insensitive" } },
       ];
+      // If search looks like a phone number (3+ digits), also search normalized
+      if (searchDigits.length >= 3 && searchDigits !== search) {
+        searchConditions.push({ phone: { contains: searchDigits, mode: "insensitive" } });
+      }
       if (where.OR) {
         // emailStatus OR already set — wrap both in AND
         const emailStatusOr = where.OR;
@@ -107,12 +113,28 @@ export async function GET(request: NextRequest) {
         emailGuessed: true,
         emailStatus: true,
         emailVerifiedAt: true,
+        reviewCount: true,
         createdAt: true,
+        campaignContacts: {
+          select: {
+            campaign: {
+              select: { id: true, number: true, name: true },
+            },
+          },
+          take: 1,
+        },
       },
     });
 
+    // Flatten campaign data for frontend
+    const flatProspects = prospects.map(({ campaignContacts, ...rest }) => ({
+      ...rest,
+      campaignId: campaignContacts[0]?.campaign?.id ?? null,
+      campaignNumber: campaignContacts[0]?.campaign?.number ?? null,
+    }));
+
     return NextResponse.json({
-      prospects,
+      prospects: flatProspects,
       total,
       page,
       totalPages: Math.ceil(total / limit),
@@ -414,6 +436,18 @@ export async function PATCH(request: NextRequest) {
       data: allowed,
     });
 
+    // Handle campaign assignment
+    if ("campaignId" in data) {
+      // Remove existing campaign contacts for this prospect
+      await prisma.campaignContact.deleteMany({ where: { prospectId: id } });
+      // Create new one if a campaign was selected
+      if (data.campaignId) {
+        await prisma.campaignContact.create({
+          data: { campaignId: data.campaignId, prospectId: id },
+        });
+      }
+    }
+
     return NextResponse.json(updated);
   } catch (error) {
     console.error("Prospect update error:", error);
@@ -426,15 +460,21 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    // Support both query param (?ids=a,b) and JSON body ({ ids: [a,b] })
+    let ids: string[] = [];
     const { searchParams } = new URL(request.url);
     const idsParam = searchParams.get("ids");
-    if (!idsParam) {
-      return NextResponse.json({ error: "Missing ids parameter" }, { status: 400 });
+    if (idsParam) {
+      ids = idsParam.split(",").filter(Boolean);
+    } else {
+      try {
+        const body = await request.json();
+        if (Array.isArray(body.ids)) ids = body.ids.filter(Boolean);
+      } catch { /* no body */ }
     }
 
-    const ids = idsParam.split(",").filter(Boolean);
     if (ids.length === 0) {
-      return NextResponse.json({ error: "No ids provided" }, { status: 400 });
+      return NextResponse.json({ error: "Missing ids parameter" }, { status: 400 });
     }
 
     // Soft-delete: archive prospects instead of hard-deleting

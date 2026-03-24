@@ -23,7 +23,49 @@ export async function GET(request: NextRequest) {
     orderBy: { scheduledFor: "asc" },
   });
 
-  return NextResponse.json(emails);
+  // Load automation settings for follow-up count
+  let maxFollowUps = 0;
+  if (workspaceId) {
+    const settingsRow = await prisma.appSettings.findUnique({ where: { workspaceId } });
+    const settings = (settingsRow?.data as Record<string, unknown>) || {};
+    const automation = (settings.automation as Record<string, unknown>) || {};
+    if (automation.autoFollowUp !== false) {
+      maxFollowUps = (automation.maxFollowUps as number) || 3;
+    }
+  }
+
+  // Enrich with contact counts and follow-up counts
+  const enriched = [];
+  for (const email of emails) {
+    let contactCount = 0;
+    let followUpCount = 0;
+    if (email.campaignId) {
+      contactCount = await prisma.campaignContact.count({
+        where: { campaignId: email.campaignId },
+      });
+      // Count configured follow-up templates for this campaign
+      const campaign = await prisma.campaign.findUnique({
+        where: { id: email.campaignId },
+        select: { followUps: true, followUpSubject: true, followUpBody: true },
+      });
+      if (campaign) {
+        const raw = campaign.followUps as unknown;
+        let templateCount = 0;
+        if (Array.isArray(raw)) {
+          templateCount = raw.filter((f: { subject?: string; body?: string }) => f.subject || f.body).length;
+        }
+        if (templateCount === 0 && campaign.followUpSubject && campaign.followUpBody) {
+          templateCount = 1;
+        }
+        followUpCount = Math.min(templateCount, maxFollowUps);
+      }
+    } else if (email.prospectId) {
+      contactCount = 1;
+    }
+    enriched.push({ ...email, contactCount, followUpCount });
+  }
+
+  return NextResponse.json(enriched);
 }
 
 // POST /api/scheduled-emails
