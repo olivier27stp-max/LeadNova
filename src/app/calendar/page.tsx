@@ -786,23 +786,51 @@ function EventDrawer({
     onClose();
   }
 
+  const [actionLoading, setActionLoading] = useState(false);
+
   async function cancelScheduledEmail() {
     if (confirmAction !== "cancelSe") { setConfirmAction("cancelSe"); return; }
-    const seId = event.id.replace(/^se_/, "");
-    await fetch(`/api/scheduled-emails/${seId}?dismissFollowUps=true`, { method: "DELETE" });
-    onUpdate();
-    onClose();
+    setActionLoading(true);
+    try {
+      const seId = event.id.replace(/^se_/, "");
+      const res = await fetch(`/api/scheduled-emails/${seId}?dismissFollowUps=true`, { method: "DELETE" });
+      if (!res.ok) {
+        console.error("Failed to delete scheduled email:", await res.text());
+        setConfirmAction(null);
+        return;
+      }
+      onUpdate();
+      onClose();
+    } catch (err) {
+      console.error("Failed to delete scheduled email:", err);
+      setConfirmAction(null);
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   async function dismissFollowUp() {
     if (confirmAction !== "dismissFu") { setConfirmAction("dismissFu"); return; }
-    await fetch("/api/calendar/dismiss-followup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventKey: event.id }),
-    });
-    onUpdate();
-    onClose();
+    setActionLoading(true);
+    try {
+      const res = await fetch("/api/calendar/dismiss-followup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventKey: event.id }),
+      });
+      if (!res.ok) {
+        console.error("Failed to dismiss follow-up:", await res.text());
+        setConfirmAction(null);
+        return;
+      }
+      onUpdate();
+      onClose();
+    } catch (err) {
+      console.error("Failed to dismiss follow-up:", err);
+      setConfirmAction(null);
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   return (
@@ -952,8 +980,8 @@ function EventDrawer({
           {/* Scheduled Email Actions */}
           {isScheduledEmail && (
             <div className="pt-4 border-t border-border space-y-1">
-              <Button size="sm" variant={confirmAction === "cancelSe" ? "danger" : "danger-ghost"} onClick={cancelScheduledEmail}>
-                <Trash2 className="size-3.5" /> {confirmAction === "cancelSe" ? "Confirmer la suppression" : event.status === "PENDING" ? "Annuler l'envoi planifié" : "Supprimer du calendrier"}
+              <Button size="sm" variant={confirmAction === "cancelSe" ? "danger" : "danger-ghost"} onClick={cancelScheduledEmail} disabled={actionLoading}>
+                <Trash2 className="size-3.5" /> {actionLoading ? "Suppression..." : confirmAction === "cancelSe" ? "Confirmer la suppression" : event.status === "PENDING" ? "Annuler l'envoi planifié" : "Supprimer du calendrier"}
               </Button>
               {confirmAction === "cancelSe" && (
                 <button onClick={() => setConfirmAction(null)} className="text-xs text-foreground-muted hover:text-foreground">

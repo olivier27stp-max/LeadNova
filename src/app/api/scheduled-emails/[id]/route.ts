@@ -129,26 +129,45 @@ export async function DELETE(
       await revertScheduledStatus(pid, id);
     }
 
-    // Delete the scheduled email — this removes the source for section 2b follow-ups
-    // (fu_se_<id>_N), so they won't be generated anymore. No dismiss entries needed.
-    await prisma.scheduledEmail.delete({ where: { id } });
-
-    // If linked to a campaign and caller wants to dismiss follow-ups too
+    // If linked to a campaign and caller wants to dismiss follow-ups too,
+    // build dismiss keys BEFORE deleting (we need the record for context)
     if (existing.campaignId && dismissFollowUps) {
-      // Dismiss all campaign follow-ups (fu_<campaignId>_N) so they disappear from calendar
       try {
-        for (let i = 1; i <= 10; i++) {
-          const eventKey = `fu_${existing.campaignId}_${i}`;
+        const MAX_FOLLOWUPS = 10;
+
+        // 1. Dismiss follow-ups derived from this scheduled email: fu_se_<seId>_N
+        for (let i = 1; i <= MAX_FOLLOWUPS; i++) {
+          const eventKey = `fu_se_${id}_${i}`;
           await prisma.dismissedFollowUp.upsert({
             where: { workspaceId_eventKey: { workspaceId: ctx.workspaceId, eventKey } },
             update: {},
             create: { workspaceId: ctx.workspaceId, eventKey },
           });
         }
+
+        // 2. Dismiss follow-ups derived from campaign lastSentAt: fu_<campaignId>_<sendTs>_N
+        const campaign = await prisma.campaign.findUnique({
+          where: { id: existing.campaignId },
+          select: { lastSentAt: true },
+        });
+        if (campaign?.lastSentAt) {
+          const sendTs = campaign.lastSentAt.getTime();
+          for (let i = 1; i <= MAX_FOLLOWUPS; i++) {
+            const eventKey = `fu_${existing.campaignId}_${sendTs}_${i}`;
+            await prisma.dismissedFollowUp.upsert({
+              where: { workspaceId_eventKey: { workspaceId: ctx.workspaceId, eventKey } },
+              update: {},
+              create: { workspaceId: ctx.workspaceId, eventKey },
+            });
+          }
+        }
       } catch {
         // table may not exist
       }
     }
+
+    // Delete the scheduled email record
+    await prisma.scheduledEmail.delete({ where: { id } });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
