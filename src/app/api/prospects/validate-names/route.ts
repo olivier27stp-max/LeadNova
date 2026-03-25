@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { validateCompanyNames, localCleanCompanyName } from "@/lib/company-name-validation";
+import { validateCompanyNames } from "@/lib/company-name-validation";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
-const AI_BATCH_SIZE = 20;
+const BATCH_SIZE = 20;
 
 // POST /api/prospects/validate-names — run company name validation on all existing prospects
 export async function POST() {
@@ -36,60 +36,46 @@ export async function POST() {
     let rejected = 0;
     let unchanged = 0;
 
-    // Step 1: Apply local rules to all prospects
-    const withLocal = prospects.map((p) => ({
-      prospect: p,
-      local: localCleanCompanyName(p.companyName),
-    }));
+    // Run full validation pipeline (local rules → web scraping → AI) in batches
+    const withResults: { prospect: typeof prospects[0]; result: Awaited<ReturnType<typeof validateCompanyNames>>[0] }[] = [];
 
-    // Step 2: Collect prospects needing AI validation
-    const needsAI = withLocal.filter(
-      ({ local }) => local.isValid && (local.confidence < 0.85 || local.needsReview)
-    );
-
-    // Step 3: Batch AI validation
-    if (needsAI.length > 0 && process.env.ANTHROPIC_API_KEY) {
-      for (let i = 0; i < needsAI.length; i += AI_BATCH_SIZE) {
-        const batch = needsAI.slice(i, i + AI_BATCH_SIZE);
-        try {
-          const aiInputs = batch.map(({ prospect }) => ({
-            rawName: prospect.companyName,
-            website: prospect.website || undefined,
-            city: prospect.city || undefined,
-            industry: prospect.industry || undefined,
-          }));
-          const aiResults = await validateCompanyNames(aiInputs);
-          for (let j = 0; j < batch.length; j++) {
-            if (aiResults[j]) {
-              batch[j].local = aiResults[j];
-            }
-          }
-        } catch (error) {
-          console.error("[validate-names] AI batch failed, keeping local results:", error);
+    for (let i = 0; i < prospects.length; i += BATCH_SIZE) {
+      const batch = prospects.slice(i, i + BATCH_SIZE);
+      try {
+        const inputs = batch.map((p) => ({
+          rawName: p.companyName,
+          website: p.website || undefined,
+          city: p.city || undefined,
+          industry: p.industry || undefined,
+        }));
+        const results = await validateCompanyNames(inputs);
+        for (let j = 0; j < batch.length; j++) {
+          withResults.push({ prospect: batch[j], result: results[j] });
         }
+      } catch (error) {
+        console.error("[validate-names] Batch failed:", error);
       }
     }
 
-    // Step 4: Update all prospects in DB
-    for (const { prospect, local } of withLocal) {
-      const finalName = local.cleanName || prospect.companyName;
+    // Update all prospects in DB
+    for (const { prospect, result } of withResults) {
+      const finalName = result.cleanName || prospect.companyName;
       const nameChanged = finalName !== prospect.companyName;
 
       const updateData: Record<string, unknown> = {
-        companyNameConfidence: local.confidence,
-        companyNameNeedsReview: local.needsReview,
+        companyNameConfidence: result.confidence,
+        companyNameNeedsReview: result.needsReview,
       };
 
-      if (nameChanged && local.isValid) {
+      if (nameChanged && result.isValid) {
         updateData.rawCompanyName = prospect.companyName;
         updateData.companyName = finalName;
         cleaned++;
-      } else if (!local.isValid) {
-        // Mark invalid but don't delete — store raw and flag
+      } else if (!result.isValid) {
         updateData.rawCompanyName = prospect.companyName;
         updateData.companyNameNeedsReview = true;
         rejected++;
-      } else if (local.needsReview) {
+      } else if (result.needsReview) {
         flagged++;
       } else {
         unchanged++;

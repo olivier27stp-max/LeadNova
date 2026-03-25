@@ -9,15 +9,24 @@ config({ path: ".env.local" });
 
 // Use the project's Prisma client (pg adapter)
 import { prisma } from "../src/lib/db";
-import { localCleanCompanyName, validateCompanyNames } from "../src/lib/company-name-validation";
+import { validateCompanyNames } from "../src/lib/company-name-validation";
 
-const AI_BATCH_SIZE = 20;
+const BATCH_SIZE = 20;
 
 async function main() {
-  console.log("Fetching unvalidated prospects...");
+  const mode = process.argv[2]; // --review to re-process flagged ones
+  const isReviewMode = mode === "--review";
+
+  console.log(isReviewMode
+    ? "Fetching flagged/review prospects for re-validation..."
+    : "Fetching unvalidated prospects...");
+
+  const whereClause = isReviewMode
+    ? { companyNameNeedsReview: true }
+    : { companyNameConfidence: null };
 
   const prospects = await prisma.prospect.findMany({
-    where: { companyNameConfidence: null },
+    where: whereClause,
     select: {
       id: true,
       companyName: true,
@@ -35,45 +44,30 @@ async function main() {
     return;
   }
 
-  // Layer 1: local rules
-  const withLocal = prospects.map((p) => ({
-    prospect: p,
-    local: localCleanCompanyName(p.companyName),
-  }));
+  // Run full validation pipeline (local rules → web scraping → AI) in batches
+  const withResults: { prospect: typeof prospects[0]; result: Awaited<ReturnType<typeof validateCompanyNames>>[0] }[] = [];
 
-  // Layer 2: AI for uncertain ones
-  const needsAI = withLocal.filter(
-    ({ local }) => local.isValid && (local.confidence < 0.85 || local.needsReview)
-  );
+  for (let i = 0; i < prospects.length; i += BATCH_SIZE) {
+    const batch = prospects.slice(i, i + BATCH_SIZE);
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(prospects.length / BATCH_SIZE);
+    console.log(`Batch ${batchNum}/${totalBatches} (${batch.length} prospects)...`);
 
-  console.log(`Local rules done. ${needsAI.length} need AI validation.`);
-
-  if (needsAI.length > 0 && process.env.ANTHROPIC_API_KEY) {
-    for (let i = 0; i < needsAI.length; i += AI_BATCH_SIZE) {
-      const batch = needsAI.slice(i, i + AI_BATCH_SIZE);
-      const batchNum = Math.floor(i / AI_BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(needsAI.length / AI_BATCH_SIZE);
-      console.log(`  AI batch ${batchNum}/${totalBatches} (${batch.length} names)...`);
-
-      try {
-        const aiInputs = batch.map(({ prospect }) => ({
-          rawName: prospect.companyName,
-          website: prospect.website || undefined,
-          city: prospect.city || undefined,
-          industry: prospect.industry || undefined,
-        }));
-        const aiResults = await validateCompanyNames(aiInputs);
-        for (let j = 0; j < batch.length; j++) {
-          if (aiResults[j]) {
-            batch[j].local = aiResults[j];
-          }
-        }
-      } catch (error) {
-        console.error(`  AI batch ${batchNum} failed:`, error);
+    try {
+      const inputs = batch.map((p) => ({
+        rawName: p.companyName,
+        website: p.website || undefined,
+        city: p.city || undefined,
+        industry: p.industry || undefined,
+      }));
+      const results = await validateCompanyNames(inputs);
+      for (let j = 0; j < batch.length; j++) {
+        withResults.push({ prospect: batch[j], result: results[j] });
       }
+    } catch (error) {
+      console.error(`  Batch ${batchNum} failed:`, error);
+      // Fallback: skip this batch
     }
-  } else if (!process.env.ANTHROPIC_API_KEY) {
-    console.log("  ANTHROPIC_API_KEY not set, skipping AI layer.");
   }
 
   // Update DB
@@ -84,28 +78,28 @@ async function main() {
 
   console.log("\nUpdating database...");
 
-  for (const { prospect, local } of withLocal) {
-    const finalName = local.cleanName || prospect.companyName;
+  for (const { prospect, result } of withResults) {
+    const finalName = result.cleanName || prospect.companyName;
     const nameChanged = finalName !== prospect.companyName;
 
     const updateData: Record<string, unknown> = {
-      companyNameConfidence: local.confidence,
-      companyNameNeedsReview: local.needsReview,
+      companyNameConfidence: result.confidence,
+      companyNameNeedsReview: result.needsReview,
     };
 
-    if (nameChanged && local.isValid) {
+    if (nameChanged && result.isValid) {
       updateData.rawCompanyName = prospect.companyName;
       updateData.companyName = finalName;
       cleaned++;
       console.log(`  CLEANED: "${prospect.companyName}" → "${finalName}"`);
-    } else if (!local.isValid) {
+    } else if (!result.isValid) {
       updateData.rawCompanyName = prospect.companyName;
       updateData.companyNameNeedsReview = true;
       rejected++;
-      console.log(`  REJECTED: "${prospect.companyName}" (${local.reason})`);
-    } else if (local.needsReview) {
+      console.log(`  REJECTED: "${prospect.companyName}" (${result.reason})`);
+    } else if (result.needsReview) {
       flagged++;
-      console.log(`  FLAGGED: "${prospect.companyName}" (${local.reason})`);
+      console.log(`  FLAGGED: "${prospect.companyName}" (${result.reason})`);
     } else {
       unchanged++;
     }
@@ -123,7 +117,7 @@ async function main() {
         await prisma.prospect.update({
           where: { id: prospect.id },
           data: {
-            companyNameConfidence: local.confidence,
+            companyNameConfidence: result.confidence,
             companyNameNeedsReview: true,
             rawCompanyName: prospect.companyName,
           },

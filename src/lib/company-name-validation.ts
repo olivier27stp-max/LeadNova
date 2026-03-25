@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import * as cheerio from "cheerio";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -150,6 +151,118 @@ export function localCleanCompanyName(raw: string): CompanyNameValidation {
   };
 }
 
+// ─── Layer 1.5: Website Scraping ─────────────────────────
+// When a name is doubtful and we have a website, fetch the homepage
+// to extract the real company name from <title>, og:site_name, <h1>, etc.
+
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+];
+
+async function fetchHomepageHTML(url: string): Promise<string | null> {
+  try {
+    let fullUrl = url;
+    if (!/^https?:\/\//i.test(fullUrl)) fullUrl = "https://" + fullUrl;
+    const res = await fetch(fullUrl, {
+      signal: AbortSignal.timeout(10_000),
+      redirect: "follow",
+      headers: {
+        "User-Agent": USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
+      },
+    });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("text/html") && !ct.includes("text/plain")) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+interface WebScrapedName {
+  name: string;
+  source: string; // e.g. "og:site_name", "title", "h1"
+}
+
+function extractCompanyNameFromHTML(html: string): WebScrapedName | null {
+  const $ = cheerio.load(html);
+
+  // Priority order: og:site_name > structured data > title tag > h1
+  const candidates: WebScrapedName[] = [];
+
+  // 1. og:site_name — most reliable, explicitly set by the site owner
+  const ogSiteName = $('meta[property="og:site_name"]').attr("content")?.trim();
+  if (ogSiteName && ogSiteName.length >= 2 && ogSiteName.length <= 80) {
+    candidates.push({ name: ogSiteName, source: "og:site_name" });
+  }
+
+  // 2. Schema.org organization name
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const json = JSON.parse($(el).html() || "");
+      const items = Array.isArray(json) ? json : [json];
+      for (const item of items) {
+        if (
+          (item["@type"] === "Organization" ||
+           item["@type"] === "LocalBusiness" ||
+           item["@type"] === "RealEstateAgent" ||
+           item["@type"] === "Corporation") &&
+          item.name
+        ) {
+          const name = String(item.name).trim();
+          if (name.length >= 2 && name.length <= 80) {
+            candidates.push({ name, source: "schema.org" });
+          }
+        }
+      }
+    } catch {
+      // invalid JSON-LD
+    }
+  });
+
+  // 3. <title> tag — often has SEO junk but can be useful
+  const titleText = $("title").first().text()?.trim();
+  if (titleText && titleText.length >= 2 && titleText.length <= 100) {
+    // Extract the first segment before | – — separators (usually the company name)
+    const firstSegment = titleText.split(/\s*[|–—]\s*/)[0]?.trim();
+    if (firstSegment && firstSegment.length >= 2) {
+      candidates.push({ name: firstSegment, source: "title" });
+    }
+  }
+
+  // 4. First <h1> — often the company name on homepage
+  const h1Text = $("h1").first().text()?.trim();
+  if (h1Text && h1Text.length >= 2 && h1Text.length <= 80) {
+    candidates.push({ name: h1Text, source: "h1" });
+  }
+
+  // 5. Logo alt text — sometimes contains the company name
+  const logoAlt = $('img[class*="logo"], img[id*="logo"], img[alt*="logo" i], header img').first().attr("alt")?.trim();
+  if (logoAlt && logoAlt.length >= 2 && logoAlt.length <= 60 && logoAlt.toLowerCase() !== "logo") {
+    candidates.push({ name: logoAlt, source: "logo-alt" });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Filter out candidates that are themselves generic labels
+  const filtered = candidates.filter((c) => {
+    const lower = c.name.toLowerCase();
+    return !GENERIC_PAGE_LABELS.has(lower);
+  });
+
+  // Return best candidate by priority (og:site_name > schema.org > title > h1 > logo)
+  return filtered[0] || null;
+}
+
+export async function scrapeCompanyName(website: string): Promise<WebScrapedName | null> {
+  const html = await fetchHomepageHTML(website);
+  if (!html) return null;
+  return extractCompanyNameFromHTML(html);
+}
+
 // ─── Layer 2: AI Validation (batched) ────────────────────
 
 const AI_MODEL = "claude-haiku-4-5-20251001";
@@ -257,7 +370,48 @@ export async function validateCompanyNames(
     local: localCleanCompanyName(input.rawName),
   }));
 
-  // Identify which ones need AI validation:
+  // Layer 1.5: Web scraping for doubtful names with a website
+  const needsScraping: number[] = [];
+  for (let i = 0; i < localResults.length; i++) {
+    const { input, local } = localResults[i];
+    if (input.website && (local.confidence < 0.85 || local.needsReview)) {
+      needsScraping.push(i);
+    }
+  }
+
+  if (needsScraping.length > 0) {
+    // Scrape in parallel (max 5 concurrent)
+    const CONCURRENCY = 5;
+    for (let i = 0; i < needsScraping.length; i += CONCURRENCY) {
+      const batch = needsScraping.slice(i, i + CONCURRENCY);
+      const promises = batch.map(async (idx) => {
+        const { input } = localResults[idx];
+        if (!input.website) return;
+        try {
+          const scraped = await scrapeCompanyName(input.website);
+          if (scraped) {
+            // Validate the scraped name with local rules too
+            const scrapedClean = localCleanCompanyName(scraped.name);
+            if (scrapedClean.isValid && scrapedClean.confidence >= 0.80) {
+              console.log(`  [scrape] "${input.rawName}" → "${scrapedClean.cleanName}" (via ${scraped.source})`);
+              localResults[idx].local = {
+                cleanName: scrapedClean.cleanName,
+                isValid: true,
+                confidence: Math.max(scrapedClean.confidence, 0.88),
+                reason: `Company name found via website ${scraped.source}: "${scraped.name}"`,
+                needsReview: false,
+              };
+            }
+          }
+        } catch (error) {
+          console.warn(`  [scrape] Failed for ${input.website}:`, error);
+        }
+      });
+      await Promise.all(promises);
+    }
+  }
+
+  // Identify which ones still need AI validation after scraping:
   // - locally valid but with low confidence (< 0.85)
   // - or marked needs_review
   const needsAI: { idx: number; input: CompanyNameInput; local: CompanyNameValidation }[] = [];
@@ -265,7 +419,7 @@ export async function validateCompanyNames(
   for (let i = 0; i < localResults.length; i++) {
     const { input, local } = localResults[i];
     if (!local.isValid) continue; // Already rejected locally, skip AI
-    if (local.confidence >= 0.85 && !local.needsReview) continue; // Clean enough
+    if (local.confidence >= 0.85 && !local.needsReview) continue; // Clean enough (or fixed by scraping)
     needsAI.push({ idx: i, input, local });
   }
 
