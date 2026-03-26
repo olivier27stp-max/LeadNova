@@ -89,12 +89,12 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         // Campaign send
         const campaign = await prisma.campaign.findUnique({
           where: { id: scheduled.campaignId },
-          include: {
-            contacts: {
-              include: {
-                prospect: { select: { id: true, companyName: true, email: true, city: true } },
-              },
-            },
+          select: {
+            id: true,
+            name: true,
+            workspaceId: true,
+            emailSubject: true,
+            emailBody: true,
           },
         });
 
@@ -114,18 +114,42 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         const settingsData = settingsRecord?.data as Record<string, unknown> | null;
         const companySettings = (settingsData?.company || {}) as CompanySettings;
 
-        const allProspects = campaign.contacts.map((c) => c.prospect).filter((p) => p.email);
+        // Use snapshot prospect IDs (saved at schedule time) — fall back to live campaign contacts
+        let prospectIds: string[] = scheduled.snapshotProspectIds || [];
+        if (prospectIds.length === 0) {
+          const contacts = await prisma.campaignContact.findMany({
+            where: { campaignId: scheduled.campaignId },
+            select: { prospectId: true },
+          });
+          prospectIds = contacts.map((c) => c.prospectId);
+        }
+
+        if (prospectIds.length === 0) {
+          await prisma.scheduledEmail.update({
+            where: { id: scheduled.id },
+            data: { status: "FAILED", error: "Aucun contact dans la campagne" },
+          });
+          errors.push(`${scheduled.id}: Aucun contact`);
+          continue;
+        }
+
+        // Load prospects from snapshot IDs
+        const allProspects = await prisma.prospect.findMany({
+          where: { id: { in: prospectIds } },
+          select: { id: true, companyName: true, email: true, city: true },
+        });
+        const withEmail = allProspects.filter((p) => p.email);
 
         // Skip prospects already emailed in this campaign (prevents duplicates across batches)
         const alreadySentIds = new Set<string>();
-        for (const p of allProspects) {
+        for (const p of withEmail) {
           const existing = await prisma.emailActivity.findFirst({
             where: { prospectId: p.id, campaignId: campaign.id },
             select: { id: true },
           });
           if (existing) alreadySentIds.add(p.id);
         }
-        const prospects = allProspects.filter((p) => !alreadySentIds.has(p.id));
+        const prospects = withEmail.filter((p) => !alreadySentIds.has(p.id));
 
         let sent = 0;
         let failed = 0;

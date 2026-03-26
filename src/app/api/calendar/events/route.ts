@@ -54,7 +54,11 @@ export async function GET(request: NextRequest) {
 
       // Pre-fetch campaigns and prospects in bulk to avoid N+1
       const seCampaignIds = [...new Set(scheduledEmails.map((se) => se.campaignId).filter(Boolean))] as string[];
-      const seProspectIds = [...new Set(scheduledEmails.map((se) => se.prospectId).filter(Boolean))] as string[];
+
+      // Collect all prospect IDs from snapshots + direct prospectId references
+      const allSnapshotIds = scheduledEmails.flatMap((se) => se.snapshotProspectIds || []);
+      const directProspectIds = scheduledEmails.map((se) => se.prospectId).filter(Boolean) as string[];
+      const allProspectIds = [...new Set([...allSnapshotIds, ...directProspectIds])];
 
       const seCampaigns = seCampaignIds.length > 0
         ? await prisma.campaign.findMany({
@@ -64,9 +68,9 @@ export async function GET(request: NextRequest) {
         : [];
       const seCampaignMap = new Map(seCampaigns.map((c) => [c.id, c]));
 
-      const seProspects = seProspectIds.length > 0
+      const seProspects = allProspectIds.length > 0
         ? await prisma.prospect.findMany({
-            where: { id: { in: seProspectIds } },
+            where: { id: { in: allProspectIds } },
             select: { id: true, companyName: true, email: true, phone: true },
           })
         : [];
@@ -74,12 +78,24 @@ export async function GET(request: NextRequest) {
 
       for (const se of scheduledEmails) {
         let campaignName: string | undefined;
-        let prospects: CalendarEvent["relatedProspects"] = [];
+        let prospects: NonNullable<CalendarEvent["relatedProspects"]> = [];
 
         if (se.campaignId) {
           const campaign = seCampaignMap.get(se.campaignId);
           if (campaign) {
             campaignName = campaign.name;
+          }
+        }
+
+        // Use snapshot prospect IDs when available, fall back to campaign contacts
+        const snapshotIds = se.snapshotProspectIds || [];
+        if (snapshotIds.length > 0) {
+          prospects = snapshotIds
+            .map((pid) => seProspectMap.get(pid))
+            .filter((p): p is NonNullable<typeof p> => !!p);
+        } else if (se.campaignId) {
+          const campaign = seCampaignMap.get(se.campaignId);
+          if (campaign) {
             prospects = campaign.contacts.map((c) => c.prospect);
           }
         }

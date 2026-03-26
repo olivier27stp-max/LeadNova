@@ -40,9 +40,10 @@ export async function GET(request: NextRequest) {
     let contactCount = 0;
     let followUpCount = 0;
     if (email.campaignId) {
-      contactCount = await prisma.campaignContact.count({
-        where: { campaignId: email.campaignId },
-      });
+      // Use snapshot count if available, else fall back to live campaign contacts
+      contactCount = email.snapshotProspectIds.length > 0
+        ? email.snapshotProspectIds.length
+        : await prisma.campaignContact.count({ where: { campaignId: email.campaignId } });
       // Count configured follow-up templates for this campaign
       const campaign = await prisma.campaign.findUnique({
         where: { id: email.campaignId },
@@ -89,6 +90,25 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Snapshot campaign contacts at schedule time so the cron doesn't depend on live state
+    let snapshotProspectIds: string[] = [];
+    if (campaignId) {
+      const contacts = await prisma.campaignContact.findMany({
+        where: { campaignId },
+        select: { prospectId: true },
+      });
+      snapshotProspectIds = contacts.map((c) => c.prospectId);
+    } else if (prospectId) {
+      snapshotProspectIds = [prospectId];
+    }
+
+    if (snapshotProspectIds.length === 0) {
+      return NextResponse.json(
+        { error: "Aucun contact sélectionné pour cet envoi." },
+        { status: 400 }
+      );
+    }
+
     const scheduledEmail = await prisma.scheduledEmail.create({
       data: {
         workspaceId,
@@ -99,24 +119,14 @@ export async function POST(request: NextRequest) {
         scheduledFor: scheduled,
         timezone: timezone || "America/Toronto",
         status: "PENDING",
+        snapshotProspectIds,
       },
     });
 
-    // Update campaign contacts' prospect status to SCHEDULED
-    if (campaignId) {
-      const contacts = await prisma.campaignContact.findMany({
-        where: { campaignId },
-        select: { prospectId: true },
-      });
-      for (const contact of contacts) {
-        await prisma.prospect.update({
-          where: { id: contact.prospectId },
-          data: { status: "SCHEDULED" },
-        });
-      }
-    } else if (prospectId) {
+    // Update prospect statuses to SCHEDULED
+    for (const pid of snapshotProspectIds) {
       await prisma.prospect.update({
-        where: { id: prospectId },
+        where: { id: pid },
         data: { status: "SCHEDULED" },
       });
     }

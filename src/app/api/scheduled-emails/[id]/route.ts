@@ -114,15 +114,18 @@ export async function DELETE(
     if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
     // Revert prospect status from SCHEDULED to correct previous status
-    const prospectIds: string[] = [];
-    if (existing.campaignId) {
-      const contacts = await prisma.campaignContact.findMany({
-        where: { campaignId: existing.campaignId },
-        select: { prospectId: true },
-      });
-      prospectIds.push(...contacts.map((c) => c.prospectId));
-    } else if (existing.prospectId) {
-      prospectIds.push(existing.prospectId);
+    // Use snapshot IDs when available, fall back to live campaign contacts
+    let prospectIds: string[] = existing.snapshotProspectIds || [];
+    if (prospectIds.length === 0) {
+      if (existing.campaignId) {
+        const contacts = await prisma.campaignContact.findMany({
+          where: { campaignId: existing.campaignId },
+          select: { prospectId: true },
+        });
+        prospectIds = contacts.map((c) => c.prospectId);
+      } else if (existing.prospectId) {
+        prospectIds = [existing.prospectId];
+      }
     }
 
     for (const pid of prospectIds) {

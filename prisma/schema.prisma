@@ -493,6 +493,7 @@ model ScheduledEmail {
   sentCount    Int?
   failedCount  Int?
   error        String?
+  snapshotProspectIds String[]     @default([])
 
   workspace    Workspace?           @relation(fields: [workspaceId], references: [id])
 
