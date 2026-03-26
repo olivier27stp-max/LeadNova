@@ -65,6 +65,17 @@ export async function POST(
   if (!campaign) {
     return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
   }
+  // Prevent concurrent sends — atomically lock the campaign
+  if (campaign.status === "ACTIVE" && campaign.lastSentAt) {
+    const minutesSinceLastSend = (Date.now() - new Date(campaign.lastSentAt).getTime()) / 60000;
+    if (minutesSinceLastSend < 2) {
+      return NextResponse.json(
+        { error: "Envoi déjà en cours. Veuillez patienter." },
+        { status: 409 }
+      );
+    }
+  }
+
   if (!campaign.emailSubject || !campaign.emailBody) {
     return NextResponse.json(
       { error: "Le message de la campagne n'est pas configuré. Renseignez le sujet et le corps de l'email." },
