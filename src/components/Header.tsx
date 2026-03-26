@@ -79,7 +79,7 @@ export default function Header() {
 
   return (
     <nav className="sticky top-0 z-40 bg-card/80 backdrop-blur-lg border-b border-border">
-      <div className="max-w-7xl mx-auto flex items-center justify-between h-12 px-6">
+      <div className="max-w-[1440px] mx-auto flex items-center justify-between h-12 px-6">
         <div className="flex items-center gap-4 min-w-0">
           <Link
             href="/"
@@ -99,7 +99,7 @@ export default function Header() {
                 href={href}
                 title={t("nav", labelKey)}
                 className={cn(
-                  "relative flex items-center gap-1.5 text-[13px] font-medium px-2.5 py-1.5 rounded-md transition-colors shrink-0",
+                  "relative flex items-center gap-1.5 text-[13px] font-medium px-2 py-1.5 rounded-md transition-colors shrink-0",
                   isActive(href)
                     ? "text-foreground bg-background-muted"
                     : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
