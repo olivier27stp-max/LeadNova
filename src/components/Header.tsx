@@ -15,7 +15,6 @@ import {
   Megaphone,
   Filter,
   Settings,
-  StickyNote,
   Sun,
   Moon,
   Monitor,
@@ -115,21 +114,6 @@ export default function Header() {
                 )}
               </Link>
             ))}
-            {isAdmin && (
-              <Link
-                href="/notes"
-                title="Notes"
-                className={cn(
-                  "relative flex items-center gap-1.5 text-[13px] font-medium px-2.5 py-1.5 rounded-md transition-colors shrink-0",
-                  isActive("/notes")
-                    ? "text-foreground bg-background-muted"
-                    : "text-foreground-muted hover:text-foreground hover:bg-background-subtle"
-                )}
-              >
-                <StickyNote className="size-3.5 shrink-0" />
-                <span className="hidden xl:inline whitespace-nowrap">Notes</span>
-              </Link>
-            )}
           </div>
         </div>
 

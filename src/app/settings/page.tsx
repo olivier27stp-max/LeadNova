@@ -56,6 +56,7 @@ import {
   Rocket,
   Sparkles,
   ArrowRight,
+  StickyNote,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────
@@ -389,6 +390,7 @@ export default function SettingsPage() {
   const { setLocale: setAppLocale } = useLanguage();
   const { t, locale } = useTranslation();
   const [activeSection, setActiveSection] = useState<SectionId>("company");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Read ?section= from URL on mount to deep-link to a specific tab
   useEffect(() => {
@@ -397,6 +399,12 @@ export default function SettingsPage() {
     if (section && SECTION_IDS.includes(section as SectionId)) {
       setActiveSection(section as SectionId);
     }
+  }, []);
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => { if (d.user?.role === "ADMIN") setIsAdmin(true); })
+      .catch(() => {});
   }, []);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4165,6 +4173,22 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
+            {isAdmin && (
+              <div>
+                <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-widest text-foreground-muted/60">
+                  Admin
+                </p>
+                <div className="space-y-0.5">
+                  <a
+                    href="/notes"
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2.5 text-foreground-muted hover:bg-card-hover"
+                  >
+                    <StickyNote className="size-4 shrink-0" />
+                    Notes
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
         </nav>
 
