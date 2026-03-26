@@ -44,6 +44,7 @@ export const translations = {
     emailVerifier: { fr: "Email Vérificateur", en: "Email Verifier" },
     calendar: { fr: "Calendrier", en: "Calendar" },
     campaigns: { fr: "Campagnes", en: "Campaigns" },
+    funnel: { fr: "Funnel", en: "Funnel" },
     settings: { fr: "Paramètres", en: "Settings" },
     theme: { fr: "Thème", en: "Theme" },
     themeAuto: { fr: "Auto", en: "Auto" },

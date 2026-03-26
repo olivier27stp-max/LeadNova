@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   CalendarDays,
   Megaphone,
+  Filter,
   Settings,
   StickyNote,
   Sun,
@@ -31,6 +32,7 @@ const NAV_KEYS = [
   { href: "/email-verifier", labelKey: "emailVerifier" as const, icon: ShieldCheck },
   { href: "/calendar", labelKey: "calendar" as const, icon: CalendarDays },
   { href: "/campaigns", labelKey: "campaigns" as const, icon: Megaphone },
+  { href: "/funnel", labelKey: "funnel" as const, icon: Filter },
   { href: "/settings", labelKey: "settings" as const, icon: Settings },
 ];
 
