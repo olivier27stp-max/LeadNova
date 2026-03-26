@@ -96,6 +96,7 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
       emailSubject: true,
       prospectId: true,
       replyReceived: true,
+      openedAt: true,
       bounce: true,
       prospect: { select: { email: true } },
     },
@@ -179,7 +180,7 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
           if (!activity.replyReceived) {
             await prisma.emailActivity.update({
               where: { id: activity.id },
-              data: { replyReceived: true },
+              data: { replyReceived: true, openedAt: activity.openedAt ?? new Date() },
             });
             await prisma.prospect.updateMany({
               where: { id: activity.prospectId, status: { notIn: ["REPLIED", "QUALIFIED"] } },
