@@ -1005,6 +1005,25 @@ export const translations = {
     verifyProspectEmails: { fr: "Vérifiez les emails de vos prospects avant d'envoyer votre campagne.", en: "Verify your prospects' emails before sending your campaign." },
     onceDoneReturn: { fr: "Une fois terminé, retournez à votre campagne pour procéder à l'envoi.", en: "Once done, return to your campaign to proceed with sending." },
   },
+
+  // ─── Funnel Page ───────────────────────────────────────
+  funnel: {
+    title: { fr: "Funnel", en: "Funnel" },
+    description: { fr: "Gérez votre pipeline de prospects", en: "Manage your prospect pipeline" },
+    newReplies: { fr: "Nouvelles réponses", en: "New Replies" },
+    prospects: { fr: "prospects", en: "prospects" },
+    prospect: { fr: "prospect", en: "prospect" },
+    addStage: { fr: "Ajouter une étape", en: "Add stage" },
+    newStage: { fr: "Nouvelle étape", en: "New Stage" },
+    rename: { fr: "Renommer", en: "Rename" },
+    delete: { fr: "Supprimer", en: "Delete" },
+    deleteConfirm: { fr: "Supprimer cette étape et retirer tous ses prospects du funnel ?", en: "Delete this stage and remove all its prospects from the funnel?" },
+    cannotDeleteDefault: { fr: "Impossible de supprimer cette étape", en: "Cannot delete this stage" },
+    cannotRenameDefault: { fr: "Impossible de renommer cette étape", en: "Cannot rename this stage" },
+    emptyStage: { fr: "Aucun prospect", en: "No prospects" },
+    dragHint: { fr: "Glissez les prospects entre les étapes", en: "Drag prospects between stages" },
+    score: { fr: "Score", en: "Score" },
+  },
 } as const;
 
 // Type helper: nested key access

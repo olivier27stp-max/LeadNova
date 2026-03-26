@@ -281,6 +281,30 @@ export async function pollGmailForUpdates(workspaceId: string): Promise<{ replie
         });
       }
 
+      // Auto-add to funnel "New Replies" stage
+      try {
+        const defaultStage = await prisma.funnelStage.findFirst({
+          where: { workspaceId, isDefault: true },
+        });
+        if (defaultStage) {
+          const existing = await prisma.funnelProspect.findUnique({
+            where: { prospectId: activity.prospect.id },
+          });
+          if (existing) {
+            await prisma.funnelProspect.update({
+              where: { id: existing.id },
+              data: { stageId: defaultStage.id, sortOrder: 0 },
+            });
+          } else {
+            await prisma.funnelProspect.create({
+              data: { stageId: defaultStage.id, prospectId: activity.prospect.id, sortOrder: 0 },
+            });
+          }
+        }
+      } catch (funnelErr) {
+        console.error("[gmail] Failed to add prospect to funnel:", funnelErr);
+      }
+
       replies++;
     }
   }

@@ -64,6 +64,7 @@ model Workspace {
   keywordGenerations KeywordGeneration[]
   calendarTasks   CalendarTask[]
   dismissedFollowUps DismissedFollowUp[]
+  funnelStages       FunnelStage[]
 
   @@map("workspaces")
 }
@@ -138,6 +139,7 @@ model Prospect {
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
   campaignContacts CampaignContact[]
+  funnelProspect   FunnelProspect?
 
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -524,4 +526,45 @@ model DismissedFollowUp {
   @@unique([workspaceId, eventKey])
   @@index([workspaceId])
   @@map("dismissed_follow_ups")
+}
+
+// ═══════════════════════════════════════════════════════════
+// FUNNEL PIPELINE
+// ═══════════════════════════════════════════════════════════
+
+model FunnelStage {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  name        String
+  slug        String
+  sortOrder   Int      @default(0)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  prospects   FunnelProspect[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId])
+  @@index([sortOrder])
+  @@map("funnel_stages")
+}
+
+model FunnelProspect {
+  id          String   @id @default(cuid())
+  stageId     String
+  prospectId  String
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  stage       FunnelStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  prospect    Prospect    @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@unique([prospectId])
+  @@index([stageId])
+  @@index([prospectId])
+  @@index([sortOrder])
+  @@map("funnel_prospects")
 }

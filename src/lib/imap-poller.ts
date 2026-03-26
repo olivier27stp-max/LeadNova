@@ -186,6 +186,31 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
               where: { id: activity.prospectId, status: { notIn: ["REPLIED", "QUALIFIED"] } },
               data: { status: "REPLIED" },
             });
+
+            // Auto-add to funnel "New Replies" stage
+            try {
+              const defaultStage = await prisma.funnelStage.findFirst({
+                where: { workspaceId, isDefault: true },
+              });
+              if (defaultStage) {
+                const existingFp = await prisma.funnelProspect.findUnique({
+                  where: { prospectId: activity.prospectId },
+                });
+                if (existingFp) {
+                  await prisma.funnelProspect.update({
+                    where: { id: existingFp.id },
+                    data: { stageId: defaultStage.id, sortOrder: 0 },
+                  });
+                } else {
+                  await prisma.funnelProspect.create({
+                    data: { stageId: defaultStage.id, prospectId: activity.prospectId, sortOrder: 0 },
+                  });
+                }
+              }
+            } catch (funnelErr) {
+              console.error("[imap] Failed to add prospect to funnel:", funnelErr);
+            }
+
             activity.replyReceived = true;
             replies++;
           }
