@@ -364,16 +364,8 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
     setLoading(true);
     try {
       const res = await fetch(`/api/campaigns/${campaignId}/reports?range=${range}`);
-      const json = await res.json();
-      if (res.ok) {
-        console.log("[reports] data received:", json.kpis, json.initial, json.followUp);
-        setData(json);
-      } else {
-        console.error("[reports] error:", res.status, json);
-      }
-    } catch (err) {
-      console.error("[reports] fetch error:", err);
-    }
+      if (res.ok) setData(await res.json());
+    } catch { /* ignore */ }
     setLoading(false);
   }, [campaignId, range]);
 

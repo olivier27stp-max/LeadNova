@@ -52,12 +52,13 @@ interface ProspectDetail extends ProspectListItem {
 }
 
 // ---------- Constants ----------
-const STATUS_OPTIONS = ["NEW", "ENRICHED", "CONTACTED", "REPLIED", "QUALIFIED", "NOT_INTERESTED"];
+const STATUS_OPTIONS = ["NEW", "ENRICHED", "CONTACTED", "REPLIED", "BOUNCED", "QUALIFIED", "NOT_INTERESTED"];
 const STATUS_LABELS: Record<string, string> = {
   NEW: "Nouveau",
   ENRICHED: "Enrichi",
   CONTACTED: "Contacté",
   REPLIED: "Répondu",
+  BOUNCED: "Bounce",
   QUALIFIED: "Qualifié",
   NOT_INTERESTED: "Pas intéressé",
 };
@@ -79,7 +80,8 @@ const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
     ENRICHED: "bg-background-muted text-foreground-secondary border border-border",
     SCHEDULED: "bg-warning-subtle text-warning border border-warning/20",
     CONTACTED: "bg-warning-subtle text-warning border border-warning/20",
-    REPLIED: "bg-success-subtle text-success border border-success/20",
+    REPLIED: "bg-emerald-100 text-emerald-700 border border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700",
+    BOUNCED: "bg-red-100 text-red-700 border border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700",
     QUALIFIED: "bg-success-subtle text-success border border-success/20",
     NOT_INTERESTED: "bg-background-muted text-foreground-muted border border-border",
   };

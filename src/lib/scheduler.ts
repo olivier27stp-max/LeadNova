@@ -1,6 +1,8 @@
 import cron from "node-cron";
 import { processScheduledEmails } from "./process-scheduled-emails";
 import { processAutoFollowUps } from "./process-scheduled-emails";
+import { pollImapForUpdates } from "./imap-poller";
+import { prisma } from "./db";
 
 const globalForCron = globalThis as unknown as { _cronStarted?: boolean };
 
@@ -20,8 +22,8 @@ export function startScheduler() {
     }
   });
 
-  // Auto follow-ups — every hour at :30
-  cron.schedule("30 * * * *", async () => {
+  // Auto follow-ups — every 2 hours at :30
+  cron.schedule("30 */2 * * *", async () => {
     try {
       const result = await processAutoFollowUps();
       if (result.sent > 0) {
@@ -35,5 +37,34 @@ export function startScheduler() {
     }
   });
 
-  console.log("[scheduler] Démarré — emails planifiés (1min) + relances auto (1h)");
+  // IMAP polling for replies & bounces — every 5 minutes
+  cron.schedule("*/5 * * * *", async () => {
+    try {
+      const allSettings = await prisma.appSettings.findMany({
+        where: { workspaceId: { not: null } },
+        select: { workspaceId: true, data: true },
+      });
+
+      for (const setting of allSettings) {
+        if (!setting.workspaceId) continue;
+        const data = setting.data as Record<string, unknown>;
+        const emailSettings = (data?.email || {}) as Record<string, string>;
+        if (emailSettings.provider === "gmail_oauth") continue;
+        if (!emailSettings.smtpHost && !emailSettings.imapHost) continue;
+
+        try {
+          const result = await pollImapForUpdates(setting.workspaceId);
+          if (result.replies > 0 || result.bounces > 0) {
+            console.log(`[scheduler] IMAP: ${result.replies} réponse(s), ${result.bounces} bounce(s)`);
+          }
+        } catch (err) {
+          console.error("[scheduler] Erreur IMAP:", err);
+        }
+      }
+    } catch (err) {
+      console.error("[scheduler] Erreur IMAP polling:", err);
+    }
+  });
+
+  console.log("[scheduler] Démarré — emails (1min) + relances (2h) + IMAP (5min)");
 }

@@ -16,6 +16,7 @@ const PUBLIC_PATHS = [
   "/api/auth/reset-password",
   "/api/track",
   "/api/webhooks",
+  "/api/cron",
   "/invite",
 ];
 

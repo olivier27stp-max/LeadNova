@@ -11,7 +11,6 @@ export async function GET(
   const { id: campaignId } = await params;
   const { searchParams } = new URL(req.url);
   const range = searchParams.get("range") || "all";
-  console.log(`[reports] campaignId=${campaignId}, workspaceId=${ctx.workspaceId}, range=${range}`);
 
   // Date filter
   let dateFrom: Date | undefined;
@@ -67,7 +66,6 @@ export async function GET(
     orderBy: { sentAt: "asc" },
   });
 
-  console.log(`[reports] contacts=${campaignContacts.length}, activities=${activities.length}, prospectIds=${prospectIds.length}`);
   if (activities.length === 0 && prospectIds.length === 0) {
     return NextResponse.json({
       kpis: { sent: 0, delivered: 0, opened: 0, replied: 0, bounced: 0, interested: 0, converted: 0, unsubscribed: 0 },

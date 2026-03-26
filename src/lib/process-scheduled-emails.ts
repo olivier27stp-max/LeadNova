@@ -298,7 +298,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       where: { campaignId: campaign.id },
       include: {
         prospect: {
-          select: { id: true, companyName: true, email: true, city: true },
+          select: { id: true, companyName: true, email: true, city: true, status: true },
         },
       },
     });
@@ -309,6 +309,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
     for (const cc of campaignContacts) {
       const prospect = cc.prospect;
       if (!prospect.email) continue;
+      if (prospect.status === "BOUNCED") continue;
 
       const { allowed } = await canSendEmail();
       if (!allowed) {

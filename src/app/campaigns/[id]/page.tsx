@@ -2076,7 +2076,7 @@ export default function CampaignDetailPage() {
                           {c.status === "SCHEDULED" && c.alreadyEmailed ? (
                             <Badge variant="danger">Double</Badge>
                           ) : (
-                            <Badge variant={c.status === "CONTACTED" || c.status === "REPLIED" || c.status === "QUALIFIED" ? "success" : c.status === "NOT_INTERESTED" ? "danger" : c.status === "SCHEDULED" ? "warning" : "default"}>
+                            <Badge variant={c.status === "REPLIED" ? "success" : c.status === "BOUNCED" || c.status === "NOT_INTERESTED" ? "danger" : c.status === "CONTACTED" || c.status === "QUALIFIED" ? "accent" : c.status === "SCHEDULED" ? "warning" : "default"}>
                               {t("prospectStatus", c.status as "NEW") || c.status}
                             </Badge>
                           )}
