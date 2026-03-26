@@ -398,7 +398,11 @@ export async function sendEmail(
   });
 
   const appUrl = process.env.APP_URL
+    || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined)
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
+  if (!appUrl) {
+    console.warn("[email-sender] APP_URL not set — tracking pixel and unsubscribe link will be missing");
+  }
   const trackingPixelUrl = appUrl
     ? `${appUrl}/api/track/open/${activity.id}`
     : undefined;
