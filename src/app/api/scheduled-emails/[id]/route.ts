@@ -2,51 +2,66 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 
-// Helper: check if a prospect has any other pending scheduled emails
-// (either directly via prospectId or indirectly via campaignId + CampaignContact)
-async function hasOtherPendingScheduledEmails(prospectId: string, excludeScheduledEmailId: string): Promise<boolean> {
-  // Check direct prospect-linked scheduled emails
-  const directPending = await prisma.scheduledEmail.count({
-    where: { prospectId, status: "PENDING", id: { not: excludeScheduledEmailId } },
-  });
-  if (directPending > 0) return true;
+// Bulk revert: for all given prospect IDs, revert SCHEDULED status in 3 queries total
+async function bulkRevertScheduledStatus(prospectIds: string[], excludeScheduledEmailId: string): Promise<void> {
+  if (prospectIds.length === 0) return;
 
-  // Check campaign-linked scheduled emails where this prospect is a contact
+  // 1. Find which prospects still have OTHER pending scheduled emails (keep them SCHEDULED)
+  //    Check both direct prospect-linked and campaign-linked scheduled emails
+  const otherPendingDirect = await prisma.scheduledEmail.findMany({
+    where: { prospectId: { in: prospectIds }, status: "PENDING", id: { not: excludeScheduledEmailId } },
+    select: { prospectId: true },
+  });
+
+  // Also check campaign-linked: find campaigns these prospects belong to
   const prospectCampaigns = await prisma.campaignContact.findMany({
-    where: { prospectId },
-    select: { campaignId: true },
+    where: { prospectId: { in: prospectIds } },
+    select: { prospectId: true, campaignId: true },
   });
-  if (prospectCampaigns.length > 0) {
-    const campaignIds = prospectCampaigns.map((cc) => cc.campaignId);
-    const campaignPending = await prisma.scheduledEmail.count({
-      where: {
-        campaignId: { in: campaignIds },
-        status: "PENDING",
-        id: { not: excludeScheduledEmailId },
-      },
+  const campaignIds = [...new Set(prospectCampaigns.map((cc) => cc.campaignId))];
+  const campaignPending = campaignIds.length > 0
+    ? await prisma.scheduledEmail.findMany({
+        where: { campaignId: { in: campaignIds }, status: "PENDING", id: { not: excludeScheduledEmailId } },
+        select: { campaignId: true },
+      })
+    : [];
+  const pendingCampaignIds = new Set(campaignPending.map((se) => se.campaignId));
+  const prospectIdsWithCampaignPending = new Set(
+    prospectCampaigns.filter((cc) => pendingCampaignIds.has(cc.campaignId)).map((cc) => cc.prospectId)
+  );
+
+  const keepScheduled = new Set([
+    ...otherPendingDirect.map((se) => se.prospectId).filter(Boolean),
+    ...prospectIdsWithCampaignPending,
+  ]);
+
+  const idsToRevert = prospectIds.filter((id) => !keepScheduled.has(id));
+  if (idsToRevert.length === 0) return;
+
+  // 2. Find which of these have email history (→ CONTACTED) vs none (→ ENRICHED)
+  const withEmails = await prisma.emailActivity.findMany({
+    where: { prospectId: { in: idsToRevert } },
+    distinct: ["prospectId"],
+    select: { prospectId: true },
+  });
+  const contactedIds = new Set(withEmails.map((e) => e.prospectId));
+
+  const toContacted = idsToRevert.filter((id) => contactedIds.has(id));
+  const toEnriched = idsToRevert.filter((id) => !contactedIds.has(id));
+
+  // 3. Bulk update in 2 queries
+  if (toContacted.length > 0) {
+    await prisma.prospect.updateMany({
+      where: { id: { in: toContacted }, status: "SCHEDULED" },
+      data: { status: "CONTACTED" },
     });
-    if (campaignPending > 0) return true;
   }
-
-  return false;
-}
-
-// Helper: revert a prospect's SCHEDULED status to the correct previous status
-async function revertScheduledStatus(prospectId: string, excludeScheduledEmailId: string): Promise<void> {
-  const hasPending = await hasOtherPendingScheduledEmails(prospectId, excludeScheduledEmailId);
-  if (hasPending) return; // Still has other pending sends, keep SCHEDULED
-
-  // Check if the prospect was already contacted (has EmailActivity records)
-  const emailCount = await prisma.emailActivity.count({
-    where: { prospectId },
-  });
-
-  const newStatus = emailCount > 0 ? "CONTACTED" : "ENRICHED";
-
-  await prisma.prospect.updateMany({
-    where: { id: prospectId, status: "SCHEDULED" },
-    data: { status: newStatus },
-  });
+  if (toEnriched.length > 0) {
+    await prisma.prospect.updateMany({
+      where: { id: { in: toEnriched }, status: "SCHEDULED" },
+      data: { status: "ENRICHED" },
+    });
+  }
 }
 
 // PATCH /api/scheduled-emails/[id] — reschedule or cancel
@@ -77,20 +92,20 @@ export async function PATCH(
     if (body.timezone) data.timezone = body.timezone;
     if (body.status === "CANCELLED") {
       data.status = "CANCELLED";
-      const prospectIdsToCheck: string[] = [];
-      if (existing.campaignId) {
-        const contacts = await prisma.campaignContact.findMany({
-          where: { campaignId: existing.campaignId },
-          select: { prospectId: true },
-        });
-        prospectIdsToCheck.push(...contacts.map((c) => c.prospectId));
-      } else if (existing.prospectId) {
-        prospectIdsToCheck.push(existing.prospectId);
+      let prospectIdsToCheck: string[] = existing.snapshotProspectIds || [];
+      if (prospectIdsToCheck.length === 0) {
+        if (existing.campaignId) {
+          const contacts = await prisma.campaignContact.findMany({
+            where: { campaignId: existing.campaignId },
+            select: { prospectId: true },
+          });
+          prospectIdsToCheck = contacts.map((c) => c.prospectId);
+        } else if (existing.prospectId) {
+          prospectIdsToCheck = [existing.prospectId];
+        }
       }
 
-      for (const pid of prospectIdsToCheck) {
-        await revertScheduledStatus(pid, id);
-      }
+      await bulkRevertScheduledStatus(prospectIdsToCheck, id);
     }
 
     const updated = await prisma.scheduledEmail.update({ where: { id }, data });
@@ -113,7 +128,7 @@ export async function DELETE(
     const existing = await prisma.scheduledEmail.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
     if (!existing) return NextResponse.json({ error: "Introuvable" }, { status: 404 });
 
-    // Revert prospect status from SCHEDULED to correct previous status
+    // Revert prospect status from SCHEDULED to correct previous status (bulk)
     // Use snapshot IDs when available, fall back to live campaign contacts
     let prospectIds: string[] = existing.snapshotProspectIds || [];
     if (prospectIds.length === 0) {
@@ -128,27 +143,21 @@ export async function DELETE(
       }
     }
 
-    for (const pid of prospectIds) {
-      await revertScheduledStatus(pid, id);
-    }
+    await bulkRevertScheduledStatus(prospectIds, id);
 
     // If linked to a campaign and caller wants to dismiss follow-ups too,
     // build dismiss keys BEFORE deleting (we need the record for context)
     if (existing.campaignId && dismissFollowUps) {
       try {
         const MAX_FOLLOWUPS = 10;
+        const dismissKeys: string[] = [];
 
-        // 1. Dismiss follow-ups derived from this scheduled email: fu_se_<seId>_N
+        // 1. Follow-ups derived from this scheduled email: fu_se_<seId>_N
         for (let i = 1; i <= MAX_FOLLOWUPS; i++) {
-          const eventKey = `fu_se_${id}_${i}`;
-          await prisma.dismissedFollowUp.upsert({
-            where: { workspaceId_eventKey: { workspaceId: ctx.workspaceId, eventKey } },
-            update: {},
-            create: { workspaceId: ctx.workspaceId, eventKey },
-          });
+          dismissKeys.push(`fu_se_${id}_${i}`);
         }
 
-        // 2. Dismiss follow-ups derived from campaign lastSentAt: fu_<campaignId>_<sendTs>_N
+        // 2. Follow-ups derived from campaign lastSentAt: fu_<campaignId>_<sendTs>_N
         const campaign = await prisma.campaign.findUnique({
           where: { id: existing.campaignId },
           select: { lastSentAt: true },
@@ -156,14 +165,18 @@ export async function DELETE(
         if (campaign?.lastSentAt) {
           const sendTs = campaign.lastSentAt.getTime();
           for (let i = 1; i <= MAX_FOLLOWUPS; i++) {
-            const eventKey = `fu_${existing.campaignId}_${sendTs}_${i}`;
-            await prisma.dismissedFollowUp.upsert({
-              where: { workspaceId_eventKey: { workspaceId: ctx.workspaceId, eventKey } },
-              update: {},
-              create: { workspaceId: ctx.workspaceId, eventKey },
-            });
+            dismissKeys.push(`fu_${existing.campaignId}_${sendTs}_${i}`);
           }
         }
+
+        // Bulk insert all dismiss keys (skip duplicates)
+        await prisma.dismissedFollowUp.createMany({
+          data: dismissKeys.map((eventKey) => ({
+            workspaceId: ctx.workspaceId,
+            eventKey,
+          })),
+          skipDuplicates: true,
+        });
       } catch {
         // table may not exist
       }
