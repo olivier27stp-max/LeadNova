@@ -178,10 +178,12 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
       // ── Pass 2: fetch bounce bodies to extract failing email ──
       for (const uid of bounceUids) {
         try {
-          const source = await client.fetchOne(String(uid), { source: true }, { uid: true });
-          if (!source?.source) continue;
+          const fetched = await client.fetchOne(String(uid), { source: true }, { uid: true });
+          if (!fetched) continue;
+          const rawSource = (fetched as unknown as { source?: Buffer }).source;
+          if (!rawSource) continue;
 
-          const body = source.source.toString().toLowerCase();
+          const body = rawSource.toString().toLowerCase();
           for (const [email] of emailToActivities) {
             if (body.includes(email)) {
               const activities = emailToActivities.get(email) || [];
