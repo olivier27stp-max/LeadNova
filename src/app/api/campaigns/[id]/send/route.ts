@@ -91,11 +91,23 @@ export async function POST(
   const withEmail = prospects.filter((p) => p.email);
   const skippedNoEmail = prospects.length - withEmail.length;
 
+  // Skip prospects already emailed in this campaign (prevents duplicate sends)
+  const alreadySentIds = new Set<string>();
+  for (const p of withEmail) {
+    const existing = await prisma.emailActivity.findFirst({
+      where: { prospectId: p.id, campaignId: id, isFollowUp: false },
+      select: { id: true },
+    });
+    if (existing) alreadySentIds.add(p.id);
+  }
+  const toSend = withEmail.filter((p) => !alreadySentIds.has(p.id));
+  const skippedAlreadySent = alreadySentIds.size;
+
   let sent = 0;
   let failed = 0;
   const errors: string[] = [];
 
-  for (const prospect of withEmail) {
+  for (const prospect of toSend) {
     const { allowed, reason } = await canSendEmail();
     if (!allowed) {
       errors.push(`Limite journalière atteinte: ${reason}`);
@@ -115,7 +127,7 @@ export async function POST(
     }
 
     // Small delay between sends (2-5 seconds)
-    if (withEmail.indexOf(prospect) < withEmail.length - 1) {
+    if (toSend.indexOf(prospect) < toSend.length - 1) {
       await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000));
     }
   }
@@ -152,7 +164,7 @@ export async function POST(
     relatedEntityId: id,
   });
 
-  return NextResponse.json({ sent, failed, skippedNoEmail, errors });
+  return NextResponse.json({ sent, failed, skippedNoEmail, skippedAlreadySent, errors });
   } catch (error) {
     return handleWorkspaceError(error);
   }
