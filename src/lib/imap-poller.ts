@@ -101,14 +101,22 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
     },
   });
 
-  // Build lookup map: prospect email → activities
+  // Build lookup maps: prospect email → activities, domain → activities
   const emailToActivities = new Map<string, typeof recentActivities>();
+  const domainToActivities = new Map<string, typeof recentActivities>();
   for (const a of recentActivities) {
     if (a.prospect.email) {
       const emailKey = a.prospect.email.toLowerCase();
       const existing = emailToActivities.get(emailKey) || [];
       existing.push(a);
       emailToActivities.set(emailKey, existing);
+
+      const domain = emailKey.split("@")[1];
+      if (domain && !domain.includes("gmail") && !domain.includes("hotmail") && !domain.includes("yahoo") && !domain.includes("outlook")) {
+        const domainExisting = domainToActivities.get(domain) || [];
+        domainExisting.push(a);
+        domainToActivities.set(domain, domainExisting);
+      }
     }
   }
 
@@ -156,17 +164,25 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
           continue;
         }
 
-        // Match reply by sender email (prospect we emailed)
-        const matchedByEmail = emailToActivities.get(fromAddr) || [];
+        // Match reply: 1) exact email, 2) same domain (company replied from different address)
+        let matched = emailToActivities.get(fromAddr) || [];
 
-        for (const activity of matchedByEmail) {
+        if (matched.length === 0) {
+          const senderDomain = fromAddr.split("@")[1];
+          if (senderDomain) {
+            matched = domainToActivities.get(senderDomain) || [];
+          }
+        }
+
+
+        for (const activity of matched) {
           if (!activity.replyReceived) {
             await prisma.emailActivity.update({
               where: { id: activity.id },
               data: { replyReceived: true },
             });
             await prisma.prospect.updateMany({
-              where: { id: activity.prospectId, status: { in: ["CONTACTED", "SCHEDULED"] } },
+              where: { id: activity.prospectId, status: { notIn: ["REPLIED", "QUALIFIED"] } },
               data: { status: "REPLIED" },
             });
             activity.replyReceived = true;
