@@ -322,7 +322,7 @@ export async function POST(
       const subject = interpolate(template.subject, prospect, companySettings);
       const emailBody = interpolate(template.body, prospect, companySettings);
 
-      const result = await sendEmail(prospect.id, subject, emailBody, id);
+      const result = await sendEmail(prospect.id, subject, emailBody, id, { followUpIndex: followUpIndex + 1 });
 
       if (result.success) {
         sent++;

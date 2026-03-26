@@ -345,7 +345,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       const template = followUpTemplates[followUpIndex];
       const subject = interpolate(template.subject, prospect, companySettings);
       const body = interpolate(template.body, prospect, companySettings);
-      const result = await sendEmail(prospect.id, subject, body, campaign.id);
+      const result = await sendEmail(prospect.id, subject, body, campaign.id, { followUpIndex: followUpIndex + 1 });
 
       if (result.success) {
         sent++;

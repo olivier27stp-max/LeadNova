@@ -6,6 +6,7 @@ import { prisma } from "./db";
 import { DAILY_EMAIL_LIMIT, EMAIL_DELAY_MIN_SECONDS, EMAIL_DELAY_MAX_SECONDS } from "./config";
 import { wrapInEmailTemplate, getTextFooter, getLogoAttachment, type CompanyInfo } from "./email-template";
 import { decrypt } from "./crypto";
+import { sendViaGmailApi } from "./gmail";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -21,9 +22,10 @@ interface SenderInfo {
   replyTo?: string;
   logoUrl?: string;
   logoEnabled: boolean;
-  provider: "resend" | "smtp";
+  provider: "resend" | "smtp" | "gmail_oauth";
   smtp: SmtpConfig;
   companyInfo: CompanyInfo;
+  workspaceId?: string | null;
 }
 
 // ─── Config builders ─────────────────────────────────────
@@ -94,8 +96,10 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
       smtp.secure = false;
     }
 
-    let provider: "resend" | "smtp";
-    if (rawProvider === "gmail" || rawProvider === "outlook") {
+    let provider: "resend" | "smtp" | "gmail_oauth";
+    if (rawProvider === "gmail_oauth") {
+      provider = "gmail_oauth";
+    } else if (rawProvider === "gmail" || rawProvider === "outlook") {
       provider = "smtp";
     } else if (emailSettings?.provider === "resend") {
       provider = "resend";
@@ -123,10 +127,10 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
       emailSignature: companySettings?.emailSignature || undefined,
     };
 
-    return { from, replyTo, logoUrl, logoEnabled, provider, smtp, companyInfo };
+    return { from, replyTo, logoUrl, logoEnabled, provider, smtp, companyInfo, workspaceId };
   } catch {
     const fallbackFrom = process.env.SMTP_FROM || process.env.SMTP_USER || "";
-    return { from: fallbackFrom, provider: fallbackProvider, smtp: fallbackSmtp, logoEnabled: true, companyInfo: {} };
+    return { from: fallbackFrom, provider: fallbackProvider, smtp: fallbackSmtp, logoEnabled: true, companyInfo: {}, workspaceId };
   }
 }
 
@@ -341,7 +345,8 @@ export async function sendEmail(
   prospectId: string,
   subject: string,
   body: string,
-  campaignId?: string
+  campaignId?: string,
+  options?: { followUpIndex?: number }
 ): Promise<{ success: boolean; error?: string }> {
   const prospect = await prisma.prospect.findUnique({
     where: { id: prospectId },
@@ -379,6 +384,7 @@ export async function sendEmail(
     if (campaignContact) resolvedCampaignId = campaignContact.campaignId;
   }
 
+  const fuIndex = options?.followUpIndex ?? 0;
   const activity = await prisma.emailActivity.create({
     data: {
       prospectId,
@@ -386,6 +392,8 @@ export async function sendEmail(
       emailSubject: subject,
       emailBody: body,
       sentAt: new Date(),
+      isFollowUp: fuIndex > 0,
+      followUpIndex: fuIndex,
     },
   });
 
@@ -402,7 +410,41 @@ export async function sendEmail(
   const text = body + getTextFooter(senderInfo.companyInfo, unsubscribeUrl);
 
   try {
-    if (senderInfo.provider === "resend") {
+    if (senderInfo.provider === "gmail_oauth" && senderInfo.workspaceId) {
+      // Gmail OAuth: build logo attachment for CID if enabled
+      let logoAttachment: { filename: string; content: Buffer; contentType: string; cid: string } | undefined;
+      if (senderInfo.logoEnabled && senderInfo.logoUrl) {
+        const logo = getLogoAttachment(senderInfo.logoUrl);
+        if (logo) {
+          logoAttachment = {
+            filename: (logo as { filename: string }).filename,
+            content: (logo as { content: Buffer }).content,
+            contentType: (logo as { contentType: string }).contentType,
+            cid: "company-logo",
+          };
+        }
+      }
+
+      const result = await sendViaGmailApi(
+        senderInfo.workspaceId,
+        prospect.email,
+        subject,
+        html,
+        text,
+        senderInfo.from,
+        senderInfo.replyTo,
+        unsubscribeUrl,
+        logoAttachment
+      );
+
+      // Store Gmail message ID for reply/bounce tracking
+      if (result.gmailMessageId) {
+        await prisma.emailActivity.update({
+          where: { id: activity.id },
+          data: { gmailMessageId: result.gmailMessageId },
+        });
+      }
+    } else if (senderInfo.provider === "resend") {
       await sendViaResend(prospect.email, subject, html, text, senderInfo, unsubscribeUrl);
     } else {
       await sendViaSmtp(prospect.email, subject, html, text, senderInfo, unsubscribeUrl);

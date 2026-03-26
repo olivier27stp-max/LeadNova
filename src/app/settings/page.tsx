@@ -86,6 +86,9 @@ interface Settings {
     smtpPort: string;
     smtpUser: string;
     smtpPass: string;
+    gmailConnectedEmail: string;
+    gmailConnectedAt: string;
+    gmailTokens: string;
   };
   prospects: {
     defaultContactType: string;
@@ -540,6 +543,25 @@ export default function SettingsPage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  // ─── Gmail OAuth callback handler ─────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gmailStatus = params.get("gmail");
+    if (gmailStatus === "connected") {
+      showToast(locale === "en" ? "Gmail connected successfully!" : "Gmail connecté avec succès !", "success");
+      setActiveSection("email");
+      // Clean URL
+      window.history.replaceState({}, "", "/settings");
+      // Reload settings to get the new Gmail state
+      fetch("/api/settings").then((r) => r.json()).then((d) => { if (!d.error) setSettings(d); });
+    } else if (gmailStatus === "error") {
+      showToast(locale === "en" ? "Gmail connection failed" : "Connexion Gmail échouée", "error");
+      setActiveSection("email");
+      window.history.replaceState({}, "", "/settings");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Load section-specific data ────────────────────
@@ -1209,6 +1231,8 @@ export default function SettingsPage() {
       case "email": {
         const emailProvider = settings.email.provider || "gmail";
         const isSmtpProvider = emailProvider === "gmail" || emailProvider === "outlook" || emailProvider === "smtp";
+        const isGmailOAuth = emailProvider === "gmail_oauth";
+        const gmailConnectedEmail = settings.email.gmailConnectedEmail || "";
 
         const providerConfigs: Record<string, { host: string; port: string; appPasswordUrl: string; label: string; instructions: string[] }> = {
           gmail: {
@@ -1309,9 +1333,10 @@ export default function SettingsPage() {
                   <p className="block text-sm font-medium text-foreground-secondary mb-2">
                     {locale === "en" ? "Email provider" : "Fournisseur email"}
                   </p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {[
-                      { id: "gmail", label: "Gmail" },
+                      { id: "gmail_oauth", label: locale === "en" ? "Gmail (OAuth)" : "Gmail (OAuth)" },
+                      { id: "gmail", label: locale === "en" ? "Gmail (SMTP)" : "Gmail (SMTP)" },
                       { id: "outlook", label: "Outlook" },
                       { id: "smtp", label: locale === "en" ? "Custom SMTP" : "SMTP personnalisé" },
                     ].map((p) => (
@@ -1341,7 +1366,7 @@ export default function SettingsPage() {
                             : "border-border bg-card hover:border-foreground-muted/30 text-foreground-secondary"
                         )}
                       >
-                        {p.id === "gmail" && (
+                        {(p.id === "gmail" || p.id === "gmail_oauth") && (
                           <svg className="size-6" viewBox="0 0 24 24">
                             <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 010 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z" fill="#EA4335"/>
                           </svg>
@@ -1391,6 +1416,93 @@ export default function SettingsPage() {
                         ? `Open ${currentConfig.label} App Passwords`
                         : `Ouvrir les mots de passe d'application ${currentConfig.label}`}
                     </a>
+                  </div>
+                )}
+
+                {/* Gmail OAuth connect/disconnect */}
+                {isGmailOAuth && (
+                  <div className="p-4 rounded-lg border border-accent/20 bg-accent-subtle space-y-3">
+                    {gmailConnectedEmail ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <div className="size-2 rounded-full bg-green-500" />
+                          <p className="text-sm font-medium text-foreground">
+                            {locale === "en" ? "Connected as" : "Connecté en tant que"}{" "}
+                            <span className="text-accent">{gmailConnectedEmail}</span>
+                          </p>
+                        </div>
+                        <p className="text-xs text-foreground-secondary">
+                          {locale === "en"
+                            ? "Emails are sent via Gmail API from your account. Bounces and replies are tracked automatically."
+                            : "Les emails sont envoyés via l'API Gmail depuis votre compte. Les bounces et réponses sont trackés automatiquement."}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch("/api/auth/gmail/disconnect", { method: "POST" });
+                              if (res.ok) {
+                                setSettings({
+                                  ...settings,
+                                  email: {
+                                    ...settings.email,
+                                    provider: "gmail",
+                                    gmailConnectedEmail: "",
+                                    gmailTokens: "",
+                                    gmailConnectedAt: "",
+                                  },
+                                });
+                                showToast(locale === "en" ? "Gmail disconnected" : "Gmail déconnecté", "success");
+                              }
+                            } catch {
+                              showToast(locale === "en" ? "Error disconnecting" : "Erreur de déconnexion", "error");
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-danger/10 text-danger text-xs font-medium hover:bg-danger/20 transition-colors"
+                        >
+                          {locale === "en" ? "Disconnect Gmail" : "Déconnecter Gmail"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <Info className="size-4 text-accent shrink-0" />
+                          <p className="text-sm font-medium text-foreground">
+                            {locale === "en"
+                              ? "Connect your Gmail account with one click"
+                              : "Connectez votre compte Gmail en un clic"}
+                          </p>
+                        </div>
+                        <ul className="text-xs text-foreground-secondary space-y-1 ml-1">
+                          <li>{locale === "en" ? "• Sends from your Gmail address" : "• Envoi depuis votre adresse Gmail"}</li>
+                          <li>{locale === "en" ? "• Automatic bounce detection" : "• Détection automatique des bounces"}</li>
+                          <li>{locale === "en" ? "• Automatic reply tracking" : "• Tracking automatique des réponses"}</li>
+                          <li>{locale === "en" ? "• No app password needed" : "• Aucun mot de passe d'application requis"}</li>
+                        </ul>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch("/api/auth/gmail");
+                              const data = await res.json();
+                              if (data.url) {
+                                window.location.href = data.url;
+                              } else {
+                                showToast(data.error || "Erreur OAuth", "error");
+                              }
+                            } catch {
+                              showToast(locale === "en" ? "Connection error" : "Erreur de connexion", "error");
+                            }
+                          }}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
+                        >
+                          <svg className="size-4" viewBox="0 0 24 24">
+                            <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 010 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z" fill="currentColor"/>
+                          </svg>
+                          {locale === "en" ? "Connect Gmail" : "Connecter Gmail"}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
 

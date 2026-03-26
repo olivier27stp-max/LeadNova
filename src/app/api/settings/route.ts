@@ -5,7 +5,7 @@ import { encrypt, decrypt, isEncrypted } from "@/lib/crypto";
 
 // Fields that must be encrypted in DB
 const SENSITIVE_FIELDS: Record<string, string[]> = {
-  email: ["smtpPass"],
+  email: ["smtpPass", "gmailTokens"],
   security: ["apiKey"],
 };
 
@@ -38,6 +38,8 @@ const DEFAULT_SETTINGS = {
     smtpPort: "587",
     smtpUser: "",
     smtpPass: "",
+    gmailConnectedEmail: "",
+    gmailConnectedAt: "",
   },
   prospects: {
     defaultContactType: "prospect",

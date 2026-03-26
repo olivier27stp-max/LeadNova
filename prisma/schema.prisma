@@ -169,6 +169,9 @@ model EmailActivity {
   replyReceived  Boolean   @default(false)
   bounce         Boolean   @default(false)
   unsubscribed   Boolean   @default(false)
+  isFollowUp     Boolean   @default(false)
+  followUpIndex  Int       @default(0)
+  gmailMessageId String?
 
   prospect       Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   campaign       Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -177,6 +180,8 @@ model EmailActivity {
   @@index([campaignId])
   @@index([sentAt])
   @@index([campaignId, sentAt])
+  @@index([gmailMessageId])
+  @@index([isFollowUp])
   @@map("email_activity")
 }
 

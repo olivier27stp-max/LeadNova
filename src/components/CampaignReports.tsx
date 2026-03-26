@@ -17,9 +17,20 @@ import {
   Users,
   CheckCircle2,
   UserMinus,
+  RefreshCw,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────
+
+interface FollowUpStats {
+  sent: number;
+  delivered: number;
+  opened: number;
+  replied: number;
+  bounced: number;
+  openRate: number;
+  replyRate: number;
+}
 
 interface ReportData {
   kpis: {
@@ -39,7 +50,9 @@ interface ReportData {
     bounceRate: number;
     unsubscribeRate: number;
   };
-  timeline: { date: string; sent: number; opened: number; replied: number; bounced: number }[];
+  initial?: FollowUpStats;
+  followUp?: FollowUpStats;
+  timeline: { date: string; sent: number; opened: number; replied: number; bounced: number; followUpSent?: number; followUpOpened?: number; followUpReplied?: number }[];
   contacts: {
     prospectId: string;
     companyName: string;
@@ -51,6 +64,10 @@ interface ReportData {
     replyReceived: boolean;
     bounce: boolean;
     unsubscribed: boolean;
+    isFollowUp?: boolean;
+    followUpIndex?: number;
+    totalEmails?: number;
+    totalFollowUps?: number;
   }[];
   totalContacts: number;
 }
@@ -278,7 +295,15 @@ function ContactTable({ contacts }: { contacts: ReportData["contacts"] }) {
             <tbody className="divide-y divide-border">
               {filtered.slice(0, 100).map((c) => (
                 <tr key={c.prospectId} className="hover:bg-background-subtle transition-colors">
-                  <td className="py-2 px-3 font-medium text-foreground truncate max-w-[180px]">{c.companyName}</td>
+                  <td className="py-2 px-3 font-medium text-foreground truncate max-w-[180px]">
+                    {c.companyName}
+                    {(c.totalFollowUps ?? 0) > 0 && (
+                      <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-medium text-warning bg-warning/10 px-1.5 py-0.5 rounded-full">
+                        <RefreshCw className="size-2.5" />
+                        {c.totalFollowUps}
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2 px-3 text-foreground-muted">{c.city || "—"}</td>
                   <td className="py-2 px-3">
                     <Badge variant={
@@ -339,8 +364,16 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
     setLoading(true);
     try {
       const res = await fetch(`/api/campaigns/${campaignId}/reports?range=${range}`);
-      if (res.ok) setData(await res.json());
-    } catch { /* ignore */ }
+      const json = await res.json();
+      if (res.ok) {
+        console.log("[reports] data received:", json.kpis, json.initial, json.followUp);
+        setData(json);
+      } else {
+        console.error("[reports] error:", res.status, json);
+      }
+    } catch (err) {
+      console.error("[reports] fetch error:", err);
+    }
     setLoading(false);
   }, [campaignId, range]);
 
@@ -395,6 +428,60 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
               delay={0.35}
             />
           </div>
+
+          {/* ── Initial vs Follow-up Breakdown ── */}
+          {data.followUp && data.followUp.sent > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <Send className="size-4 text-primary" />
+                    <CardTitle className="text-sm">Envoi initial</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div>
+                      <div className="text-xl font-bold text-foreground">{data.initial?.sent ?? 0}</div>
+                      <div className="text-xs text-foreground-muted">Envoyés</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-success">{data.initial?.openRate ?? 0}%</div>
+                      <div className="text-xs text-foreground-muted">Ouvertures</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-primary">{data.initial?.replyRate ?? 0}%</div>
+                      <div className="text-xs text-foreground-muted">Réponses</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="size-4 text-warning" />
+                    <CardTitle className="text-sm">Relances (follow-ups)</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div>
+                      <div className="text-xl font-bold text-foreground">{data.followUp.sent}</div>
+                      <div className="text-xs text-foreground-muted">Envoyées</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-success">{data.followUp.openRate}%</div>
+                      <div className="text-xs text-foreground-muted">Ouvertures</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-primary">{data.followUp.replyRate}%</div>
+                      <div className="text-xs text-foreground-muted">Réponses</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* ── Funnel ── */}
