@@ -66,6 +66,18 @@ interface Stage {
   prospects: FunnelProspectItem[];
 }
 
+// ─── Default stage slug → translation key ───────────────
+
+const STAGE_TRANSLATION_KEYS: Record<string, "newReplies" | "stageNotInterested" | "stageInterested" | "stageHotFollowUp1" | "stageHotFollowUp2" | "stageLost" | "stageClosed"> = {
+  "new-replies": "newReplies",
+  "not-interested": "stageNotInterested",
+  "interested": "stageInterested",
+  "hot-follow-up-1": "stageHotFollowUp1",
+  "hot-follow-up-2": "stageHotFollowUp2",
+  "lost": "stageLost",
+  "closed": "stageClosed",
+};
+
 // ─── Status badge variant mapping ───────────────────────
 
 const STATUS_VARIANT: Record<string, "default" | "primary" | "success" | "warning" | "danger" | "accent"> = {
@@ -262,7 +274,9 @@ function StageColumn({
           ) : (
             <>
               <h3 className="text-sm font-semibold text-foreground truncate">
-                {stage.isDefault ? t("funnel", "newReplies") : stage.name}
+                {STAGE_TRANSLATION_KEYS[stage.slug]
+                  ? t("funnel", STAGE_TRANSLATION_KEYS[stage.slug])
+                  : stage.name}
               </h3>
               <p className="text-xs text-foreground-muted">
                 {count} {count === 1 ? t("funnel", "prospect") : t("funnel", "prospects")}

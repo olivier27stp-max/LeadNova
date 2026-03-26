@@ -1023,6 +1023,13 @@ export const translations = {
     emptyStage: { fr: "Aucun prospect", en: "No prospects" },
     dragHint: { fr: "Glissez les prospects entre les étapes", en: "Drag prospects between stages" },
     score: { fr: "Score", en: "Score" },
+    // Default stage names
+    stageNotInterested: { fr: "Pas intéressé", en: "Not Interested" },
+    stageInterested: { fr: "Intéressé", en: "Interested" },
+    stageHotFollowUp1: { fr: "Suivi chaud #1", en: "Hot Follow-up #1" },
+    stageHotFollowUp2: { fr: "Suivi chaud #2", en: "Hot Follow-up #2" },
+    stageLost: { fr: "Perdu", en: "Lost" },
+    stageClosed: { fr: "Fermé", en: "Closed" },
   },
 } as const;
 

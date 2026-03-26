@@ -42,17 +42,22 @@ export async function GET() {
       },
     });
 
-    // Auto-create default stage if none exist
+    // Auto-create default stages if none exist
     if (stages.length === 0) {
-      await prisma.funnelStage.create({
-        data: {
-          workspaceId,
-          name: "New Replies",
-          slug: DEFAULT_STAGE_SLUG,
-          sortOrder: 0,
-          isDefault: true,
-        },
-      });
+      const defaultStages = [
+        { name: "New Replies", slug: "new-replies", sortOrder: 0, isDefault: true },
+        { name: "Not Interested", slug: "not-interested", sortOrder: 1, isDefault: false },
+        { name: "Interested", slug: "interested", sortOrder: 2, isDefault: false },
+        { name: "Hot Follow-up #1", slug: "hot-follow-up-1", sortOrder: 3, isDefault: false },
+        { name: "Hot Follow-up #2", slug: "hot-follow-up-2", sortOrder: 4, isDefault: false },
+        { name: "Lost", slug: "lost", sortOrder: 5, isDefault: false },
+        { name: "Closed", slug: "closed", sortOrder: 6, isDefault: false },
+      ];
+      for (const s of defaultStages) {
+        await prisma.funnelStage.create({
+          data: { workspaceId, ...s },
+        });
+      }
       stages = await prisma.funnelStage.findMany({
         where: { workspaceId },
         orderBy: { sortOrder: "asc" },
