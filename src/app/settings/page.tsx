@@ -4646,7 +4646,7 @@ export default function SettingsPage() {
               },
               {
                 labelKey: "groupCampaigns",
-                ids: ["campaigns", "automation"],
+                ids: ["email", "emailAccounts", "campaigns", "automation"],
               },
               {
                 labelKey: "groupPlatform",
