@@ -1,14 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getWorkspaceContext } from "@/lib/workspace";
+import { startOfDayInTz } from "@/lib/utils";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const ctx = await getWorkspaceContext();
     const workspaceId = ctx?.workspaceId ?? null;
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const tz = request.headers.get("x-timezone") || "America/Montreal";
+    const startOfDay = startOfDayInTz(tz);
 
     // Prospect filter by workspace
     const prospectWhere = {
@@ -36,13 +37,20 @@ export async function GET() {
       where: prospectWhere,
       _count: true,
     });
+    const statusMap = Object.fromEntries(
+      prospectsByStatus.map((s) => [s.status, s._count])
+    );
+
     const emailsSentToday = await prisma.emailActivity.count({
       where: { ...emailWhere, sentAt: { gte: startOfDay } },
     });
     const totalEmailsSent = await prisma.emailActivity.count({ where: emailWhere });
-    const totalReplies = await prisma.emailActivity.count({
+    const emailReplies = await prisma.emailActivity.count({
       where: { ...emailWhere, replyReceived: true },
     });
+    // Include prospects manually set to REPLIED (may not have EmailActivity)
+    const statusRepliedCount = statusMap["REPLIED"] || 0;
+    const totalReplies = Math.max(emailReplies, statusRepliedCount);
     const totalBounces = await prisma.emailActivity.count({
       where: { ...emailWhere, bounce: true },
     });
@@ -69,10 +77,6 @@ export async function GET() {
         },
       },
     });
-
-    const statusMap = Object.fromEntries(
-      prospectsByStatus.map((s) => [s.status, s._count])
-    );
 
     const replyRate =
       totalEmailsSent > 0

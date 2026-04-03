@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getWorkspaceContext } from "@/lib/workspace";
+import { startOfDayInTz } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,23 +9,16 @@ export async function GET(request: NextRequest) {
     const workspaceId = ctx?.workspaceId ?? null;
 
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "day"; // day | week | month
+    const period = searchParams.get("period") || "day";
+    const tz = request.headers.get("x-timezone") || "America/Montreal";
 
-    const now = new Date();
     let since: Date;
-
     if (period === "week") {
-      since = new Date(now);
-      since.setDate(since.getDate() - 7);
-      since.setHours(0, 0, 0, 0);
+      since = startOfDayInTz(tz, 7);
     } else if (period === "month") {
-      since = new Date(now);
-      since.setDate(since.getDate() - 30);
-      since.setHours(0, 0, 0, 0);
+      since = startOfDayInTz(tz, 30);
     } else {
-      // day
-      since = new Date(now);
-      since.setHours(0, 0, 0, 0);
+      since = startOfDayInTz(tz);
     }
 
     // Get campaigns belonging to this workspace

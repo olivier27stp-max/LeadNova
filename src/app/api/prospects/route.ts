@@ -432,10 +432,53 @@ export async function PATCH(request: NextRequest) {
       if (f in data) allowed[f] = data[f];
     }
 
+    // Fetch current prospect to detect status change
+    const current = await prisma.prospect.findUnique({
+      where: { id },
+      select: { status: true, workspaceId: true },
+    });
+
     const updated = await prisma.prospect.update({
       where: { id },
       data: allowed,
     });
+
+    // When status manually set to REPLIED:
+    // 1. Mark latest EmailActivity as replyReceived (so it shows in campaign reports)
+    // 2. Auto-add to funnel "New Replies" stage
+    if (
+      allowed.status === "REPLIED" &&
+      current?.status !== "REPLIED"
+    ) {
+      // Mark latest email activity as replied
+      const latestEmail = await prisma.emailActivity.findFirst({
+        where: { prospectId: id },
+        orderBy: { sentAt: "desc" },
+      });
+      if (latestEmail && !latestEmail.replyReceived) {
+        await prisma.emailActivity.update({
+          where: { id: latestEmail.id },
+          data: { replyReceived: true },
+        });
+      }
+
+      // Auto-add to funnel
+      if (current?.workspaceId) {
+        const existingFunnel = await prisma.funnelProspect.findUnique({
+          where: { prospectId: id },
+        });
+        if (!existingFunnel) {
+          const defaultStage = await prisma.funnelStage.findFirst({
+            where: { workspaceId: current.workspaceId, isDefault: true },
+          });
+          if (defaultStage) {
+            await prisma.funnelProspect.create({
+              data: { stageId: defaultStage.id, prospectId: id, sortOrder: 0 },
+            });
+          }
+        }
+      }
+    }
 
     // Handle campaign assignment
     if ("campaignId" in data) {

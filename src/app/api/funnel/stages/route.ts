@@ -23,6 +23,7 @@ export async function GET() {
       orderBy: { sortOrder: "asc" },
       include: {
         prospects: {
+          where: { prospect: { archivedAt: null } },
           include: {
             prospect: {
               select: {
@@ -63,6 +64,7 @@ export async function GET() {
         orderBy: { sortOrder: "asc" },
         include: {
           prospects: {
+            where: { prospect: { archivedAt: null } },
             include: {
               prospect: {
                 select: {
@@ -81,6 +83,70 @@ export async function GET() {
           },
         },
       });
+    }
+
+    // Cleanup: remove funnel entries for archived/deleted prospects
+    await prisma.funnelProspect.deleteMany({
+      where: {
+        stage: { workspaceId },
+        prospect: { archivedAt: { not: null } },
+      },
+    });
+
+    // Auto-sync: add REPLIED prospects not yet in the funnel to "new-replies"
+    const defaultStage = stages.find((s) => s.slug === DEFAULT_STAGE_SLUG);
+    if (defaultStage) {
+      const existingProspectIds = new Set(
+        stages.flatMap((s) => s.prospects.map((p) => p.prospectId))
+      );
+
+      const repliedNotInFunnel = await prisma.prospect.findMany({
+        where: {
+          workspaceId,
+          status: "REPLIED",
+          archivedAt: null,
+          id: { notIn: [...existingProspectIds] },
+        },
+        select: { id: true },
+      });
+
+      if (repliedNotInFunnel.length > 0) {
+        for (const p of repliedNotInFunnel) {
+          await prisma.funnelProspect.create({
+            data: {
+              stageId: defaultStage.id,
+              prospectId: p.id,
+              sortOrder: 0,
+            },
+          });
+        }
+
+        // Re-fetch with newly added prospects
+        stages = await prisma.funnelStage.findMany({
+          where: { workspaceId },
+          orderBy: { sortOrder: "asc" },
+          include: {
+            prospects: {
+              where: { prospect: { archivedAt: null } },
+              include: {
+                prospect: {
+                  select: {
+                    id: true,
+                    companyName: true,
+                    email: true,
+                    phone: true,
+                    status: true,
+                    leadScore: true,
+                    city: true,
+                    industry: true,
+                  },
+                },
+              },
+              orderBy: { sortOrder: "asc" },
+            },
+          },
+        });
+      }
     }
 
     return NextResponse.json(stages);

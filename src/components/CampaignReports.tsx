@@ -363,7 +363,7 @@ export default function CampaignReports({ campaignId }: { campaignId: string }) 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/campaigns/${campaignId}/reports?range=${range}`);
+      const res = await fetch(`/api/campaigns/${campaignId}/reports?range=${range}`, { headers: { "x-timezone": Intl.DateTimeFormat().resolvedOptions().timeZone } });
       if (res.ok) setData(await res.json());
     } catch { /* ignore */ }
     setLoading(false);

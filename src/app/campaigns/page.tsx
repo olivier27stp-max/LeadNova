@@ -95,7 +95,7 @@ export default function CampaignsPage() {
   }, []);
 
   function fetchStats(period: StatsPeriod) {
-    fetch(`/api/campaigns/stats?period=${period}`)
+    fetch(`/api/campaigns/stats?period=${period}`, { headers: { "x-timezone": Intl.DateTimeFormat().resolvedOptions().timeZone } })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => data && setStats(data))
       .catch(console.error);

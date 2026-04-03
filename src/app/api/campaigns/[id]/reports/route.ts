@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
+import { startOfDayInTz } from "@/lib/utils";
 
 export async function GET(
   req: NextRequest,
@@ -12,15 +13,15 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const range = searchParams.get("range") || "all";
 
-  // Date filter
+  // Date filter — use the user's browser timezone
+  const tz = req.headers.get("x-timezone") || "America/Montreal";
   let dateFrom: Date | undefined;
-  const now = new Date();
   if (range === "today") {
-    dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    dateFrom = startOfDayInTz(tz);
   } else if (range === "7d") {
-    dateFrom = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    dateFrom = startOfDayInTz(tz, 7);
   } else if (range === "30d") {
-    dateFrom = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    dateFrom = startOfDayInTz(tz, 30);
   }
 
   // Verify campaign belongs to workspace
