@@ -134,7 +134,7 @@ export async function GET(
       ? await prisma.emailActivity.findMany({
           where: { prospectId: { in: prospectIds }, campaignId: id, bounce: false },
           orderBy: { sentAt: "desc" },
-          select: { prospectId: true, sentAt: true, replyReceived: true },
+          select: { prospectId: true, sentAt: true, replyReceived: true, unsubscribed: true },
         })
       : [];
 
@@ -165,6 +165,7 @@ export async function GET(
       const followUpIndex = emails.length - 1;
       if (followUpIndex >= effectiveMaxFollowUps) continue;
       if (stopOnReply && emails.some((e) => e.replyReceived)) continue;
+      if (emails.some((e) => e.unsubscribed)) continue; // Respect unsubscribe
 
       // Check initial delay
       const firstEmail = emails[emails.length - 1]; // oldest
@@ -272,7 +273,7 @@ export async function POST(
       ? await prisma.emailActivity.findMany({
           where: { prospectId: { in: postProspectIds }, campaignId: id, bounce: false },
           orderBy: { sentAt: "desc" },
-          select: { prospectId: true, sentAt: true, replyReceived: true },
+          select: { prospectId: true, sentAt: true, replyReceived: true, unsubscribed: true },
         })
       : [];
 
@@ -307,6 +308,7 @@ export async function POST(
       const followUpIndex = emails.length - 1;
       if (followUpIndex >= effectiveMaxFollowUps) { skipped++; continue; }
       if (stopOnReply && emails.some((e) => e.replyReceived)) { skipped++; continue; }
+      if (emails.some((e) => e.unsubscribed)) { skipped++; continue; } // Respect unsubscribe
 
       // Check initial delay
       const firstEmail = emails[emails.length - 1]; // oldest

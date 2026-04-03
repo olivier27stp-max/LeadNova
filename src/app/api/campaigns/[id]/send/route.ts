@@ -102,16 +102,22 @@ export async function POST(
   const withEmail = prospects.filter((p) => p.email);
   const skippedNoEmail = prospects.length - withEmail.length;
 
-  // Skip prospects already emailed in this campaign (prevents duplicate sends)
+  // Skip prospects already emailed in this campaign or unsubscribed
   const alreadySentIds = new Set<string>();
+  const unsubscribedIds = new Set<string>();
   for (const p of withEmail) {
     const existing = await prisma.emailActivity.findFirst({
       where: { prospectId: p.id, campaignId: id, isFollowUp: false },
       select: { id: true },
     });
     if (existing) alreadySentIds.add(p.id);
+    const unsub = await prisma.emailActivity.findFirst({
+      where: { prospectId: p.id, unsubscribed: true },
+      select: { id: true },
+    });
+    if (unsub) unsubscribedIds.add(p.id);
   }
-  const toSend = withEmail.filter((p) => !alreadySentIds.has(p.id));
+  const toSend = withEmail.filter((p) => !alreadySentIds.has(p.id) && !unsubscribedIds.has(p.id));
   const skippedAlreadySent = alreadySentIds.size;
 
   let sent = 0;

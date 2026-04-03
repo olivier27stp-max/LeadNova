@@ -40,6 +40,8 @@ const DEFAULT_SETTINGS = {
     smtpPass: "",
     gmailConnectedEmail: "",
     gmailConnectedAt: "",
+    trackingDomain: "",
+    trackingDomainVerified: false,
   },
   prospects: {
     defaultContactType: "prospect",

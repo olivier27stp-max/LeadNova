@@ -320,11 +320,12 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       const emails = await prisma.emailActivity.findMany({
         where: { prospectId: prospect.id, bounce: false },
         orderBy: { sentAt: "desc" },
-        select: { sentAt: true, replyReceived: true },
+        select: { sentAt: true, replyReceived: true, unsubscribed: true },
       });
 
       if (emails.length === 0) continue; // No initial email sent yet
       if (stopOnReply && emails.some((e) => e.replyReceived)) continue;
+      if (emails.some((e) => e.unsubscribed)) continue; // Respect unsubscribe
 
       // Determine which follow-up number this would be
       // emails.length = 1 → need follow-up #1 (index 0), emails.length = 2 → follow-up #2 (index 1), etc.

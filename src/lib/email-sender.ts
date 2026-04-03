@@ -26,6 +26,7 @@ interface SenderInfo {
   smtp: SmtpConfig;
   companyInfo: CompanyInfo;
   workspaceId?: string | null;
+  trackingDomain?: string;
 }
 
 // ─── Config builders ─────────────────────────────────────
@@ -127,7 +128,10 @@ async function getSenderInfo(workspaceId?: string | null): Promise<SenderInfo> {
       emailSignature: companySettings?.emailSignature || undefined,
     };
 
-    return { from, replyTo, logoUrl, logoEnabled, provider, smtp, companyInfo, workspaceId };
+    // Custom tracking domain (e.g. track.clientdomain.com)
+    const trackingDomain = emailSettings?.trackingDomain || undefined;
+
+    return { from, replyTo, logoUrl, logoEnabled, provider, smtp, companyInfo, workspaceId, trackingDomain };
   } catch {
     const fallbackFrom = process.env.SMTP_FROM || process.env.SMTP_USER || "";
     return { from: fallbackFrom, provider: fallbackProvider, smtp: fallbackSmtp, logoEnabled: true, companyInfo: {}, workspaceId };
@@ -403,11 +407,16 @@ export async function sendEmail(
   if (!appUrl) {
     console.warn("[email-sender] APP_URL not set — tracking pixel and unsubscribe link will be missing");
   }
-  const trackingPixelUrl = appUrl
-    ? `${appUrl}/api/track/open/${activity.id}`
+  // Use custom tracking domain if configured (e.g. https://track.clientdomain.com)
+  // Falls back to appUrl for tracking URLs
+  const trackingBase = senderInfo.trackingDomain
+    ? (senderInfo.trackingDomain.startsWith("http") ? senderInfo.trackingDomain : `https://${senderInfo.trackingDomain}`)
+    : appUrl;
+  const trackingPixelUrl = trackingBase
+    ? `${trackingBase}/api/track/open/${activity.id}`
     : undefined;
-  const unsubscribeUrl = appUrl
-    ? `${appUrl}/api/track/unsubscribe/${activity.id}`
+  const unsubscribeUrl = trackingBase
+    ? `${trackingBase}/api/track/unsubscribe/${activity.id}`
     : undefined;
 
   const html = wrapInEmailTemplate(body, senderInfo.companyInfo, trackingPixelUrl, unsubscribeUrl, senderInfo.logoEnabled);
