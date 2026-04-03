@@ -364,12 +364,45 @@ export async function sendEmail(
     return { success: false, error: "Email is blacklisted" };
   }
 
-  const { allowed, reason } = await canSendEmail();
-  if (!allowed) {
-    return { success: false, error: reason };
+  // ── Multi-sender rotation ──
+  // If workspace has EmailAccounts, use rotation instead of single-sender
+  let multiSenderAccount: { id: string; email: string; displayName: string | null; smtpHost: string; smtpPort: number; smtpUser: string; smtpPass: string; trackingDomain?: string } | null = null;
+  if (prospect.workspaceId) {
+    const { getNextSendingAccount } = await import("@/lib/email-account-rotation");
+    const account = await getNextSendingAccount(prospect.workspaceId);
+    if (account) {
+      multiSenderAccount = account;
+    }
+  }
+
+  // If no multi-sender account, fall back to single-sender with global limit check
+  if (!multiSenderAccount) {
+    const { allowed, reason } = await canSendEmail();
+    if (!allowed) {
+      return { success: false, error: reason };
+    }
   }
 
   const senderInfo = await getSenderInfo(prospect.workspaceId);
+
+  // Override sender info with multi-sender account if available
+  if (multiSenderAccount) {
+    const { decrypt: dec } = await import("@/lib/crypto");
+    const fromName = multiSenderAccount.displayName || senderInfo.companyInfo.name || "";
+    const fromEmail = multiSenderAccount.email;
+    senderInfo.from = fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
+    senderInfo.replyTo = fromEmail;
+    senderInfo.provider = "smtp";
+    senderInfo.smtp = {
+      host: multiSenderAccount.smtpHost,
+      port: multiSenderAccount.smtpPort,
+      secure: multiSenderAccount.smtpPort === 465,
+      auth: {
+        user: multiSenderAccount.smtpUser,
+        pass: dec(multiSenderAccount.smtpPass) || multiSenderAccount.smtpPass,
+      },
+    };
+  }
 
   // Block if no sender email configured
   const senderEmail = senderInfo.replyTo || senderInfo.from.match(/<(.+)>/)?.[1] || senderInfo.from;
@@ -393,6 +426,7 @@ export async function sendEmail(
     data: {
       prospectId,
       campaignId: resolvedCampaignId,
+      emailAccountId: multiSenderAccount?.id || null,
       emailSubject: subject,
       emailBody: body,
       sentAt: new Date(),
@@ -467,6 +501,12 @@ export async function sendEmail(
       where: { id: prospectId },
       data: { status: "CONTACTED" },
     });
+
+    // Record multi-sender account usage
+    if (multiSenderAccount) {
+      const { recordAccountSend } = await import("@/lib/email-account-rotation");
+      await recordAccountSend(multiSenderAccount.id, activity.id);
+    }
 
     // Update campaign lastSentAt so follow-ups appear in calendar (section 2a)
     if (resolvedCampaignId) {

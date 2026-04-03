@@ -515,6 +515,7 @@ export const translations = {
     title: { fr: "Paramètres", en: "Settings" },
     company: { fr: "Entreprise", en: "Company" },
     emailSection: { fr: "Email", en: "Email" },
+    emailAccounts: { fr: "Comptes email", en: "Email Accounts" },
     team: { fr: "Équipe", en: "Team" },
     campaigns: { fr: "Campagnes", en: "Campaigns" },
     automation: { fr: "Automatisation", en: "Automation" },

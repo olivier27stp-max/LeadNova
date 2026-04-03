@@ -57,6 +57,11 @@ import {
   Sparkles,
   ArrowRight,
   StickyNote,
+  SendHorizonal,
+  Play,
+  Pause,
+  Flame,
+  Upload,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────
@@ -90,6 +95,7 @@ interface Settings {
     gmailConnectedEmail: string;
     gmailConnectedAt: string;
     gmailTokens: string;
+    trackingDomain: string;
   };
   prospects: {
     defaultContactType: string;
@@ -207,13 +213,14 @@ interface ActivityLogEntry {
 
 // ─── Sections config ─────────────────────────────────────
 
-const SECTION_IDS = ["company", "email", "team", "prospects", "campaigns", "automation", "targeting", "archive", "appearance", "language", "security", "subscription", "activity"] as const;
+const SECTION_IDS = ["company", "email", "emailAccounts", "team", "prospects", "campaigns", "automation", "targeting", "archive", "appearance", "language", "security", "subscription", "activity"] as const;
 
 type SectionId = (typeof SECTION_IDS)[number];
 
 const SECTION_ICONS: Record<SectionId, typeof Building2> = {
   company: Building2,
   email: Mail,
+  emailAccounts: SendHorizonal,
   team: Users,
   prospects: UserSearch,
   campaigns: Megaphone,
@@ -231,6 +238,7 @@ const SECTION_ICONS: Record<SectionId, typeof Building2> = {
 const SECTION_LABEL_KEYS: Record<SectionId, string> = {
   company: "company",
   email: "emailSection",
+  emailAccounts: "emailAccounts",
   team: "team",
   prospects: "prospects",
   campaigns: "campaigns",
@@ -414,6 +422,42 @@ export default function SettingsPage() {
     message: string;
     type: "success" | "error";
   } | null>(null);
+
+  // Email accounts (multi-sender)
+  interface EmailAccountRow {
+    id: string; email: string; displayName: string | null; domain: string;
+    smtpHost: string; smtpPort: number; smtpUser: string;
+    imapHost: string | null; imapPort: number | null; imapUser: string | null;
+    dailyLimit: number; sentToday: number; sentTodayDate: string | null;
+    totalSent: number; status: string; warmupStartedAt: string | null;
+    warmupDayNumber: number; bounceCount: number; lastError: string | null;
+    lastUsedAt: string | null; sortOrder: number; createdAt: string;
+  }
+  const [emailAccounts, setEmailAccounts] = useState<EmailAccountRow[]>([]);
+  const [emailAccountsLoading, setEmailAccountsLoading] = useState(false);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [newAccount, setNewAccount] = useState({ email: "", smtpHost: "", smtpPort: "587", smtpUser: "", smtpPass: "", imapHost: "", imapPort: "993", imapUser: "", imapPass: "", dailyLimit: "100", displayName: "" });
+  const [bulkText, setBulkText] = useState("");
+  const [bulkHost, setBulkHost] = useState("");
+  const [bulkPort, setBulkPort] = useState("587");
+  const [testingAccountId, setTestingAccountId] = useState<string | null>(null);
+
+  const fetchEmailAccounts = useCallback(async () => {
+    setEmailAccountsLoading(true);
+    try {
+      const res = await fetch("/api/email-accounts");
+      if (res.ok) {
+        const data = await res.json();
+        setEmailAccounts(data.accounts || []);
+      }
+    } catch { /* ignore */ }
+    setEmailAccountsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === "emailAccounts") fetchEmailAccounts();
+  }, [activeSection, fetchEmailAccounts]);
 
   // Theme
   const { theme, setTheme } = useTheme();
@@ -1593,8 +1637,472 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                 )}
+
+                {/* Custom Tracking Domain */}
+                <div className="border-t border-border pt-5 mt-5">
+                  <p className="text-sm font-semibold text-foreground mb-1">
+                    {locale === "en" ? "Custom Tracking Domain" : "Domaine de tracking personnalisé"}
+                  </p>
+                  <p className="text-xs text-muted mb-3">
+                    {locale === "en"
+                      ? "Use your own domain for open tracking pixels and unsubscribe links instead of the default app domain. This improves deliverability."
+                      : "Utilisez votre propre domaine pour les pixels de tracking et les liens de désinscription au lieu du domaine par défaut. Ça améliore la délivrabilité."}
+                  </p>
+                  <FieldGroup
+                    label={locale === "en" ? "Tracking domain" : "Domaine de tracking"}
+                    description={locale === "en"
+                      ? "e.g. track.yourdomain.com — Add a CNAME record pointing to your app domain."
+                      : "ex : track.votredomaine.com — Ajoutez un enregistrement CNAME pointant vers votre domaine app."}
+                  >
+                    <div className="flex gap-2">
+                      <Input
+                        value={settings.email.trackingDomain || ""}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          setSettings({
+                            ...settings,
+                            email: { ...settings.email, trackingDomain: e.target.value.trim().replace(/^https?:\/\//, "").replace(/\/$/, "") },
+                          });
+                          setHasUnsaved(true);
+                        }}
+                        placeholder="track.yourdomain.com"
+                      />
+                      {settings.email.trackingDomain && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(`/api/settings/verify-tracking-domain?domain=${encodeURIComponent(settings.email.trackingDomain)}`);
+                              const data = await res.json();
+                              if (data.valid) {
+                                showToast(locale === "en" ? "CNAME verified! Tracking domain is active." : "CNAME vérifié ! Le domaine de tracking est actif.", "success");
+                              } else {
+                                showToast(data.error || (locale === "en" ? "CNAME not found. Make sure your DNS is configured." : "CNAME introuvable. Vérifiez votre configuration DNS."), "error");
+                              }
+                            } catch {
+                              showToast(locale === "en" ? "Verification error" : "Erreur de vérification", "error");
+                            }
+                          }}
+                        >
+                          {locale === "en" ? "Verify" : "Vérifier"}
+                        </Button>
+                      )}
+                    </div>
+                  </FieldGroup>
+                  {settings.email.trackingDomain && (
+                    <div className="mt-3 p-3 rounded-md bg-background-subtle border border-border">
+                      <p className="text-xs font-medium text-foreground-secondary mb-1.5">
+                        {locale === "en" ? "DNS Configuration" : "Configuration DNS"}
+                      </p>
+                      <div className="font-mono text-xs bg-background rounded border border-border p-2 select-all">
+                        <span className="text-foreground-muted">CNAME</span>{" "}
+                        <span className="text-foreground">{settings.email.trackingDomain}</span>{" "}
+                        <span className="text-foreground-muted">→</span>{" "}
+                        <span className="text-primary">{typeof window !== "undefined" ? window.location.hostname : "leadnova.one"}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </SectionCard>
+          </motion.div>
+        );
+      }
+
+      // === COMPTES EMAIL (MULTI-SENDER) ===
+      case "emailAccounts": {
+        const STATUS_BADGE: Record<string, { label: string; class: string }> = {
+          ACTIVE: { label: locale === "en" ? "Active" : "Actif", class: "bg-success-subtle text-success border-success/20" },
+          WARMING: { label: locale === "en" ? "Warming up" : "Préchauffage", class: "bg-warning-subtle text-warning border-warning/20" },
+          PAUSED: { label: locale === "en" ? "Paused" : "En pause", class: "bg-background-muted text-foreground-muted border-border" },
+          ERROR: { label: locale === "en" ? "Error" : "Erreur", class: "bg-danger-subtle text-danger border-danger/20" },
+        };
+
+        async function handleAddAccount() {
+          const res = await fetch("/api/email-accounts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newAccount),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            showToast(locale === "en" ? "Account added" : "Compte ajouté", "success");
+            setShowAddAccount(false);
+            setNewAccount({ email: "", smtpHost: "", smtpPort: "587", smtpUser: "", smtpPass: "", imapHost: "", imapPort: "993", imapUser: "", imapPass: "", dailyLimit: "100", displayName: "" });
+            fetchEmailAccounts();
+          } else {
+            showToast(data.error || "Erreur", "error");
+          }
+        }
+
+        async function handleBulkImport() {
+          const res = await fetch("/api/email-accounts/bulk-import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lines: bulkText, smtpHost: bulkHost, smtpPort: bulkPort }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            showToast(`${data.created} ${locale === "en" ? "accounts imported" : "comptes importés"}, ${data.skipped} ${locale === "en" ? "skipped" : "ignorés"}`, "success");
+            setShowBulkImport(false);
+            setBulkText("");
+            fetchEmailAccounts();
+          } else {
+            showToast(data.error || "Erreur", "error");
+          }
+        }
+
+        async function handleDeleteAccount(id: string) {
+          if (!confirm(locale === "en" ? "Delete this account?" : "Supprimer ce compte ?")) return;
+          await fetch(`/api/email-accounts/${id}`, { method: "DELETE" });
+          fetchEmailAccounts();
+        }
+
+        async function handleTestAccount(id: string) {
+          setTestingAccountId(id);
+          try {
+            const res = await fetch(`/api/email-accounts/${id}/test`, { method: "POST" });
+            const data = await res.json();
+            showToast(data.success ? (locale === "en" ? "Connection OK!" : "Connexion réussie !") : (data.error || "Erreur"), data.success ? "success" : "error");
+          } catch {
+            showToast("Erreur de connexion", "error");
+          }
+          setTestingAccountId(null);
+          fetchEmailAccounts();
+        }
+
+        async function handleToggleStatus(id: string, current: string) {
+          const newStatus = current === "ACTIVE" ? "PAUSED" : current === "PAUSED" ? "ACTIVE" : current === "WARMING" ? "PAUSED" : "ACTIVE";
+          await fetch(`/api/email-accounts/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus }),
+          });
+          fetchEmailAccounts();
+        }
+
+        async function handleUpdateLimit(id: string, limit: number) {
+          await fetch(`/api/email-accounts/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dailyLimit: limit }),
+          });
+        }
+
+        // Group by domain
+        const domainGroups = new Map<string, EmailAccountRow[]>();
+        for (const a of emailAccounts) {
+          const list = domainGroups.get(a.domain) || [];
+          list.push(a);
+          domainGroups.set(a.domain, list);
+        }
+
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-6"
+          >
+            {/* Header */}
+            <SectionCard
+              title={locale === "en" ? "Email Accounts" : "Comptes email"}
+              description={locale === "en"
+                ? "Connect multiple SMTP accounts for rotation. Emails are distributed automatically across active accounts."
+                : "Connectez plusieurs comptes SMTP pour la rotation. Les emails sont distribués automatiquement entre les comptes actifs."}
+            >
+              <div className="space-y-4">
+                {/* Actions */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button size="sm" onClick={() => setShowAddAccount(true)}>
+                    <Plus className="size-4 mr-1" />
+                    {locale === "en" ? "Add account" : "Ajouter un compte"}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setShowBulkImport(true)}>
+                    <Upload className="size-4 mr-1" />
+                    {locale === "en" ? "Bulk import" : "Import en masse"}
+                  </Button>
+                  <span className="text-xs text-foreground-muted ml-auto">
+                    {emailAccounts.length}/100 {locale === "en" ? "accounts" : "comptes"}
+                  </span>
+                </div>
+
+                {/* Stats bar */}
+                {emailAccounts.length > 0 && (
+                  <div className="flex gap-4 p-3 rounded-lg bg-background-subtle border border-border text-xs">
+                    <div>
+                      <span className="text-foreground-muted">{locale === "en" ? "Active" : "Actifs"}: </span>
+                      <span className="font-semibold text-success">{emailAccounts.filter(a => a.status === "ACTIVE").length}</span>
+                    </div>
+                    <div>
+                      <span className="text-foreground-muted">{locale === "en" ? "Warming" : "Préchauffage"}: </span>
+                      <span className="font-semibold text-warning">{emailAccounts.filter(a => a.status === "WARMING").length}</span>
+                    </div>
+                    <div>
+                      <span className="text-foreground-muted">{locale === "en" ? "Capacity/day" : "Capacité/jour"}: </span>
+                      <span className="font-semibold text-foreground">{emailAccounts.filter(a => a.status === "ACTIVE").reduce((sum, a) => sum + a.dailyLimit, 0)}</span>
+                    </div>
+                    <div>
+                      <span className="text-foreground-muted">{locale === "en" ? "Sent today" : "Envoyés aujourd'hui"}: </span>
+                      <span className="font-semibold text-foreground">{emailAccounts.reduce((sum, a) => sum + (a.sentTodayDate === new Date().toISOString().split("T")[0] ? a.sentToday : 0), 0)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading */}
+                {emailAccountsLoading && emailAccounts.length === 0 && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-16 w-full rounded-md" />
+                    <Skeleton className="h-16 w-full rounded-md" />
+                  </div>
+                )}
+
+                {/* Empty state */}
+                {!emailAccountsLoading && emailAccounts.length === 0 && (
+                  <div className="text-center py-8">
+                    <SendHorizonal className="size-8 text-foreground-muted/30 mx-auto mb-2" />
+                    <p className="text-sm text-foreground-muted">
+                      {locale === "en" ? "No email accounts configured yet." : "Aucun compte email configuré."}
+                    </p>
+                    <p className="text-xs text-foreground-muted/60 mt-1">
+                      {locale === "en" ? "Add accounts to enable multi-sender rotation." : "Ajoutez des comptes pour activer la rotation multi-expéditeur."}
+                    </p>
+                  </div>
+                )}
+
+                {/* Account list grouped by domain */}
+                {Array.from(domainGroups.entries()).map(([domain, accounts]) => (
+                  <div key={domain} className="border border-border rounded-lg overflow-hidden">
+                    {/* Domain header */}
+                    <div className="px-4 py-2 bg-background-subtle border-b border-border flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Globe className="size-3.5 text-foreground-muted" />
+                        <span className="text-sm font-semibold text-foreground">{domain}</span>
+                        <span className="text-xs text-foreground-muted">({accounts.length})</span>
+                      </div>
+                      {accounts.some(a => a.imapHost) ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-success-subtle text-success border border-success/20">IMAP</span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-background-muted text-foreground-muted border border-border">
+                          {locale === "en" ? "No IMAP" : "Pas d'IMAP"}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Accounts */}
+                    {accounts.map((account) => {
+                      const badge = STATUS_BADGE[account.status] || STATUS_BADGE.ERROR;
+                      const today = new Date().toISOString().split("T")[0];
+                      const sentToday = account.sentTodayDate === today ? account.sentToday : 0;
+
+                      return (
+                        <div key={account.id} className="px-4 py-3 border-b border-border last:border-b-0 hover:bg-background-subtle/50 transition-colors">
+                          <div className="flex items-center gap-3">
+                            {/* Email + status */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-foreground truncate">{account.email}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.class}`}>{badge.label}</span>
+                              </div>
+                              {account.lastError && (
+                                <p className="text-[10px] text-danger mt-0.5 truncate">{account.lastError}</p>
+                              )}
+                            </div>
+
+                            {/* Daily progress */}
+                            <div className="text-right shrink-0 w-20">
+                              <div className="text-xs font-mono tabular-nums text-foreground">
+                                {sentToday}/{account.dailyLimit}
+                              </div>
+                              <div className="w-full h-1 bg-background-muted rounded-full mt-1">
+                                <div
+                                  className="h-1 bg-primary rounded-full transition-all"
+                                  style={{ width: `${Math.min(100, (sentToday / account.dailyLimit) * 100)}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Warm-up indicator */}
+                            {account.status === "WARMING" && (
+                              <div className="text-center shrink-0 w-14">
+                                <Flame className="size-3.5 text-warning mx-auto" />
+                                <p className="text-[10px] text-foreground-muted">J{account.warmupDayNumber}</p>
+                              </div>
+                            )}
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => handleToggleStatus(account.id, account.status)}
+                                className="p-1.5 rounded-md text-foreground-muted hover:text-foreground hover:bg-background-muted transition-colors"
+                                title={account.status === "ACTIVE" || account.status === "WARMING" ? "Pause" : "Activer"}
+                              >
+                                {account.status === "ACTIVE" || account.status === "WARMING" ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleTestAccount(account.id)}
+                                className="p-1.5 rounded-md text-foreground-muted hover:text-primary hover:bg-primary-subtle transition-colors"
+                                title={locale === "en" ? "Test connection" : "Tester"}
+                              >
+                                {testingAccountId === account.id ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAccount(account.id)}
+                                className="p-1.5 rounded-md text-foreground-muted hover:text-danger hover:bg-danger-subtle transition-colors"
+                                title={locale === "en" ? "Delete" : "Supprimer"}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Limit slider */}
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-[10px] text-foreground-muted w-24 shrink-0">
+                              {locale === "en" ? "Daily limit" : "Limite/jour"}
+                            </span>
+                            <input
+                              type="range"
+                              min="5"
+                              max="500"
+                              step="5"
+                              value={account.dailyLimit}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setEmailAccounts(prev => prev.map(a => a.id === account.id ? { ...a, dailyLimit: val } : a));
+                              }}
+                              onMouseUp={(e) => handleUpdateLimit(account.id, parseInt((e.target as HTMLInputElement).value))}
+                              onTouchEnd={(e) => handleUpdateLimit(account.id, parseInt((e.target as HTMLInputElement).value))}
+                              className="flex-1 h-1 accent-primary cursor-pointer"
+                            />
+                            <span className="text-[10px] font-mono text-foreground w-8 text-right">{account.dailyLimit}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+
+            {/* Add Account Modal */}
+            {showAddAccount && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAddAccount(false)}>
+                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-foreground">
+                      {locale === "en" ? "Add Email Account" : "Ajouter un compte email"}
+                    </h3>
+                    <button onClick={() => setShowAddAccount(false)} className="p-1 text-foreground-muted hover:text-foreground"><X className="size-4" /></button>
+                  </div>
+                  <div className="space-y-3">
+                    <FieldGroup label="Email">
+                      <Input value={newAccount.email} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, email: e.target.value })} placeholder="contact@domain.com" />
+                    </FieldGroup>
+                    <FieldGroup label={locale === "en" ? "Display name" : "Nom d'affichage"}>
+                      <Input value={newAccount.displayName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, displayName: e.target.value })} placeholder="John Doe" />
+                    </FieldGroup>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FieldGroup label={locale === "en" ? "SMTP Host" : "Hôte SMTP"}>
+                        <Input value={newAccount.smtpHost} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, smtpHost: e.target.value })} placeholder="smtp.zoho.com" />
+                      </FieldGroup>
+                      <FieldGroup label="Port">
+                        <Input value={newAccount.smtpPort} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, smtpPort: e.target.value })} placeholder="587" />
+                      </FieldGroup>
+                    </div>
+                    <FieldGroup label={locale === "en" ? "SMTP User" : "Utilisateur SMTP"}>
+                      <Input value={newAccount.smtpUser} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, smtpUser: e.target.value })} placeholder={newAccount.email || "email@domain.com"} />
+                    </FieldGroup>
+                    <FieldGroup label={locale === "en" ? "Password" : "Mot de passe"}>
+                      <Input type="password" value={newAccount.smtpPass} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, smtpPass: e.target.value })} placeholder="••••••••" />
+                    </FieldGroup>
+                    <FieldGroup label={locale === "en" ? "Daily limit" : "Limite journalière"}>
+                      <Input type="number" value={newAccount.dailyLimit} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, dailyLimit: e.target.value })} min="5" max="500" />
+                    </FieldGroup>
+
+                    {/* Optional IMAP */}
+                    <details className="group">
+                      <summary className="text-xs text-foreground-muted cursor-pointer hover:text-foreground">
+                        IMAP ({locale === "en" ? "optional, for reply detection" : "optionnel, pour détecter les réponses"})
+                      </summary>
+                      <div className="mt-2 space-y-3 pl-2 border-l-2 border-border">
+                        <div className="grid grid-cols-2 gap-3">
+                          <FieldGroup label={locale === "en" ? "IMAP Host" : "Hôte IMAP"}>
+                            <Input value={newAccount.imapHost} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, imapHost: e.target.value })} placeholder="imap.zoho.com" />
+                          </FieldGroup>
+                          <FieldGroup label="Port">
+                            <Input value={newAccount.imapPort} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, imapPort: e.target.value })} placeholder="993" />
+                          </FieldGroup>
+                        </div>
+                        <FieldGroup label={locale === "en" ? "IMAP User" : "Utilisateur IMAP"}>
+                          <Input value={newAccount.imapUser} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, imapUser: e.target.value })} placeholder={newAccount.email || "email@domain.com"} />
+                        </FieldGroup>
+                        <FieldGroup label={locale === "en" ? "IMAP Password" : "Mot de passe IMAP"}>
+                          <Input type="password" value={newAccount.imapPass} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewAccount({ ...newAccount, imapPass: e.target.value })} placeholder="••••••••" />
+                        </FieldGroup>
+                      </div>
+                    </details>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-5">
+                    <Button variant="secondary" size="sm" onClick={() => setShowAddAccount(false)}>
+                      {locale === "en" ? "Cancel" : "Annuler"}
+                    </Button>
+                    <Button size="sm" onClick={handleAddAccount}>
+                      <Plus className="size-4 mr-1" />
+                      {locale === "en" ? "Add" : "Ajouter"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Bulk Import Modal */}
+            {showBulkImport && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowBulkImport(false)}>
+                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-foreground">
+                      {locale === "en" ? "Bulk Import" : "Import en masse"}
+                    </h3>
+                    <button onClick={() => setShowBulkImport(false)} className="p-1 text-foreground-muted hover:text-foreground"><X className="size-4" /></button>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-xs text-foreground-muted">
+                      {locale === "en"
+                        ? "One account per line: email:password or email:password:host:port"
+                        : "Un compte par ligne : email:motdepasse ou email:motdepasse:host:port"}
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FieldGroup label={locale === "en" ? "Default SMTP host" : "Hôte SMTP par défaut"}>
+                        <Input value={bulkHost} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBulkHost(e.target.value)} placeholder="smtp.zoho.com" />
+                      </FieldGroup>
+                      <FieldGroup label={locale === "en" ? "Default port" : "Port par défaut"}>
+                        <Input value={bulkPort} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBulkPort(e.target.value)} placeholder="587" />
+                      </FieldGroup>
+                    </div>
+                    <textarea
+                      value={bulkText}
+                      onChange={(e) => setBulkText(e.target.value)}
+                      rows={8}
+                      className="w-full rounded-md border border-border bg-background p-3 text-xs font-mono text-foreground placeholder:text-foreground-muted/50 outline-none focus:ring-2 focus:ring-primary/30"
+                      placeholder={`contact1@domain1.com:password123\ninfo@domain2.com:password456\nhello@domain3.com:pass789:smtp.custom.com:587`}
+                    />
+                    <p className="text-xs text-foreground-muted">
+                      {bulkText.split("\n").filter(l => l.trim() && l.includes(":")).length} {locale === "en" ? "accounts detected" : "comptes détectés"}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-5">
+                    <Button variant="secondary" size="sm" onClick={() => setShowBulkImport(false)}>
+                      {locale === "en" ? "Cancel" : "Annuler"}
+                    </Button>
+                    <Button size="sm" onClick={handleBulkImport}>
+                      <Upload className="size-4 mr-1" />
+                      {locale === "en" ? "Import" : "Importer"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </motion.div>
         );
       }

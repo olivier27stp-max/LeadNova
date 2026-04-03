@@ -65,6 +65,7 @@ model Workspace {
   calendarTasks   CalendarTask[]
   dismissedFollowUps DismissedFollowUp[]
   funnelStages       FunnelStage[]
+  emailAccounts      EmailAccount[]
 
   @@map("workspaces")
 }
@@ -162,25 +163,27 @@ model Prospect {
 }
 
 model EmailActivity {
-  id             String    @id @default(cuid())
-  prospectId     String
-  campaignId     String?
-  emailSubject   String
-  emailBody      String
-  sentAt         DateTime  @default(now())
-  openedAt       DateTime?
-  replyReceived  Boolean   @default(false)
-  bounce         Boolean   @default(false)
-  unsubscribed   Boolean   @default(false)
-  isFollowUp     Boolean   @default(false)
-  followUpIndex  Int       @default(0)
-  gmailMessageId String?
+  id              String    @id @default(cuid())
+  prospectId      String
+  campaignId      String?
+  emailAccountId  String?
+  emailSubject    String
+  emailBody       String
+  sentAt          DateTime  @default(now())
+  openedAt        DateTime?
+  replyReceived   Boolean   @default(false)
+  bounce          Boolean   @default(false)
+  unsubscribed    Boolean   @default(false)
+  isFollowUp      Boolean   @default(false)
+  followUpIndex   Int       @default(0)
+  gmailMessageId  String?
 
-  prospect       Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  campaign       Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  prospect        Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([prospectId])
   @@index([campaignId])
+  @@index([emailAccountId])
   @@index([sentAt])
   @@index([campaignId, sentAt])
   @@index([gmailMessageId])
@@ -567,4 +570,79 @@ model FunnelProspect {
   @@index([prospectId])
   @@index([sortOrder])
   @@map("funnel_prospects")
+}
+
+// ─── Multi-Sender Email Accounts ─────────────────────────
+
+enum EmailAccountStatus {
+  WARMING
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+model EmailAccount {
+  id              String             @id @default(cuid())
+  workspaceId     String
+
+  // Identity
+  email           String
+  displayName     String?
+  domain          String
+
+  // SMTP
+  smtpHost        String
+  smtpPort        Int                @default(587)
+  smtpUser        String
+  smtpPass        String
+
+  // IMAP (optional, 1 per domain)
+  imapHost        String?
+  imapPort        Int?               @default(993)
+  imapUser        String?
+  imapPass        String?
+
+  // Sending limits
+  dailyLimit      Int                @default(100)
+  sentToday       Int                @default(0)
+  sentTodayDate   String?
+  totalSent       Int                @default(0)
+
+  // Warm-up
+  status          EmailAccountStatus @default(WARMING)
+  warmupStartedAt DateTime?
+  warmupDayNumber Int                @default(0)
+
+  // Health
+  bounceCount     Int                @default(0)
+  lastError       String?
+  lastUsedAt      DateTime?
+  sortOrder       Int                @default(0)
+
+  workspace       Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sendLogs        EmailSendLog[]
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([domain])
+  @@map("email_accounts")
+}
+
+model EmailSendLog {
+  id              String   @id @default(cuid())
+  emailAccountId  String
+  emailActivityId String?
+  type            String   @default("campaign")
+  sentAt          DateTime @default(now())
+
+  emailAccount    EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@index([emailAccountId])
+  @@index([emailAccountId, sentAt])
+  @@index([sentAt])
+  @@map("email_send_logs")
 }
