@@ -274,7 +274,7 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string):
   const searchQuery = `${query}, ${city}`;
   const params = new URLSearchParams({
     query: searchQuery,
-    limit: "20",
+    limit: "40",
     async: "false",
     language: "en",
     region: "US",
@@ -387,8 +387,9 @@ export async function discoverProspects(
   const normalizedCity = normalizeCityName(city);
   const settings = await loadTargetingSettings(workspaceId);
 
-  // Build queries from user settings: searchQueries (with {city} replacement) + keyword × city combinations
-  // Also generate query variations for deeper coverage
+  // Build queries from user settings
+  const isOutscraper = !!process.env.OUTSCRAPER_API_KEY;
+
   const queries: string[] = [];
   const addedQueries = new Set<string>();
   function addQuery(q: string) {
@@ -402,14 +403,18 @@ export async function discoverProspects(
     addQuery(sq.replace(/\{city\}/gi, city));
   }
   for (const kw of settings.keywords) {
-    // Base query: keyword + city
     addQuery(`${kw} ${city}`);
-    // Variation: "keyword près de city" (finds businesses in surrounding areas)
-    addQuery(`${kw} près de ${city}`);
-    // Variation: "keyword région de city"
-    addQuery(`${kw} région de ${city}`);
+    // Only add FR variations for Google Places (fast API). Outscraper is slow per query.
+    if (!isOutscraper) {
+      addQuery(`${kw} près de ${city}`);
+      addQuery(`${kw} région de ${city}`);
+    }
   }
-  if (queries.length === 0) {
+
+  // For Outscraper: limit to max 5 queries to keep it fast (each takes ~10-20s)
+  const effectiveQueries = isOutscraper ? queries.slice(0, 5) : queries;
+
+  if (effectiveQueries.length === 0) {
     return { found: 0, new: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
   }
 
@@ -419,7 +424,7 @@ export async function discoverProspects(
   const errors: string[] = [];
   let queriesWithResults = 0;
 
-  for (const query of queries) {
+  for (const query of effectiveQueries) {
     if (isCancelRequested()) break;
     try {
       const results = await searchPlaces(query, city);
@@ -434,6 +439,8 @@ export async function discoverProspects(
           _searchQuery: query,
         }))
       );
+      // For Outscraper: stop early if we have enough results
+      if (isOutscraper && allResults.length >= (maxNew * 2)) break;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       errors.push(`${query}: ${message}`);
