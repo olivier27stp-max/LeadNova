@@ -632,9 +632,38 @@ export default function ProspectsPage() {
     }
   }
 
+  // Cleanup progress
+  const [cleanupProgress, setCleanupProgress] = useState<{
+    status: string; checked: number; total: number; archived: number; currentProspect: string; startedAt: number;
+  } | null>(null);
+  const cleanupPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  function startCleanupPolling() {
+    stopCleanupPolling();
+    cleanupPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch("/api/prospects/cleanup");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status === "idle") return;
+        setCleanupProgress(data);
+        if (data.status === "done" || data.status === "cancelled") {
+          stopCleanupPolling();
+          fetchProspects();
+          setTimeout(() => setCleanupProgress(null), 5000);
+        }
+      } catch { /* ignore */ }
+    }, 1000);
+  }
+  function stopCleanupPolling() {
+    if (cleanupPollRef.current) { clearInterval(cleanupPollRef.current); cleanupPollRef.current = undefined; }
+  }
+
   async function handleCleanupIrrelevant() {
-    if (!confirm("Supprimer les prospects qui ne correspondent pas à vos mots-clés de ciblage ?")) return;
+    if (!confirm("Supprimer les prospects qui ne correspondent pas à vos mots-clés de ciblage ? (scrape les sites web)")) return;
     setActionLoading("cleanup-irrelevant");
+    setCleanupProgress({ status: "running", checked: 0, total: 0, archived: 0, currentProspect: "...", startedAt: Date.now() });
+    startCleanupPolling();
     try {
       const res = await fetch("/api/prospects", {
         method: "POST",
@@ -642,14 +671,22 @@ export default function ProspectsPage() {
         body: JSON.stringify({ _action: "cleanupIrrelevant" }),
       });
       const data = await res.json();
+      stopCleanupPolling();
       if (!res.ok) throw new Error(data.error || "Cleanup failed");
-      alert(`${data.archived} prospect${data.archived > 1 ? "s" : ""} non pertinent${data.archived > 1 ? "s" : ""} supprimé${data.archived > 1 ? "s" : ""} sur ${data.checked} vérifiés`);
+      setCleanupProgress({ status: data.cancelled ? "cancelled" : "done", checked: data.checked, total: data.checked, archived: data.archived, currentProspect: "", startedAt: cleanupProgress?.startedAt || Date.now() });
       fetchProspects();
+      setTimeout(() => setCleanupProgress(null), 5000);
     } catch (err) {
+      stopCleanupPolling();
+      setCleanupProgress(null);
       alert(err instanceof Error ? err.message : "Erreur lors du nettoyage");
     } finally {
       setActionLoading(null);
     }
+  }
+
+  async function stopCleanup() {
+    try { await fetch("/api/prospects/cleanup", { method: "DELETE" }); } catch { /* ignore */ }
   }
 
   async function handleEnrichBatch() {
@@ -1842,6 +1879,35 @@ export default function ProspectsPage() {
           />
         );
       })()}
+
+      {/* Cleanup progress bar */}
+      {cleanupProgress && cleanupProgress.status !== "idle" && (
+        <JobProgressBar
+          data={{
+            type: "enrichment",
+            status: cleanupProgress.status === "done" ? "completed"
+              : cleanupProgress.status === "cancelled" ? "cancelled"
+              : "running",
+            title: cleanupProgress.status === "running"
+              ? "Nettoyage non pertinents en cours..."
+              : cleanupProgress.status === "done"
+                ? `Nettoyage terminé — ${cleanupProgress.archived} supprimé${cleanupProgress.archived !== 1 ? "s" : ""}`
+                : "Nettoyage arrêté",
+            stepLabel: cleanupProgress.currentProspect
+              ? `Vérification : ${cleanupProgress.currentProspect}`
+              : "",
+            processed: cleanupProgress.checked,
+            total: cleanupProgress.total,
+            startedAt: cleanupProgress.startedAt,
+            currentStep: cleanupProgress.checked + 1,
+            totalSteps: cleanupProgress.total,
+            stepUnit: "Prospect",
+            secondaryLabel: `${cleanupProgress.checked} vérifiés, ${cleanupProgress.archived} non pertinent${cleanupProgress.archived !== 1 ? "s" : ""}`,
+          }}
+          onStop={stopCleanup}
+          onDismiss={() => setCleanupProgress(null)}
+        />
+      )}
 
       {/* Search + Filters */}
       <div className="flex flex-wrap gap-3 mb-4 items-center">

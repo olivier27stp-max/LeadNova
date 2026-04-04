@@ -325,7 +325,6 @@ export async function POST(request: NextRequest) {
       const workspaceId = await getWorkspaceId();
       if (!workspaceId) return NextResponse.json({ error: "No workspace" }, { status: 400 });
 
-      // Load targeting keywords
       const settingsRow = await prisma.appSettings.findFirst({
         where: { workspaceId },
         select: { data: true },
@@ -340,26 +339,41 @@ export async function POST(request: NextRequest) {
       }
 
       const { checkRelevanceBatch } = await import("@/lib/relevance-check");
+      const { setCleanupProgress, updateCleanupProgress, isCleanupCancelRequested } = await import("@/lib/cleanup-progress");
 
-      // Load all prospects for this workspace
       const prospects = await prisma.prospect.findMany({
         where: { workspaceId, archivedAt: null },
         select: { id: true, companyName: true, industry: true, website: true, city: true },
       });
 
-      const relevanceConfig = { positiveKeywords: keywords, blockedKeywords };
+      setCleanupProgress({
+        status: "running",
+        checked: 0,
+        total: prospects.length,
+        archived: 0,
+        currentProspect: "...",
+        startedAt: Date.now(),
+      });
 
-      // Check relevance in batches of 10 (scrapes websites)
+      const relevanceConfig = { positiveKeywords: keywords, blockedKeywords };
       const irrelevantIds: string[] = [];
       const BATCH_SIZE = 10;
+
       for (let i = 0; i < prospects.length; i += BATCH_SIZE) {
+        if (isCleanupCancelRequested()) break;
+
         const batch = prospects.slice(i, i + BATCH_SIZE);
+        updateCleanupProgress({
+          checked: i,
+          currentProspect: batch[0]?.companyName || "...",
+        });
+
         const results = await checkRelevanceBatch(
           batch.map((p) => ({
             companyName: p.companyName,
             website: p.website || undefined,
             googleCategory: p.industry || undefined,
-            searchKeyword: keywords[0], // use first keyword as reference
+            searchKeyword: keywords[0],
           })),
           relevanceConfig
         );
@@ -384,6 +398,16 @@ export async function POST(request: NextRequest) {
         totalArchived += result.count;
       }
 
+      const wasCancelled = isCleanupCancelRequested();
+      setCleanupProgress({
+        status: wasCancelled ? "cancelled" : "done",
+        checked: prospects.length,
+        total: prospects.length,
+        archived: totalArchived,
+        currentProspect: "",
+        startedAt: Date.now(),
+      });
+
       if (totalArchived > 0) {
         await logActivity({
           action: "prospect_cleanup_irrelevant",
@@ -394,7 +418,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      return NextResponse.json({ archived: totalArchived, checked: prospects.length });
+      return NextResponse.json({ archived: totalArchived, checked: prospects.length, cancelled: wasCancelled });
     }
 
     // Clean up invalid emails/websites (punycode garbage from Google Maps)
