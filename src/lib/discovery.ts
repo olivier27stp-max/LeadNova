@@ -10,12 +10,13 @@ interface TargetingSettings {
   blockedKeywords: string[];
   cities: string[];
   searchQueries: string[];
+  region: string;
   minReviews?: number;
   maxReviews?: number;
 }
 
 export async function loadTargetingSettings(workspaceId?: string | null): Promise<TargetingSettings> {
-  const empty: TargetingSettings = { keywords: [], blockedKeywords: [], cities: [], searchQueries: [] };
+  const empty: TargetingSettings = { keywords: [], blockedKeywords: [], cities: [], searchQueries: [], region: "CA" };
   try {
     const where = workspaceId ? { workspaceId } : { workspaceId: null };
     const row = await prisma.appSettings.findFirst({ where, select: { data: true } });
@@ -28,6 +29,7 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
       blockedKeywords: Array.isArray(targeting.blockedKeywords) ? (targeting.blockedKeywords as string[]).map((k) => (k as string).toLowerCase().trim()).filter(Boolean) : [],
       cities: Array.isArray(targeting.cities) ? (targeting.cities as string[]).filter(Boolean) : [],
       searchQueries: Array.isArray(targeting.searchQueries) ? (targeting.searchQueries as string[]).filter(Boolean) : [],
+      region: typeof targeting.region === "string" ? (targeting.region as string) : "CA",
       minReviews: typeof targeting.minReviews === "number" ? targeting.minReviews : undefined,
       maxReviews: typeof targeting.maxReviews === "number" ? targeting.maxReviews : undefined,
     };
@@ -234,14 +236,15 @@ function getCityCoords(city: string): { lat: number; lng: number } | null {
 
 const SEARCH_RADIUS_METERS = 30000; // 30km — covers surrounding towns
 
-async function searchPlaces(query: string, city: string): Promise<SearchResult[]> {
+async function searchPlaces(query: string, city: string, region = "CA"): Promise<SearchResult[]> {
   const outscrapeKey = process.env.OUTSCRAPER_API_KEY;
   const placesKey = process.env.GOOGLE_PLACES_API_KEY;
+  const lang = region === "CA" ? "fr" : "en";
 
   // Try Outscraper first, fall back to Google Places if no results or error
   if (outscrapeKey) {
     try {
-      const results = await searchViaOutscraper(query, city, outscrapeKey);
+      const results = await searchViaOutscraper(query, city, outscrapeKey, region, lang);
       if (results.length > 0) return results;
       console.warn(`[discovery] Outscraper returned 0 results for "${query}", falling back to Google Places`);
     } catch (err) {
@@ -249,7 +252,7 @@ async function searchPlaces(query: string, city: string): Promise<SearchResult[]
     }
   }
   if (placesKey) {
-    return searchViaGooglePlaces(query, city, placesKey);
+    return searchViaGooglePlaces(query, city, placesKey, lang);
   }
   throw new Error("OUTSCRAPER_API_KEY or GOOGLE_PLACES_API_KEY not configured");
 }
@@ -275,17 +278,18 @@ interface OutscraperResult {
   postal_code?: string;
 }
 
-async function searchViaOutscraper(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
+async function searchViaOutscraper(query: string, city: string, apiKey: string, region = "CA", lang = "fr"): Promise<SearchResult[]> {
   // Avoid duplicating city if query already contains it
   const cityLower = city.toLowerCase();
   const queryHasCity = query.toLowerCase().includes(cityLower);
-  const searchQuery = queryHasCity ? query : `${query}, ${city}, QC`;
+  const provinceSuffix = region === "CA" ? ", QC" : "";
+  const searchQuery = queryHasCity ? query : `${query}, ${city}${provinceSuffix}`;
   const params = new URLSearchParams({
     query: searchQuery,
     limit: "40",
     async: "false",
-    language: "fr",
-    region: "CA",
+    language: lang,
+    region,
   });
 
   const res = await fetch(`https://api.outscraper.cloud/google-maps-search?${params}`, {
@@ -328,10 +332,10 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string):
 
 // ─── Google Places fallback ─────────────────
 
-async function searchViaGooglePlaces(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
+async function searchViaGooglePlaces(query: string, city: string, apiKey: string, lang = "fr"): Promise<SearchResult[]> {
   const requestBody: Record<string, unknown> = {
     textQuery: query,
-    languageCode: "en",
+    languageCode: lang,
     maxResultCount: 20,
   };
 
@@ -436,7 +440,7 @@ export async function discoverProspects(
   for (const query of effectiveQueries) {
     if (isCancelRequested()) break;
     try {
-      const results = await searchPlaces(query, city);
+      const results = await searchPlaces(query, city, settings.region);
       if (results.length > 0) {
         queriesWithResults++;
       }

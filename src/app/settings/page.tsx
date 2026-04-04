@@ -156,6 +156,7 @@ interface Settings {
     blockedKeywords: string[];
     cities: string[];
     searchQueries: string[];
+    region: string;
     minReviews?: number;
     maxReviews?: number;
   };
@@ -4148,6 +4149,37 @@ export default function SettingsPage() {
                     ))
                   )}
                 </div>
+              </div>
+
+              <div className="border-t border-border my-2" />
+
+              {/* Région / Pays */}
+              <div>
+                <p className="text-sm font-medium text-foreground-secondary mb-2">
+                  Région de recherche
+                </p>
+                <p className="text-xs text-muted mb-3">
+                  Pays utilisé pour les recherches Google Maps
+                </p>
+                <select
+                  value={settings.targeting.region || "CA"}
+                  onChange={(e) => {
+                    setSettings({
+                      ...settings,
+                      targeting: { ...settings.targeting, region: e.target.value },
+                    });
+                    setHasUnsaved(true);
+                  }}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+                >
+                  <option value="CA">🇨🇦 Canada</option>
+                  <option value="US">🇺🇸 États-Unis</option>
+                  <option value="FR">🇫🇷 France</option>
+                  <option value="BE">🇧🇪 Belgique</option>
+                  <option value="CH">🇨🇭 Suisse</option>
+                  <option value="GB">🇬🇧 Royaume-Uni</option>
+                  <option value="AU">🇦🇺 Australie</option>
+                </select>
               </div>
 
               <div className="border-t border-border my-2" />

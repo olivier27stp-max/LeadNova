@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS = {
     blockedKeywords: [],
     cities: [],
     searchQueries: [],
+    region: "CA",
   },
   appearance: {
     language: "fr",
