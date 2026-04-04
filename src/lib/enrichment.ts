@@ -888,8 +888,10 @@ async function searchViaOutscraperEnrich(companyName: string, city: string | und
     const data = await res.json();
     const results: Array<{
       name?: string;
+      address?: string;
       full_address?: string;
       phone?: string;
+      website?: string;
       site?: string;
       city?: string;
     }> = Array.isArray(data?.data?.[0]) ? data.data[0] : (data?.data || []);
@@ -909,9 +911,9 @@ async function searchViaOutscraperEnrich(companyName: string, city: string | und
 
     return {
       title: bestMatch.name,
-      address: bestMatch.full_address,
+      address: bestMatch.full_address || bestMatch.address,
       phone: validPhone,
-      website: bestMatch.site,
+      website: bestMatch.website || bestMatch.site,
       city: bestMatch.city ? normalizeCity(bestMatch.city) : undefined,
     };
   } catch (err) {

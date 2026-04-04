@@ -253,14 +253,21 @@ async function searchPlaces(query: string, city: string): Promise<SearchResult[]
 
 interface OutscraperResult {
   name?: string;
+  address?: string;
   full_address?: string;
   phone?: string;
+  website?: string;
   site?: string;
+  location_link?: string;
   google_maps_url?: string;
   city?: string;
   reviews?: number;
+  rating?: number;
   type?: string;
   category?: string;
+  subtypes?: string;
+  state?: string;
+  postal_code?: string;
 }
 
 async function searchViaOutscraper(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
@@ -291,7 +298,7 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string):
   return results
     .filter((r) => r.name)
     .map((r) => {
-      let website = r.site || undefined;
+      let website = r.website || r.site || undefined;
       if (website && !/^https?:\/\//i.test(website)) {
         website = "https://" + website;
       }
@@ -299,11 +306,11 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string):
       return {
         companyName: r.name!,
         website,
-        address: r.full_address || undefined,
+        address: r.full_address || r.address || undefined,
         phone: r.phone || undefined,
-        googleMapsUrl: r.google_maps_url || undefined,
-        city: normalizeCityName(city),
-        industry: query.replace(city, "").trim(),
+        googleMapsUrl: r.location_link || r.google_maps_url || undefined,
+        city: r.city || normalizeCityName(city),
+        industry: r.type || r.category || query.replace(city, "").trim(),
         source: "outscraper",
         reviewCount: r.reviews,
       };
