@@ -632,6 +632,26 @@ export default function ProspectsPage() {
     }
   }
 
+  async function handleCleanupIrrelevant() {
+    if (!confirm("Supprimer les prospects qui ne correspondent pas à vos mots-clés de ciblage ?")) return;
+    setActionLoading("cleanup-irrelevant");
+    try {
+      const res = await fetch("/api/prospects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _action: "cleanupIrrelevant" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Cleanup failed");
+      alert(`${data.archived} prospect${data.archived > 1 ? "s" : ""} non pertinent${data.archived > 1 ? "s" : ""} supprimé${data.archived > 1 ? "s" : ""} sur ${data.checked} vérifiés`);
+      fetchProspects();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erreur lors du nettoyage");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleEnrichBatch() {
     setShowEnrichConfirm(false);
     setEnrichProgress({ status: "running", target: enrichTarget, enriched: 0, failed: 0, noData: 0, currentProspect: t("prospects", "starting"), startedAt: Date.now() });
@@ -1440,6 +1460,13 @@ export default function ProspectsPage() {
               className="border border-border bg-card text-foreground-secondary px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
             >
               {actionLoading === "deduplicate" ? t("prospects", "removingDuplicates") : t("prospects", "removeDuplicates")}
+            </button>
+            <button
+              onClick={handleCleanupIrrelevant}
+              disabled={actionLoading === "cleanup-irrelevant"}
+              className="border border-border bg-card text-foreground-secondary px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
+            >
+              {actionLoading === "cleanup-irrelevant" ? "Nettoyage..." : "Nettoyer non pertinents"}
             </button>
           </div>
         </div>
