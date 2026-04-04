@@ -232,6 +232,7 @@ export default function ProspectsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [contactTypeFilter, setContactTypeFilter] = useState("");
   const [cityFilter, setCityFilter] = useState("");
+  const [campaignFilter, setCampaignFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const { t, locale } = useTranslation();
@@ -337,7 +338,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -357,6 +358,8 @@ export default function ProspectsPage() {
     if (statusFilter) params.set("status", statusFilter);
     if (sourceFilter) params.set("source", sourceFilter);
     if (contactTypeFilter) params.set("contactType", contactTypeFilter);
+    if (campaignFilter && campaignFilter !== "none") params.set("campaignId", campaignFilter);
+    if (campaignFilter === "none") params.set("campaignId", "none");
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
     if (sortOrder) params.set("sortOrder", sortOrder);
@@ -382,7 +385,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -1210,12 +1213,13 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || debouncedSearch || searchQuery;
+  const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || debouncedSearch || searchQuery;
   function resetFilters() {
     setStatusFilter("");
     setCityFilter("");
     setSourceFilter("");
     setContactTypeFilter("");
+    setCampaignFilter("");
     setSearchQuery("");
     setDebouncedSearch("");
      }
@@ -1840,6 +1844,17 @@ export default function ProspectsPage() {
           <option value="">{t("prospects", "allTypes")}</option>
           {CONTACT_TYPE_OPTIONS.map((ct) => (
             <option key={ct} value={ct}>{t("contactType", ct as "prospect") || ct}</option>
+          ))}
+        </select>
+        <select
+          value={campaignFilter}
+          onChange={(e) => { setCampaignFilter(e.target.value); }}
+          className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+        >
+          <option value="">Toutes les campagnes</option>
+          <option value="none">Aucune campagne</option>
+          {campaigns.map((c) => (
+            <option key={c.id} value={c.id}>#{c.number} — {c.name}</option>
           ))}
         </select>
         {hasFilters && (

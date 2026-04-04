@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get("source");
     const contactType = searchParams.get("contactType");
     const emailStatus = searchParams.get("emailStatus");
+    const campaignId = searchParams.get("campaignId");
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -42,6 +43,11 @@ export async function GET(request: NextRequest) {
     if (contactType) where.contactType = contactType;
     if (emailStatus === "unknown") where.OR = [{ emailStatus: "unknown" }, { emailStatus: null }];
     else if (emailStatus) where.emailStatus = emailStatus;
+    if (campaignId === "none") {
+      where.campaignContacts = { none: {} };
+    } else if (campaignId) {
+      where.campaignContacts = { some: { campaignId } };
+    }
 
     // Text search across multiple fields — use AND to avoid overwriting emailStatus OR
     if (search) {
@@ -197,7 +203,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ fixed });
     }
 
-    // Deduplicate prospects by email (case-insensitive)
+    // Deduplicate prospects by email, company name+city, and phone number
     if (body._action === "deduplicate") {
       const all = await prisma.prospect.findMany({
         where: { archivedAt: null },
@@ -205,18 +211,47 @@ export async function POST(request: NextRequest) {
         orderBy: { leadScore: "desc" },
       });
 
-      const seen = new Map<string, string>();
-      const toDelete: string[] = [];
+      const toDeleteSet = new Set<string>();
 
+      // 1. Deduplicate by email (case-insensitive)
+      const seenEmails = new Map<string, string>();
       for (const p of all) {
         if (!p.email) continue;
         const key = p.email.toLowerCase().trim();
-        if (seen.has(key)) {
-          toDelete.push(p.id);
+        if (seenEmails.has(key)) {
+          toDeleteSet.add(p.id);
         } else {
-          seen.set(key, p.id);
+          seenEmails.set(key, p.id);
         }
       }
+
+      // 2. Deduplicate by company name + city (case-insensitive)
+      const seenNames = new Map<string, string>();
+      for (const p of all) {
+        if (toDeleteSet.has(p.id)) continue;
+        const nameKey = `${p.companyName.toLowerCase().trim()}|${(p.city || "").toLowerCase().trim()}`;
+        if (seenNames.has(nameKey)) {
+          toDeleteSet.add(p.id);
+        } else {
+          seenNames.set(nameKey, p.id);
+        }
+      }
+
+      // 3. Deduplicate by phone number (digits only)
+      const seenPhones = new Map<string, string>();
+      for (const p of all) {
+        if (toDeleteSet.has(p.id)) continue;
+        if (!p.phone) continue;
+        const phoneKey = p.phone.replace(/\D/g, "");
+        if (phoneKey.length < 7) continue; // skip too-short numbers
+        if (seenPhones.has(phoneKey)) {
+          toDeleteSet.add(p.id);
+        } else {
+          seenPhones.set(phoneKey, p.id);
+        }
+      }
+
+      const toDelete = Array.from(toDeleteSet);
 
       // Collect info of prospects to delete before removing them
       const deletedProspects = all

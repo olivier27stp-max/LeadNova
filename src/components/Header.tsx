@@ -40,16 +40,11 @@ export default function Header() {
   const { t } = useTranslation();
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
-  const [unsubscribeCount, setUnsubscribeCount] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    fetch("/api/blacklist?count=true")
-      .then((r) => r.json())
-      .then((d) => { if (d.count != null) setUnsubscribeCount(d.count); })
-      .catch(() => {});
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => { if (d.user?.role === "ADMIN") setIsAdmin(true); })
@@ -107,11 +102,6 @@ export default function Header() {
               >
                 <Icon className="size-3.5 shrink-0" />
                 <span className="hidden xl:inline whitespace-nowrap">{t("nav", labelKey)}</span>
-                {href === "/settings" && unsubscribeCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none ring-2 ring-card/80 pointer-events-none">
-                    {unsubscribeCount > 99 ? "99+" : unsubscribeCount}
-                  </span>
-                )}
               </Link>
             ))}
           </div>
