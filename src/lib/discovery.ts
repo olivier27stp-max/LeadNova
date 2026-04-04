@@ -529,21 +529,58 @@ export async function discoverProspects(
     : afterBlocked;
 
   // ─── Company name validation (Layer 1 local + Layer 2 AI) ───
+  const AI_SKIP_REVIEW_THRESHOLD = 25; // Skip AI validation if prospect has 25+ Google reviews
+
   // First pass: local rules to reject obvious garbage and clean names
   const localChecked = filtered.map((result) => {
     const local = localCleanCompanyName(result.companyName);
+    // #4: Auto-validate if 25+ reviews — clearly a real business, no AI needed
+    if (result.reviewCount != null && result.reviewCount >= AI_SKIP_REVIEW_THRESHOLD) {
+      return { result, local: { ...local, isValid: true, confidence: 1.0, needsReview: false, reason: `Auto-validé (${result.reviewCount} avis Google)` } };
+    }
     return { result, local };
   });
 
   // Remove locally-rejected entries (invalid with no review needed)
   const afterLocalFilter = localChecked.filter(({ local }) => local.isValid || local.needsReview);
 
-  // Collect entries that need AI validation
-  const needsAIValidation = afterLocalFilter.filter(
-    ({ local }) => local.confidence < 0.85 || local.needsReview
-  );
+  // #1: Load AI validation cache from DB to avoid re-validating known names
+  let aiCache = new Map<string, { isValid: boolean; cleanName: string; confidence: number; needsReview: boolean }>();
+  try {
+    const cacheRows = await prisma.prospect.findMany({
+      where: { companyNameConfidence: { not: null }, ...(workspaceId ? { workspaceId } : {}) },
+      select: { companyName: true, rawCompanyName: true, companyNameConfidence: true, companyNameNeedsReview: true },
+      distinct: ["companyName"],
+    });
+    for (const row of cacheRows) {
+      const key = (row.rawCompanyName || row.companyName).toLowerCase().trim();
+      aiCache.set(key, {
+        isValid: true,
+        cleanName: row.companyName,
+        confidence: row.companyNameConfidence ?? 0.5,
+        needsReview: row.companyNameNeedsReview,
+      });
+    }
+  } catch {
+    // Non-critical — proceed without cache
+  }
 
-  // Batch AI validation for entries that need it
+  // Collect entries that need AI validation (skip cached + high-review + high-confidence)
+  const needsAIValidation: typeof afterLocalFilter = [];
+  for (const entry of afterLocalFilter) {
+    if (entry.local.confidence >= 0.85 && !entry.local.needsReview) continue; // Already confident
+    // Check cache
+    const cacheKey = entry.result.companyName.toLowerCase().trim();
+    const cached = aiCache.get(cacheKey);
+    if (cached) {
+      entry.local = { ...entry.local, ...cached, reason: "Validé (cache)" };
+      continue;
+    }
+    needsAIValidation.push(entry);
+  }
+
+  // Batch AI validation only for entries that truly need it
+  let aiTokensSaved = afterLocalFilter.length - needsAIValidation.length;
   if (needsAIValidation.length > 0) {
     try {
       const aiInputs = needsAIValidation.map(({ result }) => ({
@@ -564,6 +601,7 @@ export async function discoverProspects(
       console.error("[discovery] AI company name validation failed, using local results:", error);
     }
   }
+  console.log(`[discovery] AI validation: ${needsAIValidation.length} called, ${aiTokensSaved} skipped (cache/reviews/confidence)`);
 
   let newCount = 0;
   let processedCount = 0; // total processed (new + existing) — used to enforce target limit
