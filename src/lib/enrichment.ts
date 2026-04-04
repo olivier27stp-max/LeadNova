@@ -863,19 +863,21 @@ async function searchGoogleMaps(companyName: string, city?: string): Promise<Map
 }
 
 async function searchViaOutscraperEnrich(companyName: string, city: string | undefined, apiKey: string): Promise<MapsResult | null> {
-  const query = city ? `${companyName} ${city}` : companyName;
+  const query = city ? `${companyName}, ${city}` : companyName;
 
   try {
     const params = new URLSearchParams({
       query,
       limit: "5",
+      async: "false",
       language: "en",
       region: "US",
     });
 
-    const res = await fetch(`https://api.app.outscraper.com/maps/search-v3?${params}`, {
+    const res = await fetch(`https://api.outscraper.cloud/google-maps-search?${params}`, {
+      method: "GET",
       headers: { "X-API-KEY": apiKey },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {

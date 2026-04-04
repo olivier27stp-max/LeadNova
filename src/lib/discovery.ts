@@ -264,17 +264,19 @@ interface OutscraperResult {
 }
 
 async function searchViaOutscraper(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
-  const searchQuery = `${query} ${city}`;
+  const searchQuery = `${query}, ${city}`;
   const params = new URLSearchParams({
     query: searchQuery,
     limit: "20",
+    async: "false",
     language: "en",
     region: "US",
   });
 
-  const res = await fetch(`https://api.app.outscraper.com/maps/search-v3?${params}`, {
+  const res = await fetch(`https://api.outscraper.cloud/google-maps-search?${params}`, {
+    method: "GET",
     headers: { "X-API-KEY": apiKey },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!res.ok) {
