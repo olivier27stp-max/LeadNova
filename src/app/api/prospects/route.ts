@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ assigned });
     }
 
-    // Clean up prospects that don't match targeting keywords
+    // Clean up prospects that don't match targeting keywords (with website scraping)
     if (body._action === "cleanupIrrelevant") {
       const workspaceId = await getWorkspaceId();
       if (!workspaceId) return NextResponse.json({ error: "No workspace" }, { status: 400 });
@@ -333,43 +333,48 @@ export async function POST(request: NextRequest) {
       const settingsData = (settingsRow?.data as Record<string, unknown>) || {};
       const targeting = (settingsData.targeting as Record<string, unknown>) || {};
       const keywords: string[] = Array.isArray(targeting.keywords) ? (targeting.keywords as string[]).filter(Boolean) : [];
+      const blockedKeywords: string[] = Array.isArray(targeting.blockedKeywords) ? (targeting.blockedKeywords as string[]).filter(Boolean) : [];
 
       if (keywords.length === 0) {
         return NextResponse.json({ error: "Aucun mot-clé configuré dans Ciblage" }, { status: 400 });
       }
 
-      // Extract core words from all keywords (remove stop words and city names)
-      const STOP_WORDS = new Set(["de", "du", "des", "le", "la", "les", "et", "en", "à", "au", "aux", "un", "une", "près", "région", "the", "and", "in", "of", "for", "service", "entreprise", "company", "professional", "commercial"]);
-      const coreWords = new Set<string>();
-      for (const kw of keywords) {
-        for (const word of kw.toLowerCase().split(/\s+/)) {
-          if (word.length > 2 && !STOP_WORDS.has(word)) {
-            coreWords.add(word);
-          }
-        }
-      }
+      const { checkRelevanceBatch } = await import("@/lib/relevance-check");
 
       // Load all prospects for this workspace
       const prospects = await prisma.prospect.findMany({
         where: { workspaceId, archivedAt: null },
-        select: { id: true, companyName: true, industry: true, city: true },
+        select: { id: true, companyName: true, industry: true, website: true, city: true },
       });
 
-      // Check each prospect: does its name or industry contain at least one core keyword word?
+      const relevanceConfig = { positiveKeywords: keywords, blockedKeywords };
+
+      // Check relevance in batches of 10 (scrapes websites)
       const irrelevantIds: string[] = [];
-      for (const p of prospects) {
-        const text = `${p.companyName} ${p.industry || ""}`.toLowerCase();
-        const isRelevant = coreWords.size === 0 || Array.from(coreWords).some((w) => text.includes(w));
-        if (!isRelevant) {
-          irrelevantIds.push(p.id);
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < prospects.length; i += BATCH_SIZE) {
+        const batch = prospects.slice(i, i + BATCH_SIZE);
+        const results = await checkRelevanceBatch(
+          batch.map((p) => ({
+            companyName: p.companyName,
+            website: p.website || undefined,
+            googleCategory: p.industry || undefined,
+            searchKeyword: keywords[0], // use first keyword as reference
+          })),
+          relevanceConfig
+        );
+        for (let j = 0; j < batch.length; j++) {
+          if (results[j]?.relevant === false) {
+            irrelevantIds.push(batch[j].id);
+          }
         }
       }
 
       // Archive irrelevant prospects in batches
       let totalArchived = 0;
-      const BATCH_SIZE = 200;
-      for (let i = 0; i < irrelevantIds.length; i += BATCH_SIZE) {
-        const batch = irrelevantIds.slice(i, i + BATCH_SIZE);
+      const DELETE_BATCH = 200;
+      for (let i = 0; i < irrelevantIds.length; i += DELETE_BATCH) {
+        const batch = irrelevantIds.slice(i, i + DELETE_BATCH);
         await prisma.campaignContact.deleteMany({ where: { prospectId: { in: batch } } });
         await prisma.funnelProspect.deleteMany({ where: { prospectId: { in: batch } } });
         const result = await prisma.prospect.updateMany({
