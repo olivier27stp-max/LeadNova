@@ -205,8 +205,12 @@ export async function POST(request: NextRequest) {
 
     // Deduplicate prospects by email, company name+city, and phone number
     if (body._action === "deduplicate") {
+      const workspaceId = await getWorkspaceId();
+      const whereClause: Record<string, unknown> = { archivedAt: null };
+      if (workspaceId) whereClause.workspaceId = workspaceId;
+
       const all = await prisma.prospect.findMany({
-        where: { archivedAt: null },
+        where: whereClause,
         select: { id: true, companyName: true, email: true, city: true, phone: true, website: true, leadScore: true, status: true, createdAt: true },
         orderBy: { leadScore: "desc" },
       });
@@ -243,7 +247,7 @@ export async function POST(request: NextRequest) {
         if (toDeleteSet.has(p.id)) continue;
         if (!p.phone) continue;
         const phoneKey = p.phone.replace(/\D/g, "");
-        if (phoneKey.length < 7) continue; // skip too-short numbers
+        if (phoneKey.length < 7) continue;
         if (seenPhones.has(phoneKey)) {
           toDeleteSet.add(p.id);
         } else {
@@ -266,25 +270,32 @@ export async function POST(request: NextRequest) {
           status: p.status,
         }));
 
-      if (toDelete.length > 0) {
-        await prisma.campaignContact.deleteMany({ where: { prospectId: { in: toDelete } } });
-        await prisma.prospect.updateMany({
-          where: { id: { in: toDelete } },
+      // Delete in batches of 200 to avoid query size limits
+      let totalArchived = 0;
+      const BATCH_SIZE = 200;
+      for (let i = 0; i < toDelete.length; i += BATCH_SIZE) {
+        const batch = toDelete.slice(i, i + BATCH_SIZE);
+        await prisma.campaignContact.deleteMany({ where: { prospectId: { in: batch } } });
+        await prisma.funnelProspect.deleteMany({ where: { prospectId: { in: batch } } });
+        await prisma.emailActivity.deleteMany({ where: { prospectId: { in: batch } } });
+        const result = await prisma.prospect.updateMany({
+          where: { id: { in: batch } },
           data: { archivedAt: new Date() },
         });
+        totalArchived += result.count;
       }
 
-      if (toDelete.length > 0) {
+      if (totalArchived > 0) {
         await logActivity({
           action: "prospect_deduplicated",
           type: "success",
           title: "Doublons supprimés",
-          details: `${toDelete.length} prospects en double supprimés`,
-          metadata: { deleted: toDelete.length, deletedProspects },
+          details: `${totalArchived} prospects en double supprimés`,
+          metadata: { detected: toDelete.length, archived: totalArchived, deletedProspects },
         });
       }
 
-      return NextResponse.json({ deleted: toDelete.length });
+      return NextResponse.json({ deleted: totalArchived });
     }
 
     // Bulk assign prospects to a campaign
