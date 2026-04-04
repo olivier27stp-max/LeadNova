@@ -171,6 +171,7 @@ interface DiscoveryDiagnostics {
 export interface DiscoveryOutcome {
   found: number;
   new: number;
+  skippedExisting: number;
   diagnostics: DiscoveryDiagnostics;
 }
 
@@ -428,10 +429,27 @@ export async function discoverProspects(
   const effectiveQueries = isOutscraper ? queries.slice(0, 5) : queries;
 
   if (effectiveQueries.length === 0) {
-    return { found: 0, new: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
+    return { found: 0, new: 0, skippedExisting: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
   }
 
   const blockedKeywords = settings.blockedKeywords;
+
+  // ─── Pre-load existing prospects to skip duplicates (saves API tokens + AI calls) ───
+  const existingWhere: Record<string, unknown> = { archivedAt: null };
+  if (workspaceId) existingWhere.workspaceId = workspaceId;
+  const existingProspects = await prisma.prospect.findMany({
+    where: existingWhere,
+    select: { companyName: true, city: true, phone: true },
+  });
+  const existingNames = new Set(
+    existingProspects.map((p) => `${p.companyName.toLowerCase().trim()}|${(p.city || "").toLowerCase().trim()}`)
+  );
+  const existingPhones = new Set(
+    existingProspects
+      .filter((p) => p.phone)
+      .map((p) => p.phone!.replace(/\D/g, ""))
+      .filter((p) => p.length >= 7)
+  );
 
   const allResults: SearchResult[] = [];
   const errors: string[] = [];
@@ -473,8 +491,19 @@ export async function discoverProspects(
     return true;
   });
 
+  // Filter out prospects that already exist in the database
+  const afterExisting = unique.filter((r) => {
+    const nameKey = `${r.companyName.toLowerCase().trim()}|${(r.city || "").toLowerCase().trim()}`;
+    if (existingNames.has(nameKey)) return false;
+    if (r.phone) {
+      const phoneKey = r.phone.replace(/\D/g, "");
+      if (phoneKey.length >= 7 && existingPhones.has(phoneKey)) return false;
+    }
+    return true;
+  });
+
   // Filter out irrelevant results (wrong industry despite matching keyword)
-  const afterRelevance = unique.filter((r) => {
+  const afterRelevance = afterExisting.filter((r) => {
     if (!r._searchQuery) return true;
     return !isIrrelevantResult(r.companyName, r._searchQuery);
   });
@@ -594,9 +623,15 @@ export async function discoverProspects(
     }
   }
 
+  const skippedExisting = unique.length - afterExisting.length;
+  if (skippedExisting > 0) {
+    console.log(`[discovery] Skipped ${skippedExisting} already-existing prospects (saved API tokens)`);
+  }
+
   return {
     found: unique.length,
     new: newCount,
+    skippedExisting,
     diagnostics: {
       queriesAttempted: queries.length,
       queriesWithResults,
