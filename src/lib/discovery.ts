@@ -558,8 +558,12 @@ export async function discoverProspects(
       })
     : afterBlocked;
 
-  // ─── AI relevance check (scrape website + verify match with keyword) ───
-  // Only check prospects that have a website (others pass through)
+  // ─── Relevance check (scrape website + smart local logic with user keywords) ───
+  // Uses the user's positive keywords + blocked keywords to determine relevance
+  const relevanceConfig = {
+    positiveKeywords: settings.keywords,
+    blockedKeywords: settings.blockedKeywords,
+  };
   const withWebsite = filtered.filter((r) => r.website && r._searchQuery);
   const withoutWebsite = filtered.filter((r) => !r.website || !r._searchQuery);
 
@@ -576,7 +580,8 @@ export async function discoverProspects(
             website: r.website,
             googleCategory: r.googleCategory,
             searchKeyword: r._searchQuery!,
-          }))
+          })),
+          relevanceConfig
         );
         for (let j = 0; j < batch.length; j++) {
           if (results[j]?.relevant !== false) {
