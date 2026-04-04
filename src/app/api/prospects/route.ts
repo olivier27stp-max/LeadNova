@@ -287,6 +287,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ deleted: toDelete.length });
     }
 
+    // Bulk assign prospects to a campaign
+    if (body._action === "bulkAssignCampaign") {
+      const { ids, campaignId: targetCampaignId } = body;
+      if (!Array.isArray(ids) || !targetCampaignId) {
+        return NextResponse.json({ error: "ids and campaignId required" }, { status: 400 });
+      }
+      let assigned = 0;
+      for (const prospectId of ids) {
+        try {
+          await prisma.campaignContact.upsert({
+            where: { campaignId_prospectId: { campaignId: targetCampaignId, prospectId } },
+            update: {},
+            create: { campaignId: targetCampaignId, prospectId },
+          });
+          assigned++;
+        } catch {
+          // Skip errors (invalid IDs, etc.)
+        }
+      }
+      return NextResponse.json({ assigned });
+    }
+
     // Clean up invalid emails/websites (punycode garbage from Google Maps)
     if (body._action === "cleanupBadEmails") {
       const VALID_DOMAIN_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;

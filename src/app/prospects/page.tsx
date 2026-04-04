@@ -918,6 +918,30 @@ export default function ProspectsPage() {
     }
   }
 
+  // Bulk assign to campaign
+  const [bulkCampaignId, setBulkCampaignId] = useState("");
+  async function handleBulkAssignCampaign() {
+    if (selectedIds.size === 0 || !bulkCampaignId) return;
+    setActionLoading("bulk-campaign");
+    try {
+      const res = await fetch("/api/prospects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _action: "bulkAssignCampaign", ids: Array.from(selectedIds), campaignId: bulkCampaignId }),
+      });
+      if (!res.ok) throw new Error("Assign failed");
+      const data = await res.json();
+      alert(`${data.assigned} prospect${data.assigned > 1 ? "s" : ""} ajouté${data.assigned > 1 ? "s" : ""} à la campagne`);
+      setSelectedIds(new Set());
+      setBulkCampaignId("");
+      fetchProspects();
+    } catch {
+      alert("Erreur lors de l'assignation");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   // Edit prospect
   function startEditing() {
     if (!selectedProspect) return;
@@ -1913,6 +1937,25 @@ export default function ProspectsPage() {
           >
             {actionLoading === "bulk-delete" ? t("prospects", "deleting") : t("prospects", "deleteSelection")}
           </button>
+          <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-border">
+            <select
+              value={bulkCampaignId}
+              onChange={(e) => setBulkCampaignId(e.target.value)}
+              className="text-sm border border-border rounded-md px-2 py-1.5 bg-background text-foreground"
+            >
+              <option value="">Campagne...</option>
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>#{c.number} — {c.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleBulkAssignCampaign}
+              disabled={!bulkCampaignId || actionLoading === "bulk-campaign"}
+              className="text-sm border border-primary text-primary px-3 py-1.5 rounded-md hover:bg-primary-subtle disabled:opacity-50"
+            >
+              {actionLoading === "bulk-campaign" ? "..." : "Assigner"}
+            </button>
+          </div>
           <button
             onClick={() => setSelectedIds(new Set())}
             className="text-sm text-foreground-muted hover:text-foreground"
