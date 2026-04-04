@@ -537,9 +537,10 @@ export async function discoverProspects(
   }
 
   let newCount = 0;
+  let processedCount = 0; // total processed (new + existing) — used to enforce target limit
 
   for (const { result, local } of afterLocalFilter) {
-    if (newCount >= maxNew || isCancelRequested()) break;
+    if (processedCount >= maxNew || isCancelRequested()) break;
 
     // Skip entries marked invalid by AI
     if (!local.isValid && !local.needsReview) continue;
@@ -569,6 +570,7 @@ export async function discoverProspects(
         },
       });
       newCount++;
+      processedCount++;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -585,6 +587,7 @@ export async function discoverProspects(
             // Non-critical
           }
         }
+        processedCount++;
         continue;
       }
       throw error;
