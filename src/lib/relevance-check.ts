@@ -1,16 +1,14 @@
 import * as cheerio from "cheerio";
-import Anthropic from "@anthropic-ai/sdk";
 
 /**
- * Relevance checker: scrapes prospect website + uses AI to verify
+ * Relevance checker: scrapes prospect website and locally checks
  * if the business actually matches the search keyword.
  *
- * Used during discovery to filter out false positives like
- * "TEINTE TA TIOP" (auto tinting) when searching for "nettoyage de vitres".
+ * 100% gratuit — 0 token AI. Compare les mots-clés avec le contenu
+ * du site web (titre, description, headings, paragraphes).
  */
 
 const SCRAPE_TIMEOUT_MS = 8000;
-const MAX_TEXT_LENGTH = 1500; // chars sent to AI per prospect
 
 interface RelevanceInput {
   companyName: string;
@@ -24,7 +22,33 @@ interface RelevanceResult {
   reason: string;
 }
 
-/** Scrape homepage and extract meaningful text (title, meta, headings, first paragraphs) */
+// Words that indicate a DIFFERENT industry when found on the website
+// These override a matching Google category
+const UNRELATED_INDICATORS: Record<string, string[]> = {
+  // When searching for window/glass cleaning
+  "vitre": ["teint", "tint", "pellicule", "film solaire", "pare-brise", "windshield", "esthétique auto", "esthetique auto", "auto glass", "remplacement de vitre", "réparation de vitre", "installation de vitre", "débosselage", "carrosserie", "automobile", "vehicule", "véhicule"],
+  "vitres": ["teint", "tint", "pellicule", "film solaire", "pare-brise", "windshield", "esthétique auto", "esthetique auto", "auto glass", "remplacement de vitre", "réparation de vitre", "installation de vitre", "débosselage", "carrosserie", "automobile", "vehicule", "véhicule"],
+  "window": ["tint", "tinting", "film", "auto glass", "windshield", "replacement", "installation", "automotive", "vehicle", "car"],
+  "cleaning": ["tint", "tinting", "auto detailing", "car wash", "automotive", "vehicle wrap"],
+  "nettoyage": ["teint", "tint", "pare-brise", "automobile", "véhicule", "vehicule", "carrosserie", "esthétique auto", "débosselage", "conduit", "ventilation", "cheminée", "ramonage"],
+  "lavage": ["teint", "tint", "pare-brise", "automobile", "esthétique auto", "lave-auto", "car wash"],
+  "gouttière": ["toiture", "couvreur", "revêtement", "bardeau", "siding"],
+  "ménager": ["conduit", "ventilation", "cheminée", "ramonage", "plomberie"],
+  "peinture": ["automobile", "carrosserie", "débosselage", "auto body"],
+  "paysag": ["déneigement", "excavation", "asphalte", "pavage"],
+  "plomb": ["climatisation", "chauffage", "thermopompe", "hvac"],
+  "toiture": ["solaire", "solar", "panneau", "photovoltaïque"],
+};
+
+// Positive indicators — words that CONFIRM relevance
+const RELEVANT_INDICATORS: Record<string, string[]> = {
+  "vitre": ["lavage de vitre", "nettoyage de vitre", "window cleaning", "window washing", "vitres résidentielles", "vitres commerciales", "nettoyage de fenêtre"],
+  "vitres": ["lavage de vitre", "nettoyage de vitre", "window cleaning", "window washing", "vitres résidentielles", "vitres commerciales", "nettoyage de fenêtre"],
+  "nettoyage": ["entretien ménager", "femme de ménage", "service de nettoyage", "nettoyage résidentiel", "nettoyage commercial", "cleaning service", "house cleaning", "janitorial"],
+  "gouttière": ["nettoyage de gouttière", "gutter cleaning", "entretien de gouttière"],
+};
+
+/** Scrape homepage and extract meaningful text */
 async function scrapeHomepageText(url: string): Promise<string> {
   try {
     const res = await fetch(url, {
@@ -40,48 +64,90 @@ async function scrapeHomepageText(url: string): Promise<string> {
     const html = await res.text();
     const $ = cheerio.load(html);
 
-    // Remove scripts, styles, nav, footer noise
-    $("script, style, nav, footer, noscript, iframe, svg").remove();
+    $("script, style, nav, noscript, iframe, svg").remove();
 
     const parts: string[] = [];
 
-    // Title
     const title = $("title").text().trim();
-    if (title) parts.push(`Titre: ${title}`);
+    if (title) parts.push(title);
 
-    // Meta description
     const metaDesc = $('meta[name="description"]').attr("content")?.trim();
-    if (metaDesc) parts.push(`Description: ${metaDesc}`);
+    if (metaDesc) parts.push(metaDesc);
 
-    // H1, H2, H3
+    // OG description as fallback
+    const ogDesc = $('meta[property="og:description"]').attr("content")?.trim();
+    if (ogDesc && ogDesc !== metaDesc) parts.push(ogDesc);
+
     $("h1, h2, h3").each((_, el) => {
       const text = $(el).text().trim();
       if (text && text.length < 200) parts.push(text);
     });
 
-    // First few paragraphs
-    $("p").slice(0, 8).each((_, el) => {
+    // First paragraphs + list items (services pages often use <li>)
+    $("p, li").slice(0, 15).each((_, el) => {
       const text = $(el).text().trim();
-      if (text && text.length > 20 && text.length < 500) parts.push(text);
+      if (text && text.length > 10 && text.length < 500) parts.push(text);
     });
 
-    return parts.join("\n").slice(0, MAX_TEXT_LENGTH);
+    // Footer text (often has business description)
+    $("footer").each((_, el) => {
+      const text = $(el).text().trim().slice(0, 300);
+      if (text) parts.push(text);
+    });
+
+    return parts.join(" ").toLowerCase().slice(0, 3000);
   } catch {
     return "";
   }
 }
 
-/** Batch check relevance using AI. Returns array of results matching input order. */
+/** Check a single prospect's relevance by comparing site content to keyword */
+function checkSingleRelevance(input: RelevanceInput, siteText: string): RelevanceResult {
+  const kwLower = input.searchKeyword.toLowerCase();
+  const nameLower = input.companyName.toLowerCase();
+  const urlLower = (input.website || "").toLowerCase();
+  const allText = `${siteText} ${nameLower} ${urlLower}`;
+
+  // Extract core words from the search keyword
+  const STOP_WORDS = new Set(["de", "du", "des", "le", "la", "les", "et", "en", "à", "au", "un", "une", "the", "and", "in", "of", "for", "service", "entreprise", "company"]);
+  const kwWords = kwLower.split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
+  // Check for UNRELATED indicators in site content
+  for (const kwWord of kwWords) {
+    const unrelated = UNRELATED_INDICATORS[kwWord];
+    if (!unrelated) continue;
+    for (const indicator of unrelated) {
+      if (allText.includes(indicator)) {
+        // Found an unrelated indicator — but check if there's also a POSITIVE indicator
+        const relevant = RELEVANT_INDICATORS[kwWord];
+        if (relevant && relevant.some((r) => allText.includes(r))) {
+          continue; // Has both unrelated AND relevant — keep it (mixed business)
+        }
+        return { relevant: false, reason: `"${indicator}" trouvé — non pertinent pour "${kwWord}"` };
+      }
+    }
+  }
+
+  // If we have site text, check that at least one keyword word appears
+  if (siteText.length > 50) {
+    const hasKeywordMatch = kwWords.some((w) => siteText.includes(w));
+    if (!hasKeywordMatch) {
+      // Site doesn't mention anything related to the keyword at all
+      // But be lenient — only filter if site has enough content to be sure
+      if (siteText.length > 200) {
+        return { relevant: false, reason: `Aucun mot-clé trouvé sur le site web` };
+      }
+    }
+  }
+
+  return { relevant: true, reason: "OK" };
+}
+
+/** Batch check relevance. Scrapes websites and checks locally (0 tokens). */
 export async function checkRelevanceBatch(
   inputs: RelevanceInput[]
 ): Promise<RelevanceResult[]> {
   if (inputs.length === 0) return [];
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    // No AI key — assume all relevant (skip check)
-    return inputs.map(() => ({ relevant: true, reason: "No API key — skipped" }));
-  }
 
   // Scrape websites in parallel (max 5 concurrent)
   const siteTexts: string[] = [];
@@ -94,60 +160,6 @@ export async function checkRelevanceBatch(
     siteTexts.push(...results);
   }
 
-  // Build the prompt — one batch call for all prospects
-  const prospectLines = inputs.map((inp, i) => {
-    const site = siteTexts[i] ? `\nSite web:\n${siteTexts[i]}` : "\nSite web: (non disponible)";
-    return `--- Prospect ${i + 1} ---
-Nom: ${inp.companyName}
-Catégorie Google: ${inp.googleCategory || "inconnue"}
-URL: ${inp.website || "aucun"}${site}`;
-  }).join("\n\n");
-
-  const prompt = `Tu es un expert en validation de prospects B2B.
-
-Mot-clé de recherche: "${inputs[0].searchKeyword}"
-
-Pour chaque prospect ci-dessous, détermine si l'entreprise offre RÉELLEMENT le service correspondant au mot-clé de recherche.
-Attention: la catégorie Google peut être incorrecte. Base-toi principalement sur le contenu du site web et le nom de l'entreprise.
-
-${prospectLines}
-
-Réponds en JSON uniquement, un tableau avec un objet par prospect:
-[{"relevant": true/false, "reason": "explication courte"}]
-
-Exemples de cas NON pertinents:
-- Teintage de vitres d'auto quand on cherche "nettoyage de vitres"
-- Installation de pare-brise quand on cherche "lavage de vitres"
-- Esthétique automobile quand on cherche "nettoyage de vitres"
-- Revêtement extérieur quand on cherche "nettoyage de maison"
-
-Sois strict: si le service principal de l'entreprise ne correspond PAS au mot-clé, marque-le comme non pertinent.`;
-
-  try {
-    const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const text = response.content[0]?.type === "text" ? response.content[0].text : "";
-    // Extract JSON from response
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      console.error("[relevance-check] Could not parse AI response:", text.slice(0, 200));
-      return inputs.map(() => ({ relevant: true, reason: "Parse error — kept" }));
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]) as RelevanceResult[];
-    // Ensure array length matches
-    if (parsed.length !== inputs.length) {
-      console.warn(`[relevance-check] AI returned ${parsed.length} results for ${inputs.length} inputs`);
-      return inputs.map((_, i) => parsed[i] || { relevant: true, reason: "Missing — kept" });
-    }
-    return parsed;
-  } catch (error) {
-    console.error("[relevance-check] AI call failed:", error);
-    return inputs.map(() => ({ relevant: true, reason: "AI error — kept" }));
-  }
+  // Check each prospect locally
+  return inputs.map((input, i) => checkSingleRelevance(input, siteTexts[i]));
 }
