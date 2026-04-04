@@ -50,9 +50,9 @@ function matchesBlockedKeyword(text: string, blockedKeywords: string[]): boolean
 
 // Map of search terms → unrelated industry indicators in company name/address
 const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[] }> = [
-  // Window cleaning ≠ auto glass
-  { keywords: ["lavage de vitres", "nettoyage de vitres", "vitres résidentielles", "vitres commerciales"],
-    exclude: ["auto", "automobile", "pare-brise", "windshield", "carrosserie", "d'autos", "d'auto", "car wash"] },
+  // Window cleaning ≠ auto glass / tinting / detailing
+  { keywords: ["lavage de vitres", "nettoyage de vitres", "vitres résidentielles", "vitres commerciales", "window cleaning", "window washing"],
+    exclude: ["auto", "automobile", "pare-brise", "windshield", "carrosserie", "d'autos", "d'auto", "car wash", "teint", "tint", "esthétique", "esthetique", "detailing", "pellicule", "film", "wrapping", "wrap"] },
   // Pressure washing ≠ car wash
   { keywords: ["lavage à pression", "lavage pression"],
     exclude: ["auto", "automobile", "car wash", "lave-auto"] },
@@ -76,12 +76,15 @@ const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[] }> = [
     exclude: ["installation", "remplacement", "fenêtre", "porte et fenêtre", "vitrerie"] },
 ];
 
-/** Check if a result is irrelevant based on the search keyword vs company name/category mismatch */
-function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string): boolean {
+/** Check if a result is irrelevant based on the search keyword vs company name/category/website mismatch */
+function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string, website?: string): boolean {
   const nameLower = companyName.toLowerCase();
   const kwLower = searchKeyword.toLowerCase();
   const catLower = (googleCategory || "").toLowerCase();
-  const textToCheck = `${nameLower} ${catLower}`;
+  // Include website URL in checks — domain often reveals the real business type
+  // e.g. "teintetatiop-esthetiqueauto.fr" contains "esthetique" and "auto"
+  const siteLower = (website || "").toLowerCase().replace(/https?:\/\//, "").replace(/www\./, "");
+  const textToCheck = `${nameLower} ${catLower} ${siteLower}`;
 
   // Rule-based exclusions
   for (const rule of INDUSTRY_EXCLUSIONS) {
@@ -101,9 +104,9 @@ function isIrrelevantResult(companyName: string, searchKeyword: string, googleCa
       .split(/\s+/)
       .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 
-    // Check if at least one keyword word appears in the category or company name
+    // Check if at least one keyword word appears in the category, company name, or website
     const hasRelevantMatch = kwWords.some((w) =>
-      catLower.includes(w) || nameLower.includes(w)
+      catLower.includes(w) || nameLower.includes(w) || siteLower.includes(w)
     );
 
     // If no keyword word matches the category or name, it's likely irrelevant
@@ -531,7 +534,7 @@ export async function discoverProspects(
   // Filter out irrelevant results (wrong industry despite matching keyword)
   const afterRelevance = afterExisting.filter((r) => {
     if (!r._searchQuery) return true;
-    return !isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory);
+    return !isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website);
   });
 
   // Filter out prospects matching blocked keywords
