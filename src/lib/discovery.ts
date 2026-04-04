@@ -76,18 +76,42 @@ const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[] }> = [
     exclude: ["installation", "remplacement", "fenêtre", "porte et fenêtre", "vitrerie"] },
 ];
 
-/** Check if a result is irrelevant based on the search keyword vs company name mismatch */
-function isIrrelevantResult(companyName: string, searchKeyword: string): boolean {
+/** Check if a result is irrelevant based on the search keyword vs company name/category mismatch */
+function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string): boolean {
   const nameLower = companyName.toLowerCase();
   const kwLower = searchKeyword.toLowerCase();
+  const catLower = (googleCategory || "").toLowerCase();
+  const textToCheck = `${nameLower} ${catLower}`;
 
+  // Rule-based exclusions
   for (const rule of INDUSTRY_EXCLUSIONS) {
-    // Check if the search keyword matches this rule
     const keywordMatches = rule.keywords.some((k) => kwLower.includes(k));
     if (!keywordMatches) continue;
+    if (rule.exclude.some((ex) => textToCheck.includes(ex))) {
+      return true;
+    }
+  }
 
-    // If it does, check if the company name contains excluded terms
-    if (rule.exclude.some((ex) => nameLower.includes(ex))) {
+  // ─── Generic keyword-vs-category relevance check ───
+  // If we have a Google category, check if it's completely unrelated to the search keyword.
+  // Extract core service words from the keyword (remove city names and common words)
+  if (catLower && catLower.length > 2) {
+    const STOP_WORDS = new Set(["de", "du", "des", "le", "la", "les", "et", "en", "à", "au", "aux", "un", "une", "près", "région", "the", "and", "in", "of", "for"]);
+    const kwWords = kwLower
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
+    // Check if at least one keyword word appears in the category or company name
+    const hasRelevantMatch = kwWords.some((w) =>
+      catLower.includes(w) || nameLower.includes(w)
+    );
+
+    // If no keyword word matches the category or name, it's likely irrelevant
+    // BUT only if the category itself seems unrelated (not a generic category)
+    const GENERIC_CATEGORIES = ["business", "entreprise", "company", "service", "contractor", "entrepreneur"];
+    const isGenericCategory = GENERIC_CATEGORIES.some((g) => catLower.includes(g));
+
+    if (!hasRelevantMatch && !isGenericCategory) {
       return true;
     }
   }
@@ -158,6 +182,7 @@ interface SearchResult {
   industry: string;
   source: string;
   reviewCount?: number;
+  googleCategory?: string; // Google Maps business category (e.g. "Siding contractor")
   _searchQuery?: string; // internal: the query that found this result
 }
 
@@ -327,6 +352,7 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string, 
         industry: r.type || r.category || query.replace(city, "").trim(),
         source: "outscraper",
         reviewCount: r.reviews,
+        googleCategory: r.type || r.category || undefined,
       };
     });
 }
@@ -505,7 +531,7 @@ export async function discoverProspects(
   // Filter out irrelevant results (wrong industry despite matching keyword)
   const afterRelevance = afterExisting.filter((r) => {
     if (!r._searchQuery) return true;
-    return !isIrrelevantResult(r.companyName, r._searchQuery);
+    return !isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory);
   });
 
   // Filter out prospects matching blocked keywords
