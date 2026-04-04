@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
       ...(workspaceId ? { workspaceId } : {}),
     };
 
-    // EmailActivity: filter by workspace through prospect relation (avoids huge IN clause)
-    const emailWhere = workspaceId
+    // EmailActivity: filter by workspace through prospect relation
+    const emailProspectFilter = workspaceId
       ? { prospect: { workspaceId, archivedAt: null } }
       : {};
 
@@ -34,17 +34,17 @@ export async function GET(request: NextRequest) {
     );
 
     const emailsSentToday = await prisma.emailActivity.count({
-      where: { ...emailWhere, sentAt: { gte: startOfDay } },
+      where: { ...emailProspectFilter, sentAt: { gte: startOfDay } },
     });
-    const totalEmailsSent = await prisma.emailActivity.count({ where: emailWhere });
+    const totalEmailsSent = await prisma.emailActivity.count({ where: emailProspectFilter });
     const emailReplies = await prisma.emailActivity.count({
-      where: { ...emailWhere, replyReceived: true },
+      where: { ...emailProspectFilter, replyReceived: true },
     });
     // Include prospects manually set to REPLIED (may not have EmailActivity)
     const statusRepliedCount = statusMap["REPLIED"] || 0;
     const totalReplies = Math.max(emailReplies, statusRepliedCount);
     const totalBounces = await prisma.emailActivity.count({
-      where: { ...emailWhere, bounce: true },
+      where: { ...emailProspectFilter, bounce: true },
     });
     const recentProspects = await prisma.prospect.findMany({
       where: prospectWhere,
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
       },
     });
     const recentEmails = await prisma.emailActivity.findMany({
-      where: emailWhere,
+      where: emailProspectFilter,
       orderBy: { sentAt: "desc" },
       take: 5,
       include: {
