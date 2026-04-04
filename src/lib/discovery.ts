@@ -235,13 +235,18 @@ function getCityCoords(city: string): { lat: number; lng: number } | null {
 const SEARCH_RADIUS_METERS = 30000; // 30km — covers surrounding towns
 
 async function searchPlaces(query: string, city: string): Promise<SearchResult[]> {
-  // ── Outscraper API (Google Maps scraping) ──
   const outscrapeKey = process.env.OUTSCRAPER_API_KEY;
-  // Fallback to Google Places API if Outscraper not configured
   const placesKey = process.env.GOOGLE_PLACES_API_KEY;
 
+  // Try Outscraper first, fall back to Google Places if no results or error
   if (outscrapeKey) {
-    return searchViaOutscraper(query, city, outscrapeKey);
+    try {
+      const results = await searchViaOutscraper(query, city, outscrapeKey);
+      if (results.length > 0) return results;
+      console.warn(`[discovery] Outscraper returned 0 results for "${query}", falling back to Google Places`);
+    } catch (err) {
+      console.error(`[discovery] Outscraper error, falling back to Google Places:`, err);
+    }
   }
   if (placesKey) {
     return searchViaGooglePlaces(query, city, placesKey);
@@ -271,13 +276,16 @@ interface OutscraperResult {
 }
 
 async function searchViaOutscraper(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
-  const searchQuery = `${query}, ${city}`;
+  // Avoid duplicating city if query already contains it
+  const cityLower = city.toLowerCase();
+  const queryHasCity = query.toLowerCase().includes(cityLower);
+  const searchQuery = queryHasCity ? query : `${query}, ${city}, QC`;
   const params = new URLSearchParams({
     query: searchQuery,
     limit: "40",
     async: "false",
-    language: "en",
-    region: "US",
+    language: "fr",
+    region: "CA",
   });
 
   const res = await fetch(`https://api.outscraper.cloud/google-maps-search?${params}`, {
@@ -292,8 +300,9 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string):
   }
 
   const data = await res.json();
+  console.log(`[outscraper] Query: "${searchQuery}" — Response keys: ${Object.keys(data || {}).join(", ")}, data type: ${typeof data?.data}, data[0] type: ${typeof data?.data?.[0]}, length: ${Array.isArray(data?.data?.[0]) ? data.data[0].length : (Array.isArray(data?.data) ? data.data.length : "N/A")}`);
   // Outscraper returns { data: [[...results]] } for search-v3
-  const results: OutscraperResult[] = Array.isArray(data?.data?.[0]) ? data.data[0] : (data?.data || []);
+  const results: OutscraperResult[] = Array.isArray(data?.data?.[0]) ? data.data[0] : (Array.isArray(data?.data) ? data.data : []);
 
   return results
     .filter((r) => r.name)
