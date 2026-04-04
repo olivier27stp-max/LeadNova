@@ -9,13 +9,14 @@ import { prisma } from "@/lib/db";
 
 const TODAY_FORMAT = () => new Date().toISOString().split("T")[0];
 
-/** Get the next ACTIVE account with remaining daily capacity (round-robin by lastUsedAt) */
+/** Get the next available account with remaining daily capacity (round-robin by lastUsedAt).
+ *  Supports both ACTIVE and WARMING accounts. WARMING accounts use progressive limits. */
 export async function getNextSendingAccount(workspaceId: string) {
   const today = TODAY_FORMAT();
 
-  // Get all active accounts for this workspace
+  // Get all sendable accounts (ACTIVE + WARMING) for this workspace
   const accounts = await prisma.emailAccount.findMany({
-    where: { workspaceId, status: "ACTIVE" },
+    where: { workspaceId, status: { in: ["ACTIVE", "WARMING"] } },
     orderBy: { lastUsedAt: "asc" }, // round-robin: least recently used first
   });
 
@@ -23,16 +24,30 @@ export async function getNextSendingAccount(workspaceId: string) {
 
   for (const account of accounts) {
     // Lazy daily reset: if sentTodayDate is not today, reset counter
+    // For WARMING accounts, also advance warm-up day number
     if (account.sentTodayDate !== today) {
+      const updateData: Record<string, unknown> = { sentToday: 0, sentTodayDate: today };
+      if (account.status === "WARMING" && account.warmupStartedAt) {
+        const daysSinceStart = Math.floor(
+          (Date.now() - new Date(account.warmupStartedAt).getTime()) / 86400000
+        );
+        updateData.warmupDayNumber = daysSinceStart + 1;
+        account.warmupDayNumber = daysSinceStart + 1;
+      }
       await prisma.emailAccount.update({
         where: { id: account.id },
-        data: { sentToday: 0, sentTodayDate: today },
+        data: updateData,
       });
       account.sentToday = 0;
     }
 
-    // Check if under daily limit
-    if (account.sentToday < account.dailyLimit) {
+    // Calculate effective daily limit: WARMING uses progressive limits
+    const effectiveLimit = account.status === "WARMING"
+      ? getWarmupVolume(account.warmupDayNumber || 1, account.dailyLimit)
+      : account.dailyLimit;
+
+    // Check if under effective daily limit
+    if (account.sentToday < effectiveLimit) {
       return account;
     }
   }
@@ -41,11 +56,11 @@ export async function getNextSendingAccount(workspaceId: string) {
   return null;
 }
 
-/** Record a send: increment counters, create log entry */
+/** Record a send: increment counters, create log entry, auto-promote WARMING → ACTIVE */
 export async function recordAccountSend(accountId: string, activityId?: string) {
   const today = TODAY_FORMAT();
 
-  await prisma.emailAccount.update({
+  const account = await prisma.emailAccount.update({
     where: { id: accountId },
     data: {
       sentToday: { increment: 1 },
@@ -54,6 +69,17 @@ export async function recordAccountSend(accountId: string, activityId?: string) 
       lastUsedAt: new Date(),
     },
   });
+
+  // Auto-promote WARMING → ACTIVE when warm-up volume reaches dailyLimit
+  if (account.status === "WARMING") {
+    const warmupVolume = getWarmupVolume(account.warmupDayNumber || 1, account.dailyLimit);
+    if (warmupVolume >= account.dailyLimit) {
+      await prisma.emailAccount.update({
+        where: { id: accountId },
+        data: { status: "ACTIVE" },
+      });
+    }
+  }
 
   await prisma.emailSendLog.create({
     data: {

@@ -348,6 +348,21 @@ export async function pollGmailForUpdates(workspaceId: string): Promise<{ replie
         where: { id: activity.id },
         data: { bounce: true },
       });
+      // Auto-blacklist bounced email to prevent future sends
+      try {
+        await prisma.blacklist.upsert({
+          where: { workspaceId_email: { workspaceId, email: bouncedEmail } },
+          update: { reason: "hard_bounce" },
+          create: { email: bouncedEmail, reason: "hard_bounce", workspaceId },
+        });
+      } catch {
+        // Ignore if already blacklisted
+      }
+      // Update prospect status
+      await prisma.prospect.updateMany({
+        where: { email: bouncedEmail, status: { notIn: ["REPLIED", "QUALIFIED"] } },
+        data: { status: "BOUNCED", emailStatus: "invalid" },
+      });
       bounces++;
     }
   }

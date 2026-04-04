@@ -37,11 +37,26 @@ export async function POST(request: NextRequest) {
           const activity = await prisma.emailActivity.findFirst({
             where: { prospect: { email: to } },
             orderBy: { sentAt: "desc" },
+            include: { prospect: { select: { id: true, workspaceId: true } } },
           });
           if (activity) {
             await prisma.emailActivity.update({
               where: { id: activity.id },
               data: { bounce: true },
+            });
+            // Auto-blacklist bounced email to prevent future sends
+            const wsId = activity.prospect.workspaceId;
+            if (wsId) {
+              await prisma.blacklist.upsert({
+                where: { workspaceId_email: { workspaceId: wsId, email: to } },
+                update: { reason: "hard_bounce" },
+                create: { email: to, reason: "hard_bounce", workspaceId: wsId },
+              });
+            }
+            // Update prospect status
+            await prisma.prospect.updateMany({
+              where: { id: activity.prospect.id, status: { notIn: ["REPLIED", "QUALIFIED"] } },
+              data: { status: "BOUNCED", emailStatus: "invalid" },
             });
           }
         }

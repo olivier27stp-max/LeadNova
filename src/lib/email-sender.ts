@@ -364,6 +364,21 @@ export async function sendEmail(
     return { success: false, error: "Email is blacklisted" };
   }
 
+  // Block sending to invalid or disposable emails (verified by email-verifier)
+  const blockedStatuses = ["invalid", "disposable"];
+  if (prospect.emailStatus && blockedStatuses.includes(prospect.emailStatus)) {
+    return { success: false, error: `Email bloqué — statut: ${prospect.emailStatus}` };
+  }
+
+  // Block sending to prospects that have previously bounced
+  const previousBounce = await prisma.emailActivity.findFirst({
+    where: { prospectId, bounce: true },
+    select: { id: true },
+  });
+  if (previousBounce) {
+    return { success: false, error: "Email bloqué — bounce précédent détecté" };
+  }
+
   // ── Multi-sender rotation ──
   // If workspace has EmailAccounts, use rotation instead of single-sender
   let multiSenderAccount: { id: string; email: string; displayName: string | null; smtpHost: string; smtpPort: number; smtpUser: string; smtpPass: string; trackingDomain?: string } | null = null;
@@ -522,6 +537,24 @@ export async function sendEmail(
       where: { id: activity.id },
       data: { bounce: true },
     });
+
+    // Increment bounce count on multi-sender account; auto-pause if too many bounces
+    if (multiSenderAccount) {
+      const updated = await prisma.emailAccount.update({
+        where: { id: multiSenderAccount.id },
+        data: {
+          bounceCount: { increment: 1 },
+          lastError: error instanceof Error ? error.message : "Send failed",
+        },
+      });
+      // Auto-pause account if bounce rate is too high (>10 bounces)
+      if (updated.bounceCount >= 10 && updated.status !== "PAUSED") {
+        await prisma.emailAccount.update({
+          where: { id: multiSenderAccount.id },
+          data: { status: "PAUSED", lastError: "Auto-paused: trop de bounces" },
+        });
+      }
+    }
 
     return {
       success: false,
