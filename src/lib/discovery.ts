@@ -3,6 +3,7 @@ import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
 import { isCancelRequested } from "./discovery-progress";
 import { validateCompanyNames, localCleanCompanyName } from "./company-name-validation";
+import { checkRelevanceBatch } from "./relevance-check";
 
 // ─── Targeting settings loader ────────────────────────────
 interface TargetingSettings {
@@ -557,11 +558,48 @@ export async function discoverProspects(
       })
     : afterBlocked;
 
+  // ─── AI relevance check (scrape website + verify match with keyword) ───
+  // Only check prospects that have a website (others pass through)
+  const withWebsite = filtered.filter((r) => r.website && r._searchQuery);
+  const withoutWebsite = filtered.filter((r) => !r.website || !r._searchQuery);
+
+  let afterAIRelevance = [...withoutWebsite];
+  if (withWebsite.length > 0 && !isCancelRequested()) {
+    const RELEVANCE_BATCH_SIZE = 10;
+    for (let i = 0; i < withWebsite.length; i += RELEVANCE_BATCH_SIZE) {
+      if (isCancelRequested()) break;
+      const batch = withWebsite.slice(i, i + RELEVANCE_BATCH_SIZE);
+      try {
+        const results = await checkRelevanceBatch(
+          batch.map((r) => ({
+            companyName: r.companyName,
+            website: r.website,
+            googleCategory: r.googleCategory,
+            searchKeyword: r._searchQuery!,
+          }))
+        );
+        for (let j = 0; j < batch.length; j++) {
+          if (results[j]?.relevant !== false) {
+            afterAIRelevance.push(batch[j]);
+          } else {
+            console.log(`[discovery] AI filtered: "${batch[j].companyName}" — ${results[j]?.reason}`);
+          }
+        }
+      } catch (error) {
+        console.error("[discovery] AI relevance check failed, keeping all:", error);
+        afterAIRelevance.push(...batch);
+      }
+    }
+    console.log(`[discovery] AI relevance: ${afterAIRelevance.length} kept / ${filtered.length} total (${filtered.length - afterAIRelevance.length} filtered)`);
+  } else {
+    afterAIRelevance = filtered;
+  }
+
   // ─── Company name validation (Layer 1 local + Layer 2 AI) ───
   const AI_SKIP_REVIEW_THRESHOLD = 25; // Skip AI validation if prospect has 25+ Google reviews
 
   // First pass: local rules to reject obvious garbage and clean names
-  const localChecked = filtered.map((result) => {
+  const localChecked = afterAIRelevance.map((result) => {
     const local = localCleanCompanyName(result.companyName);
     // #4: Auto-validate if 25+ reviews — clearly a real business, no AI needed
     if (result.reviewCount != null && result.reviewCount >= AI_SKIP_REVIEW_THRESHOLD) {
