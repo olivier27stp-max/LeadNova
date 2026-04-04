@@ -17,17 +17,9 @@ export async function GET(request: NextRequest) {
       ...(workspaceId ? { workspaceId } : {}),
     };
 
-    // EmailActivity joins through prospect, filter by workspace via prospectId
-    // We get prospect IDs for this workspace first, then filter email activities
-    const workspaceProspectIds = workspaceId
-      ? await prisma.prospect.findMany({
-          where: { workspaceId, archivedAt: null },
-          select: { id: true },
-        }).then((ps) => ps.map((p) => p.id))
-      : null;
-
-    const emailWhere = workspaceProspectIds
-      ? { prospectId: { in: workspaceProspectIds } }
+    // EmailActivity: filter by workspace through prospect relation (avoids huge IN clause)
+    const emailWhere = workspaceId
+      ? { prospect: { workspaceId, archivedAt: null } }
       : {};
 
     // Sequential queries to avoid overwhelming the connection pool
