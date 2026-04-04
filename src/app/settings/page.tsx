@@ -437,11 +437,55 @@ export default function SettingsPage() {
   const [emailAccountsLoading, setEmailAccountsLoading] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [showProviderGuide, setShowProviderGuide] = useState(false);
   const [newAccount, setNewAccount] = useState({ email: "", smtpHost: "", smtpPort: "587", smtpUser: "", smtpPass: "", imapHost: "", imapPort: "993", imapUser: "", imapPass: "", dailyLimit: "100", displayName: "" });
   const [bulkText, setBulkText] = useState("");
   const [bulkHost, setBulkHost] = useState("");
   const [bulkPort, setBulkPort] = useState("587");
   const [testingAccountId, setTestingAccountId] = useState<string | null>(null);
+
+  // Interactive schema demo
+  interface SchemaEmail { id: string; address: string; limit: number; }
+  interface SchemaDomain { id: string; name: string; emails: SchemaEmail[]; }
+  const [schemaDomains, setSchemaDomains] = useState<SchemaDomain[]>([
+    {
+      id: "d1",
+      name: "",
+      emails: [
+        { id: "e1", address: "", limit: 100 },
+        { id: "e2", address: "", limit: 100 },
+        { id: "e3", address: "", limit: 100 },
+        { id: "e4", address: "", limit: 100 },
+        { id: "e5", address: "", limit: 100 },
+      ],
+    },
+  ]);
+  const [schemaNewDomain, setSchemaNewDomain] = useState("");
+  const [schemaAddingDomain, setSchemaAddingDomain] = useState(false);
+  const [schemaAddingEmailTo, setSchemaAddingEmailTo] = useState<string | null>(null);
+  const [schemaNewEmail, setSchemaNewEmail] = useState("");
+  const [schemaEditingDomain, setSchemaEditingDomain] = useState<string | null>(null);
+  const [schemaEditValue, setSchemaEditValue] = useState("");
+  // Node config popup — opens when clicking a domain or email node
+  interface SchemaNodeConfig {
+    domainId: string;
+    emailId?: string; // if editing email, otherwise editing domain
+    email: string;
+    smtpHost: string;
+    smtpPort: string;
+    smtpUser: string;
+    smtpPass: string;
+    imapHost: string;
+    imapPort: string;
+    imapUser: string;
+    imapPass: string;
+    dailyLimit: string;
+    displayName: string;
+  }
+  const [schemaNodeConfig, setSchemaNodeConfig] = useState<SchemaNodeConfig | null>(null);
+  const [activeDnsProvider, setActiveDnsProvider] = useState("zoho");
+  const schemaTotalEmails = schemaDomains.reduce((s, d) => s + d.emails.filter(e => e.address).length, 0);
+  const schemaTotalCapacity = schemaDomains.reduce((s, d) => s + d.emails.filter(e => e.address).reduce((s2, e) => s2 + e.limit, 0), 0);
 
   const fetchEmailAccounts = useCallback(async () => {
     setEmailAccountsLoading(true);
@@ -1812,6 +1856,341 @@ export default function SettingsPage() {
                 : "Connectez plusieurs comptes SMTP pour la rotation. Les emails sont distribués automatiquement entre les comptes actifs."}
             >
               <div className="space-y-4">
+                {/* Warning banner */}
+                <div className="rounded-lg border border-warning/30 bg-warning-subtle p-4 space-y-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="size-4 text-warning shrink-0 mt-0.5" />
+                    <p className="text-sm font-semibold text-foreground">
+                      {locale === "en" ? "Important — Read before sending" : "Important — Lire avant d'envoyer"}
+                    </p>
+                  </div>
+                  <div className="space-y-2 text-xs text-foreground-secondary ml-6">
+                    <p className="font-semibold text-danger">
+                      {locale === "en"
+                        ? "Never use your company's main domain or primary email addresses for cold outreach."
+                        : "N'utilisez jamais le domaine principal ou les adresses email principales de votre entreprise pour la prospection à froid."}
+                    </p>
+                    <p>
+                      {locale === "en"
+                        ? "If your sending domain gets flagged as spam, ALL emails from that domain will be affected — including your regular business emails, invoices, and client communications."
+                        : "Si votre domaine d'envoi est signalé comme spam, TOUS les emails de ce domaine seront affectés — y compris vos emails professionnels, factures et communications clients."}
+                    </p>
+                    <div className="border-t border-warning/20 pt-2 mt-2">
+                      <p className="font-medium text-foreground mb-1">
+                        {locale === "en" ? "Best practices:" : "Bonnes pratiques :"}
+                      </p>
+                      <ul className="space-y-1 list-disc list-inside text-foreground-muted">
+                        <li>{locale === "en" ? "Buy separate domains for outreach (e.g. yourcompany-mail.com)" : "Achetez des domaines séparés pour la prospection (ex : votreentreprise-mail.com)"}</li>
+                        <li>{locale === "en" ? "Configure SPF, DKIM, and DMARC on each domain" : "Configurez SPF, DKIM et DMARC sur chaque domaine"}</li>
+                        <li>{locale === "en" ? "Use warm-up before sending at full volume (auto-enabled)" : "Utilisez le préchauffage avant d'envoyer à plein volume (activé auto)"}</li>
+                        <li>{locale === "en" ? "Keep under 100-150 emails/day per account" : "Restez sous 100-150 emails/jour par compte"}</li>
+                        <li>{locale === "en" ? "Keep under 1000 emails/day per domain" : "Restez sous 1000 emails/jour par domaine"}</li>
+                        <li>{locale === "en" ? "Monitor your bounce rate — above 5% is dangerous" : "Surveillez votre taux de bounce — au-dessus de 5% c'est dangereux"}</li>
+                        <li>{locale === "en" ? "Stop sending to addresses that bounce or unsubscribe" : "Arrêtez d'envoyer aux adresses qui bounce ou se désabonnent"}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Interactive flow schema — Zapier-style */}
+                <div className="rounded-xl border border-border bg-background overflow-x-auto">
+                  {/* Header bar */}
+                  <div className="px-5 py-4 border-b border-border bg-background-subtle flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-foreground">
+                        {locale === "en" ? "Sending Architecture" : "Architecture d'envoi"}
+                      </p>
+                      <p className="text-xs text-foreground-muted mt-0.5">
+                        {locale === "en" ? "Visual overview of your sending infrastructure" : "Vue visuelle de votre infrastructure d'envoi"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-foreground tabular-nums leading-none">{schemaDomains.length}</p>
+                        <p className="text-[9px] text-foreground-muted uppercase tracking-wider">{locale === "en" ? "domains" : "domaines"}</p>
+                      </div>
+                      <div className="w-px h-8 bg-border" />
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-foreground tabular-nums leading-none">{schemaTotalEmails}</p>
+                        <p className="text-[9px] text-foreground-muted uppercase tracking-wider">{locale === "en" ? "accounts" : "comptes"}</p>
+                      </div>
+                      <div className="w-px h-8 bg-border" />
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-primary tabular-nums leading-none">{schemaTotalCapacity.toLocaleString()}</p>
+                        <p className="text-[9px] text-foreground-muted uppercase tracking-wider">{locale === "en" ? "emails/day" : "emails/jour"}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Flow canvas */}
+                  <div className="p-6 min-w-[600px]">
+                    <div className="flex flex-col items-center">
+
+                      {/* ── Workspace node (root) ── */}
+                      <div className="relative rounded-xl border-2 border-primary bg-primary-subtle px-6 py-3 shadow-sm">
+                        <div className="flex items-center gap-2.5">
+                          <div className="size-8 rounded-lg bg-primary flex items-center justify-center">
+                            <SendHorizonal className="size-4 text-white" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-foreground">LeadNova</p>
+                            <p className="text-[10px] text-foreground-muted">{locale === "en" ? "Multi-sender rotation" : "Rotation multi-expéditeur"}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Vertical connector from workspace */}
+                      <div className="w-0.5 h-6 bg-border" />
+
+                      {/* Horizontal branch line */}
+                      {schemaDomains.length > 1 && (
+                        <div className="relative w-full flex justify-center" style={{ height: 2 }}>
+                          <div
+                            className="absolute bg-border"
+                            style={{
+                              height: 2,
+                              left: `calc(${100 / (schemaDomains.length * 2)}% + 0px)`,
+                              right: `calc(${100 / (schemaDomains.length * 2)}% + 0px)`,
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {/* ── Domain columns ── */}
+                      <div className="flex gap-4 justify-center w-full">
+                        {schemaDomains.map((domain) => {
+                          const connectedEmails = domain.emails.filter(e => e.address);
+                          const domainCapacity = connectedEmails.reduce((s, e) => s + e.limit, 0);
+                          return (
+                            <div key={domain.id} className="flex flex-col items-center flex-1 min-w-[180px] max-w-[260px]">
+                              {/* Vertical connector to domain */}
+                              <div className="w-0.5 h-5 bg-border" />
+
+                              {/* Domain node */}
+                              <div
+                                className={cn(
+                                  "relative w-full rounded-xl border-2 shadow-sm transition-colors group cursor-pointer",
+                                  domain.name
+                                    ? "border-border bg-card hover:border-primary/40"
+                                    : "border-dashed border-foreground-muted/30 bg-background-subtle hover:border-primary/40"
+                                )}
+                                onClick={() => {
+                                  if (schemaEditingDomain !== domain.id) {
+                                    setSchemaEditingDomain(domain.id);
+                                    setSchemaEditValue(domain.name);
+                                  }
+                                }}
+                              >
+                                <div className="px-4 py-3">
+                                  {schemaEditingDomain === domain.id ? (
+                                    <div className="flex items-center gap-2">
+                                      <Globe className="size-4 text-primary shrink-0" />
+                                      <input
+                                        autoFocus
+                                        value={schemaEditValue}
+                                        onChange={(e) => setSchemaEditValue(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") {
+                                            setSchemaDomains(prev => prev.map(d => d.id === domain.id ? { ...d, name: schemaEditValue.trim() } : d));
+                                            setSchemaEditingDomain(null);
+                                          }
+                                          if (e.key === "Escape") setSchemaEditingDomain(null);
+                                        }}
+                                        onBlur={() => {
+                                          setSchemaDomains(prev => prev.map(d => d.id === domain.id ? { ...d, name: schemaEditValue.trim() } : d));
+                                          setSchemaEditingDomain(null);
+                                        }}
+                                        placeholder="domain.com"
+                                        className="flex-1 h-6 bg-transparent text-[13px] font-bold text-foreground outline-none placeholder:text-foreground-muted/40"
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <Globe className={cn("size-4 shrink-0", domain.name ? "text-primary" : "text-foreground-muted/40")} />
+                                        {domain.name ? (
+                                          <span className="text-[13px] font-bold text-foreground truncate">{domain.name}</span>
+                                        ) : (
+                                          <span className="text-[13px] font-semibold text-foreground-muted/50 italic">Connect</span>
+                                        )}
+                                      </div>
+                                      {domain.name && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); setSchemaDomains(prev => prev.filter(d => d.id !== domain.id)); }}
+                                          className="p-0.5 rounded text-foreground-muted/0 group-hover:text-foreground-muted hover:!text-danger transition-all shrink-0"
+                                        >
+                                          <X className="size-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                  {domain.name && (
+                                    <div className="flex items-center gap-2 mt-1.5">
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-background-subtle text-foreground-muted border border-border">
+                                        {domain.emails.length} emails
+                                      </span>
+                                      <span className="text-[10px] font-mono text-foreground-secondary tabular-nums">
+                                        {domainCapacity}/{locale === "en" ? "day" : "jour"}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Vertical connector to emails */}
+                              <div className="w-0.5 h-4 bg-border" />
+
+                              {/* Email nodes */}
+                              <div className="w-full space-y-2">
+                                {domain.emails.map((email, emailIdx) => (
+                                  <div key={email.id} className="flex flex-col items-center">
+                                    {emailIdx > 0 && <div className="w-0.5 h-2 bg-border" />}
+                                    <div
+                                      className={cn(
+                                        "w-full rounded-lg border px-3 py-2 transition-all cursor-pointer group",
+                                        email.address
+                                          ? "border-border bg-card hover:border-primary/30 hover:shadow-sm"
+                                          : "border-dashed border-foreground-muted/25 bg-background-subtle/50 hover:border-primary/40 hover:bg-primary-subtle/20"
+                                      )}
+                                      onClick={() => setSchemaNodeConfig({
+                                        domainId: domain.id,
+                                        emailId: email.id,
+                                        email: email.address,
+                                        smtpHost: "", smtpPort: "587", smtpUser: email.address, smtpPass: "",
+                                        imapHost: "", imapPort: "993", imapUser: "", imapPass: "",
+                                        dailyLimit: String(email.limit),
+                                        displayName: "",
+                                      })}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <Mail className={cn("size-3 shrink-0", email.address ? "text-foreground-muted" : "text-foreground-muted/30")} />
+                                        {email.address ? (
+                                          <span className="text-[11px] text-foreground truncate flex-1">{email.address}</span>
+                                        ) : (
+                                          <span className="text-[11px] text-foreground-muted/40 italic flex-1">Connect</span>
+                                        )}
+                                        {email.address && (
+                                          <span className="text-[9px] font-mono text-primary font-bold tabular-nums">{email.limit}/j</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+
+                                {/* Add email button */}
+                                {schemaAddingEmailTo === domain.id ? (
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <input
+                                      autoFocus
+                                      value={schemaNewEmail}
+                                      onChange={(e) => setSchemaNewEmail(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && schemaNewEmail.trim()) {
+                                          const addr = schemaNewEmail.trim().includes("@") ? schemaNewEmail.trim() : `${schemaNewEmail.trim()}@${domain.name}`;
+                                          setSchemaDomains(prev => prev.map(d => d.id === domain.id ? {
+                                            ...d,
+                                            emails: [...d.emails, { id: `e${Date.now()}`, address: addr, limit: 100 }],
+                                          } : d));
+                                          setSchemaNewEmail("");
+                                          setSchemaAddingEmailTo(null);
+                                        }
+                                        if (e.key === "Escape") { setSchemaAddingEmailTo(null); setSchemaNewEmail(""); }
+                                      }}
+                                      placeholder={`user@${domain.name}`}
+                                      className="flex-1 h-7 rounded border border-border bg-card px-2 text-[11px] text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        if (schemaNewEmail.trim()) {
+                                          const addr = schemaNewEmail.trim().includes("@") ? schemaNewEmail.trim() : `${schemaNewEmail.trim()}@${domain.name}`;
+                                          setSchemaDomains(prev => prev.map(d => d.id === domain.id ? {
+                                            ...d,
+                                            emails: [...d.emails, { id: `e${Date.now()}`, address: addr, limit: 100 }],
+                                          } : d));
+                                          setSchemaNewEmail("");
+                                          setSchemaAddingEmailTo(null);
+                                        }
+                                      }}
+                                      className="p-1 text-success hover:bg-success-subtle rounded shrink-0"
+                                    ><Check className="size-3" /></button>
+                                    <button onClick={() => { setSchemaAddingEmailTo(null); setSchemaNewEmail(""); }} className="p-1 text-foreground-muted hover:bg-background-muted rounded shrink-0">
+                                      <X className="size-3" /></button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => { setSchemaAddingEmailTo(domain.id); setSchemaNewEmail(""); }}
+                                    className="w-full py-1.5 rounded-lg border border-dashed border-border text-[10px] text-foreground-muted hover:text-primary hover:border-primary/40 hover:bg-primary-subtle/30 transition-all flex items-center justify-center gap-1"
+                                  >
+                                    <Plus className="size-3" />
+                                    {locale === "en" ? "Add email" : "Ajouter un email"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {/* Add domain column */}
+                        <div className="flex flex-col items-center min-w-[160px] max-w-[200px]">
+                          <div className="w-0.5 h-5 bg-border" />
+                          {schemaAddingDomain ? (
+                            <div className="w-full space-y-2">
+                              <input
+                                autoFocus
+                                value={schemaNewDomain}
+                                onChange={(e) => setSchemaNewDomain(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && schemaNewDomain.trim()) {
+                                    const name = schemaNewDomain.trim();
+                                    setSchemaDomains(prev => [...prev, {
+                                      id: `d${Date.now()}`,
+                                      name,
+                                      emails: [{ id: `e${Date.now()}`, address: `contact@${name}`, limit: 100 }],
+                                    }]);
+                                    setSchemaNewDomain("");
+                                    setSchemaAddingDomain(false);
+                                  }
+                                  if (e.key === "Escape") { setSchemaAddingDomain(false); setSchemaNewDomain(""); }
+                                }}
+                                placeholder="domain.com"
+                                className="w-full h-8 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                              />
+                              <div className="flex gap-1.5 justify-center">
+                                <button
+                                  onClick={() => {
+                                    if (schemaNewDomain.trim()) {
+                                      const name = schemaNewDomain.trim();
+                                      setSchemaDomains(prev => [...prev, {
+                                        id: `d${Date.now()}`,
+                                        name,
+                                        emails: [{ id: `e${Date.now()}`, address: `contact@${name}`, limit: 100 }],
+                                      }]);
+                                      setSchemaNewDomain("");
+                                      setSchemaAddingDomain(false);
+                                    }
+                                  }}
+                                  className="p-1.5 text-success hover:bg-success-subtle rounded"
+                                ><Check className="size-3.5" /></button>
+                                <button onClick={() => { setSchemaAddingDomain(false); setSchemaNewDomain(""); }} className="p-1.5 text-foreground-muted hover:bg-background-muted rounded">
+                                  <X className="size-3.5" /></button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setSchemaAddingDomain(true); setSchemaNewDomain(""); }}
+                              className="w-full h-[72px] rounded-xl border-2 border-dashed border-border text-foreground-muted hover:text-primary hover:border-primary/40 hover:bg-primary-subtle/20 transition-all flex flex-col items-center justify-center gap-1"
+                            >
+                              <Plus className="size-5" />
+                              <span className="text-[10px] font-medium">{locale === "en" ? "Add domain" : "Ajouter un domaine"}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button size="sm" onClick={() => setShowAddAccount(true)}>
@@ -1987,8 +2366,8 @@ export default function SettingsPage() {
 
             {/* Add Account Modal */}
             {showAddAccount && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAddAccount(false)}>
-                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-md mx-4 p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold text-foreground">
                       {locale === "en" ? "Add Email Account" : "Ajouter un compte email"}
@@ -2056,10 +2435,633 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {/* No account? Create one — Provider guide */}
+            <SectionCard
+              title={locale === "en" ? "No SMTP account?" : "Pas de compte SMTP ?"}
+              description={locale === "en"
+                ? "Choose a provider and create your sending accounts in minutes."
+                : "Choisissez un fournisseur et créez vos comptes d'envoi en quelques minutes."}
+            >
+              <Button variant="secondary" size="sm" onClick={() => setShowProviderGuide(true)}>
+                <Plus className="size-4 mr-1" />
+                {locale === "en" ? "See providers" : "Voir les fournisseurs"}
+              </Button>
+            </SectionCard>
+
+            {/* DNS Setup Guide */}
+            <SectionCard
+              title={locale === "en" ? "Domain setup guide" : "Guide de configuration du domaine"}
+              description={locale === "en"
+                ? "Follow these steps to properly configure your sending domain for maximum deliverability."
+                : "Suivez ces étapes pour configurer correctement votre domaine d'envoi et maximiser la délivrabilité."}
+            >
+              <div className="space-y-4">
+                {/* Step 1 */}
+                <div className="flex gap-3">
+                  <div className="shrink-0 size-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">1</div>
+                  <div className="flex-1 pt-0.5">
+                    <p className="text-sm font-semibold text-foreground">
+                      {locale === "en" ? "Buy a dedicated domain" : "Acheter un domaine dédié"}
+                    </p>
+                    <p className="text-xs text-foreground-muted mt-1">
+                      {locale === "en"
+                        ? "Use a separate domain for outreach (e.g. yourcompany-mail.com). Never use your main business domain. We recommend Cloudflare (~$10/year) or Namecheap (~$11/year)."
+                        : "Utilisez un domaine séparé pour la prospection (ex : votreentreprise-mail.com). N'utilisez jamais votre domaine principal. On recommande Cloudflare (~10$/an) ou Namecheap (~11$/an)."}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Step 2 */}
+                <div className="flex gap-3">
+                  <div className="shrink-0 size-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">2</div>
+                  <div className="flex-1 pt-0.5">
+                    <p className="text-sm font-semibold text-foreground">
+                      {locale === "en" ? "Create email accounts" : "Créer des comptes email"}
+                    </p>
+                    <p className="text-xs text-foreground-muted mt-1">
+                      {locale === "en"
+                        ? "Sign up with an email provider (Zoho $1/mailbox, Google Workspace $7.20/user) and create your mailboxes (contact@, info@, hello@, etc.)."
+                        : "Inscrivez-vous chez un fournisseur email (Zoho 1$/boîte, Google Workspace 7,20$/user) et créez vos boîtes mail (contact@, info@, hello@, etc.)."}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Step 3 — DNS per provider */}
+                {(() => {
+                  const dnsProviders = [
+                    {
+                      id: "zoho",
+                      name: "Zoho Mail",
+                      logo: <svg className="size-5" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="#D4382C"/><text x="6" y="16" fill="white" fontSize="10" fontWeight="bold" fontFamily="sans-serif">Z</text></svg>,
+                      spf: 'v=spf1 include:zoho.com ~all',
+                      spfGuide: locale === "en" ? "Zoho Admin → Mail Admin → your domain → Email Configuration → SPF → copy the TXT record" : "Zoho Admin → Mail Admin → votre domaine → Configuration Email → SPF → copier le record TXT",
+                      dkimSelector: "zmail._domainkey",
+                      dkimGuide: locale === "en" ? "Zoho Admin → Mail Admin → your domain → Email Configuration → DKIM" : "Zoho Admin → Mail Admin → votre domaine → Configuration Email → DKIM",
+                    },
+                    {
+                      id: "google",
+                      name: "Google Workspace",
+                      logo: <svg className="size-5" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 010 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z" fill="#EA4335"/></svg>,
+                      spf: 'v=spf1 include:_spf.google.com ~all',
+                      spfGuide: locale === "en" ? "Admin Console → Apps → Google Workspace → Gmail → SPF → use the value above" : "Console Admin → Apps → Google Workspace → Gmail → SPF → utilisez la valeur ci-dessus",
+                      dkimSelector: "google._domainkey",
+                      dkimGuide: locale === "en" ? "Admin Console → Apps → Google Workspace → Gmail → Authenticate email → Generate new record" : "Console Admin → Apps → Google Workspace → Gmail → Authentifier l'email → Générer un nouvel enregistrement",
+                    },
+                    {
+                      id: "outlook",
+                      name: "Microsoft 365",
+                      logo: <svg className="size-5" viewBox="0 0 24 24"><path d="M24 7.387v10.478c0 .23-.08.424-.238.576a.806.806 0 01-.588.234h-8.42v-6.56l1.678 1.2a.272.272 0 00.31 0L24 7.387zm-9.246 5.157V5.811l.37-.249h8.05c.23 0 .424.08.588.234.164.155.238.35.238.576v.725l-7.249 5.197-1.997-1.75z" fill="#0072C6"/><path d="M7.254 8.348c.375-.553.877-.83 1.508-.83.591 0 1.073.267 1.448.8.375.534.563 1.227.563 2.08 0 .88-.191 1.594-.574 2.143-.383.55-.882.824-1.497.824-.591 0-1.073-.267-1.448-.8-.375-.534-.563-1.234-.563-2.1 0-.86.188-1.564.563-2.117zM0 3.932l8.674-1.25v18.636L0 20.068V3.932z" fill="#0072C6"/></svg>,
+                      spf: 'v=spf1 include:spf.protection.outlook.com ~all',
+                      spfGuide: locale === "en" ? "Microsoft 365 Admin → Settings → Domains → your domain → DNS records → add TXT record with the value above" : "Admin Microsoft 365 → Paramètres → Domaines → votre domaine → Enregistrements DNS → ajouter un record TXT avec la valeur ci-dessus",
+                      dkimSelector: "selector1._domainkey",
+                      dkimGuide: locale === "en" ? "Microsoft 365 Admin → Settings → Domains → your domain → DNS records → DKIM" : "Admin Microsoft 365 → Paramètres → Domaines → votre domaine → Enregistrements DNS → DKIM",
+                    },
+                    {
+                      id: "ses",
+                      name: "Amazon SES",
+                      logo: <svg className="size-5" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z" fill="#FF9900"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="#FF9900" fill="none" strokeWidth="1.5"/></svg>,
+                      spf: 'v=spf1 include:amazonses.com ~all',
+                      spfGuide: locale === "en" ? "AWS SES Console → Verified Identities → your domain → SPF → custom MAIL FROM domain → copy TXT value" : "Console AWS SES → Identités vérifiées → votre domaine → SPF → domaine MAIL FROM personnalisé → copier la valeur TXT",
+                      dkimSelector: "*._domainkey",
+                      dkimGuide: locale === "en" ? "AWS SES Console → Verified Identities → your domain → DKIM → Easy DKIM → Generate 3 CNAME records" : "Console AWS SES → Identités vérifiées → votre domaine → DKIM → Easy DKIM → Générer 3 enregistrements CNAME",
+                    },
+                    {
+                      id: "sendgrid",
+                      name: "SendGrid",
+                      logo: <svg className="size-5" viewBox="0 0 24 24"><rect x="0" y="0" width="8" height="8" fill="#1A82E2"/><rect x="8" y="0" width="8" height="8" fill="#1A82E2" opacity="0.6"/><rect x="8" y="8" width="8" height="8" fill="#1A82E2"/><rect x="16" y="8" width="8" height="8" fill="#1A82E2" opacity="0.6"/><rect x="16" y="16" width="8" height="8" fill="#1A82E2"/><rect x="8" y="16" width="8" height="8" fill="#1A82E2" opacity="0.4"/></svg>,
+                      spf: 'v=spf1 include:sendgrid.net ~all',
+                      spfGuide: locale === "en" ? "SendGrid Dashboard → Settings → Sender Authentication → Authenticate your domain → copy TXT value for SPF" : "Dashboard SendGrid → Paramètres → Authentification d'expéditeur → Authentifier votre domaine → copier la valeur TXT pour SPF",
+                      dkimSelector: "s1._domainkey",
+                      dkimGuide: locale === "en" ? "SendGrid Dashboard → Settings → Sender Authentication → Authenticate your domain" : "Dashboard SendGrid → Paramètres → Authentification d'expéditeur → Authentifier votre domaine",
+                    },
+                    {
+                      id: "namecheap",
+                      name: "Namecheap Email",
+                      logo: <svg className="size-5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#DE3723"/><text x="6.5" y="16.5" fill="white" fontSize="11" fontWeight="bold" fontFamily="sans-serif">N</text></svg>,
+                      spf: 'v=spf1 include:spf.privateemail.com ~all',
+                      spfGuide: locale === "en" ? "Namecheap → Private Email → Domain → DNS Records → copy the SPF TXT value" : "Namecheap → Private Email → Domaine → Enregistrements DNS → copier la valeur TXT du SPF",
+                      dkimSelector: "default._domainkey",
+                      dkimGuide: locale === "en" ? "Namecheap → Private Email → Domain → DNS Records → copy DKIM value" : "Namecheap → Private Email → Domaine → Enregistrements DNS → copier la valeur DKIM",
+                    },
+                  ];
+
+                  const activeProvider = dnsProviders.find(p => p.id === activeDnsProvider) || dnsProviders[0];
+
+                  return (
+                    <div className="flex gap-3">
+                      <div className="shrink-0 size-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">3</div>
+                      <div className="flex-1 pt-0.5">
+                        <p className="text-sm font-semibold text-foreground">
+                          {locale === "en" ? "Configure DNS records" : "Configurer les enregistrements DNS"}
+                        </p>
+                        <p className="text-xs text-foreground-muted mt-1 mb-3">
+                          {locale === "en"
+                            ? "Select your provider below to see the exact DNS records to add."
+                            : "Sélectionnez votre fournisseur ci-dessous pour voir les enregistrements DNS exacts à ajouter."}
+                        </p>
+
+                        {/* Provider selector */}
+                        <div className="flex gap-1.5 flex-wrap mb-4">
+                          {dnsProviders.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => setActiveDnsProvider(p.id)}
+                              className={cn(
+                                "flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-all",
+                                activeDnsProvider === p.id
+                                  ? "border-primary bg-primary-subtle text-foreground shadow-sm"
+                                  : "border-border bg-card text-foreground-muted hover:border-primary/30 hover:text-foreground"
+                              )}
+                            >
+                              {p.logo}
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* DNS records for selected provider */}
+                        <div className="space-y-2.5">
+                          {/* SPF */}
+                          <div className="rounded-lg border border-border bg-background-subtle p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              {activeProvider.logo}
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary-subtle px-1.5 py-0.5 rounded">SPF</span>
+                              <span className="text-xs font-medium text-foreground">
+                                {locale === "en" ? "Sender authorization" : "Autorisation d'envoi"}
+                              </span>
+                            </div>
+                            <div className="font-mono text-[11px] bg-background rounded border border-border p-2.5 select-all text-foreground leading-relaxed">
+                              TXT &nbsp; @ &nbsp; &quot;{activeProvider.spf}&quot;
+                            </div>
+                            <div className="flex items-start gap-1.5 mt-2">
+                              <Info className="size-3 text-foreground-muted shrink-0 mt-0.5" />
+                              <p className="text-[10px] text-foreground-muted leading-relaxed">
+                                {activeProvider.spfGuide}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* DKIM */}
+                          <div className="rounded-lg border border-border bg-background-subtle p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              {activeProvider.logo}
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-success bg-success-subtle px-1.5 py-0.5 rounded">DKIM</span>
+                              <span className="text-xs font-medium text-foreground">
+                                {locale === "en" ? "Email signature" : "Signature email"}
+                              </span>
+                            </div>
+                            <div className="font-mono text-[11px] bg-background rounded border border-border p-2.5 select-all text-foreground leading-relaxed">
+                              TXT &nbsp; <span className="text-success">{activeProvider.dkimSelector}</span> &nbsp; &quot;v=DKIM1; k=rsa; p=<span className="text-foreground-muted">...</span>&quot;
+                            </div>
+                            <div className="flex items-start gap-1.5 mt-2">
+                              <Info className="size-3 text-foreground-muted shrink-0 mt-0.5" />
+                              <p className="text-[10px] text-foreground-muted leading-relaxed">
+                                {activeProvider.dkimGuide}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* DMARC — same for all providers */}
+                          <div className="rounded-lg border border-border bg-background-subtle p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Shield className="size-4 text-warning" />
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-warning bg-warning-subtle px-1.5 py-0.5 rounded">DMARC</span>
+                              <span className="text-xs font-medium text-foreground">
+                                {locale === "en" ? "Anti-spoofing policy" : "Politique anti-usurpation"}
+                              </span>
+                              <span className="text-[9px] text-foreground-muted ml-auto">
+                                {locale === "en" ? "Same for all providers" : "Identique pour tous les fournisseurs"}
+                              </span>
+                            </div>
+                            <div className="font-mono text-[11px] bg-background rounded border border-border p-2.5 select-all text-foreground leading-relaxed">
+                              TXT &nbsp; <span className="text-warning">_dmarc</span> &nbsp; &quot;v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.com&quot;
+                            </div>
+                            <p className="text-[10px] text-foreground-muted mt-1.5">
+                              {locale === "en"
+                                ? "Start with p=none (monitoring). After 2-4 weeks → p=quarantine → p=reject."
+                                : "Commencez avec p=none (surveillance). Après 2-4 semaines → p=quarantine → p=reject."}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Step 4 — Tracking domain */}
+                <div className="flex gap-3">
+                  <div className="shrink-0 size-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">4</div>
+                  <div className="flex-1 pt-0.5">
+                    <p className="text-sm font-semibold text-foreground">
+                      {locale === "en" ? "Custom tracking domain (optional)" : "Domaine de tracking personnalisé (optionnel)"}
+                    </p>
+                    <p className="text-xs text-foreground-muted mt-1 mb-2">
+                      {locale === "en"
+                        ? "Add a CNAME record so open tracking and unsubscribe links use your domain instead of LeadNova's."
+                        : "Ajoutez un enregistrement CNAME pour que les pixels de tracking et liens de désinscription utilisent votre domaine au lieu de celui de LeadNova."}
+                    </p>
+                    <div className="rounded-lg border border-border bg-background-subtle p-3">
+                      <div className="font-mono text-[11px] bg-background rounded border border-border p-2 select-all text-foreground">
+                        CNAME &nbsp; <span className="text-primary">track</span> &nbsp; → &nbsp; {typeof window !== "undefined" ? window.location.hostname : "leadnova.one"}
+                      </div>
+                      <p className="text-[10px] text-foreground-muted mt-1.5">
+                        {locale === "en"
+                          ? "Then go to Settings → Email → Custom Tracking Domain and enter track.yourdomain.com"
+                          : "Puis allez dans Paramètres → Email → Domaine de tracking personnalisé et entrez track.votredomaine.com"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 5 — Connect */}
+                <div className="flex gap-3">
+                  <div className="shrink-0 size-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">5</div>
+                  <div className="flex-1 pt-0.5">
+                    <p className="text-sm font-semibold text-foreground">
+                      {locale === "en" ? "Connect in LeadNova" : "Connecter dans LeadNova"}
+                    </p>
+                    <p className="text-xs text-foreground-muted mt-1">
+                      {locale === "en"
+                        ? "Click on the nodes in the architecture diagram above or use the \"Add account\" button to enter your SMTP credentials. The warm-up process starts automatically — your accounts will be promoted to Active once ready."
+                        : "Cliquez sur les nodes dans le diagramme d'architecture ci-dessus ou utilisez le bouton « Ajouter un compte » pour entrer vos identifiants SMTP. Le processus de préchauffage démarre automatiquement — vos comptes seront promus en Actif une fois prêts."}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Wait times */}
+                <div className="rounded-lg border border-border bg-background-subtle p-4">
+                  <p className="text-xs font-semibold text-foreground mb-2">
+                    {locale === "en" ? "Typical timeline" : "Calendrier typique"}
+                  </p>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div>
+                      <p className="text-lg font-bold text-foreground">24h</p>
+                      <p className="text-[10px] text-foreground-muted">{locale === "en" ? "DNS propagation" : "Propagation DNS"}</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">2-4</p>
+                      <p className="text-[10px] text-foreground-muted">{locale === "en" ? "weeks warm-up" : "semaines préchauffage"}</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-success">100%</p>
+                      <p className="text-[10px] text-foreground-muted">{locale === "en" ? "full capacity" : "pleine capacité"}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* Node Config Popup */}
+            {schemaNodeConfig && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-md mx-4 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-foreground">
+                      {schemaNodeConfig.email
+                        ? (locale === "en" ? "Edit account" : "Modifier le compte")
+                        : (locale === "en" ? "Connect account" : "Connecter un compte")}
+                    </h3>
+                    <button onClick={() => setSchemaNodeConfig(null)} className="p-1 text-foreground-muted hover:text-foreground"><X className="size-4" /></button>
+                  </div>
+                  <div className="space-y-3">
+                    <FieldGroup label="Email">
+                      <Input
+                        value={schemaNodeConfig.email}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, email: e.target.value })}
+                        placeholder="contact@domain.com"
+                      />
+                    </FieldGroup>
+                    <FieldGroup label={locale === "en" ? "Display name" : "Nom d'affichage"}>
+                      <Input
+                        value={schemaNodeConfig.displayName}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, displayName: e.target.value })}
+                        placeholder="John Doe"
+                      />
+                    </FieldGroup>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FieldGroup label={locale === "en" ? "SMTP Host" : "Hôte SMTP"}>
+                        <Input
+                          value={schemaNodeConfig.smtpHost}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, smtpHost: e.target.value })}
+                          placeholder="smtp.zoho.com"
+                        />
+                      </FieldGroup>
+                      <FieldGroup label="Port">
+                        <Input
+                          value={schemaNodeConfig.smtpPort}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, smtpPort: e.target.value })}
+                          placeholder="587"
+                        />
+                      </FieldGroup>
+                    </div>
+                    <FieldGroup label={locale === "en" ? "SMTP User" : "Utilisateur SMTP"}>
+                      <Input
+                        value={schemaNodeConfig.smtpUser}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, smtpUser: e.target.value })}
+                        placeholder={schemaNodeConfig.email || "email@domain.com"}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label={locale === "en" ? "Password" : "Mot de passe"}>
+                      <Input
+                        type="password"
+                        value={schemaNodeConfig.smtpPass}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, smtpPass: e.target.value })}
+                        placeholder="••••••••"
+                      />
+                    </FieldGroup>
+                    <FieldGroup label={locale === "en" ? "Daily send limit" : "Limite d'envoi par jour"}>
+                      <Input
+                        type="number"
+                        value={schemaNodeConfig.dailyLimit}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, dailyLimit: e.target.value })}
+                        min="5"
+                        max="500"
+                      />
+                    </FieldGroup>
+
+                    {/* IMAP */}
+                    <details className="group">
+                      <summary className="text-xs text-foreground-muted cursor-pointer hover:text-foreground">
+                        IMAP ({locale === "en" ? "optional, for reply detection" : "optionnel, pour détecter les réponses"})
+                      </summary>
+                      <div className="mt-2 space-y-3 pl-2 border-l-2 border-border">
+                        <div className="grid grid-cols-2 gap-3">
+                          <FieldGroup label={locale === "en" ? "IMAP Host" : "Hôte IMAP"}>
+                            <Input
+                              value={schemaNodeConfig.imapHost}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, imapHost: e.target.value })}
+                              placeholder="imap.zoho.com"
+                            />
+                          </FieldGroup>
+                          <FieldGroup label="Port">
+                            <Input
+                              value={schemaNodeConfig.imapPort}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, imapPort: e.target.value })}
+                              placeholder="993"
+                            />
+                          </FieldGroup>
+                        </div>
+                        <FieldGroup label={locale === "en" ? "IMAP User" : "Utilisateur IMAP"}>
+                          <Input
+                            value={schemaNodeConfig.imapUser}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, imapUser: e.target.value })}
+                            placeholder={schemaNodeConfig.email || "email@domain.com"}
+                          />
+                        </FieldGroup>
+                        <FieldGroup label={locale === "en" ? "IMAP Password" : "Mot de passe IMAP"}>
+                          <Input
+                            type="password"
+                            value={schemaNodeConfig.imapPass}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSchemaNodeConfig({ ...schemaNodeConfig, imapPass: e.target.value })}
+                            placeholder="••••••••"
+                          />
+                        </FieldGroup>
+                      </div>
+                    </details>
+                  </div>
+                  <div className="flex justify-between mt-5">
+                    <div>
+                      {schemaNodeConfig.emailId && schemaNodeConfig.email && (
+                        <Button
+                          variant="danger-ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSchemaDomains(prev => prev.map(d => d.id === schemaNodeConfig.domainId ? {
+                              ...d,
+                              emails: d.emails.filter(em => em.id !== schemaNodeConfig.emailId),
+                            } : d));
+                            setSchemaNodeConfig(null);
+                          }}
+                        >
+                          <Trash2 className="size-3.5 mr-1" />
+                          {locale === "en" ? "Remove" : "Supprimer"}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => setSchemaNodeConfig(null)}>
+                        {locale === "en" ? "Cancel" : "Annuler"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          const cfg = schemaNodeConfig;
+                          const emailAddr = cfg.email.trim();
+                          if (!emailAddr || !emailAddr.includes("@")) {
+                            showToast(locale === "en" ? "Enter a valid email" : "Entrez un email valide", "error");
+                            return;
+                          }
+                          // Update the schema visual
+                          setSchemaDomains(prev => prev.map(d => d.id === cfg.domainId ? {
+                            ...d,
+                            name: d.name || emailAddr.split("@")[1],
+                            emails: d.emails.map(em => em.id === cfg.emailId ? {
+                              ...em,
+                              address: emailAddr,
+                              limit: parseInt(cfg.dailyLimit) || 100,
+                            } : em),
+                          } : d));
+                          // Also create the real account via API
+                          if (cfg.smtpHost && cfg.smtpPass) {
+                            const res = await fetch("/api/email-accounts", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                email: emailAddr,
+                                displayName: cfg.displayName || null,
+                                smtpHost: cfg.smtpHost,
+                                smtpPort: cfg.smtpPort,
+                                smtpUser: cfg.smtpUser || emailAddr,
+                                smtpPass: cfg.smtpPass,
+                                imapHost: cfg.imapHost || null,
+                                imapPort: cfg.imapPort || "993",
+                                imapUser: cfg.imapUser || null,
+                                imapPass: cfg.imapPass || null,
+                                dailyLimit: cfg.dailyLimit || "100",
+                              }),
+                            });
+                            const data = await res.json();
+                            if (res.ok) {
+                              showToast(locale === "en" ? "Account connected!" : "Compte connecté !", "success");
+                              fetchEmailAccounts();
+                            } else {
+                              showToast(data.error || "Erreur", "error");
+                            }
+                          }
+                          setSchemaNodeConfig(null);
+                        }}
+                      >
+                        <Check className="size-4 mr-1" />
+                        {locale === "en" ? "Connect" : "Connecter"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Provider Guide Modal */}
+            {showProviderGuide && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-2xl mx-4 p-6 max-h-[85vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="font-semibold text-foreground text-lg">
+                      {locale === "en" ? "Choose an email provider" : "Choisir un fournisseur email"}
+                    </h3>
+                    <button onClick={() => setShowProviderGuide(false)} className="p-1 text-foreground-muted hover:text-foreground"><X className="size-4" /></button>
+                  </div>
+                  <p className="text-xs text-foreground-muted mb-4">
+                    {locale === "en"
+                      ? "Create accounts with one of these providers, then add them in LeadNova with their SMTP credentials."
+                      : "Créez des comptes chez un de ces fournisseurs, puis ajoutez-les dans LeadNova avec leurs identifiants SMTP."}
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {[
+                      {
+                        name: "Zoho Mail",
+                        price: locale === "en" ? "$1/mailbox/mo" : "1$/boîte/mois",
+                        smtp: "smtp.zoho.com:587",
+                        imap: "imap.zoho.com:993",
+                        url: "https://www.zoho.com/mail/",
+                        recommended: true,
+                        desc: locale === "en"
+                          ? "Best value. $1/mailbox, easy setup, good deliverability. Recommended for cold outreach."
+                          : "Meilleur rapport qualité/prix. 1$/boîte, setup facile, bonne délivrabilité. Recommandé pour la prospection.",
+                      },
+                      {
+                        name: "Google Workspace",
+                        price: locale === "en" ? "$7.20/user/mo" : "7,20$/user/mois",
+                        smtp: "smtp.gmail.com:587",
+                        imap: "imap.gmail.com:993",
+                        url: "https://workspace.google.com/",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Premium reputation. Higher cost but excellent deliverability. Use App Passwords for SMTP."
+                          : "Réputation premium. Plus cher mais excellente délivrabilité. Utilisez les mots de passe d'application.",
+                      },
+                      {
+                        name: "Microsoft 365",
+                        price: locale === "en" ? "$6/user/mo" : "6$/user/mois",
+                        smtp: "smtp.office365.com:587",
+                        imap: "outlook.office365.com:993",
+                        url: "https://www.microsoft.com/en-us/microsoft-365/business/",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Good for B2B. Strong reputation with corporate recipients."
+                          : "Bon pour le B2B. Forte réputation auprès des destinataires corporatifs.",
+                      },
+                      {
+                        name: "Amazon SES",
+                        price: locale === "en" ? "$0.10/1000 emails" : "0,10$/1000 emails",
+                        smtp: "email-smtp.us-east-1.amazonaws.com:587",
+                        imap: "—",
+                        url: "https://aws.amazon.com/ses/",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Cheapest at volume. No mailbox — SMTP only. No IMAP (use another provider for replies)."
+                          : "Le moins cher en volume. Pas de boîte mail — SMTP seulement. Pas d'IMAP (utilisez un autre fournisseur pour les réponses).",
+                      },
+                      {
+                        name: "SendGrid",
+                        price: locale === "en" ? "$19.95/mo (50k emails)" : "19,95$/mois (50k emails)",
+                        smtp: "smtp.sendgrid.net:587",
+                        imap: "—",
+                        url: "https://sendgrid.com/",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Transactional email platform. API key as SMTP password. No IMAP."
+                          : "Plateforme email transactionnelle. Clé API comme mot de passe SMTP. Pas d'IMAP.",
+                      },
+                      {
+                        name: "Namecheap Email",
+                        price: locale === "en" ? "$1.09/mailbox/mo" : "1,09$/boîte/mois",
+                        smtp: "mail.privateemail.com:587",
+                        imap: "mail.privateemail.com:993",
+                        url: "https://www.namecheap.com/hosting/email/",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Affordable with domain purchase. Good for secondary domains."
+                          : "Abordable avec achat de domaine. Bon pour les domaines secondaires.",
+                      },
+                      {
+                        name: "Hostinger Email",
+                        price: locale === "en" ? "$0.99/mailbox/mo" : "0,99$/boîte/mois",
+                        smtp: "smtp.hostinger.com:465",
+                        imap: "imap.hostinger.com:993",
+                        url: "https://www.hostinger.com/email",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Budget option. Good enough for outreach with proper warm-up."
+                          : "Option budget. Suffisant pour la prospection avec un bon préchauffage.",
+                      },
+                      {
+                        name: "Mailgun",
+                        price: locale === "en" ? "$0.80/1000 emails" : "0,80$/1000 emails",
+                        smtp: "smtp.mailgun.org:587",
+                        imap: "—",
+                        url: "https://www.mailgun.com/",
+                        recommended: false,
+                        desc: locale === "en"
+                          ? "Developer-friendly API + SMTP. Good analytics. No IMAP."
+                          : "API + SMTP orienté développeurs. Bonnes analytics. Pas d'IMAP.",
+                      },
+                    ].map((provider) => (
+                      <div
+                        key={provider.name}
+                        className={cn(
+                          "rounded-xl border p-5 flex flex-col transition-all",
+                          provider.recommended
+                            ? "border-primary/40 bg-primary-subtle shadow-sm"
+                            : "border-border bg-card hover:border-primary/20 hover:shadow-sm"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-bold text-[15px] tracking-tight text-foreground">{provider.name}</span>
+                          {provider.recommended && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary text-white font-semibold tracking-wide uppercase">
+                              {locale === "en" ? "Recommended" : "Recommandé"}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[13px] leading-relaxed text-foreground-secondary mb-3 flex-1">{provider.desc}</p>
+                        <div className="rounded-md bg-background-subtle border border-border px-3 py-2 space-y-1 mb-3">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-foreground-muted font-medium">SMTP</span>
+                            <span className="font-mono text-foreground">{provider.smtp}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-foreground-muted font-medium">IMAP</span>
+                            <span className="font-mono text-foreground">{provider.imap}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border">
+                            <span className="text-foreground-muted font-medium">{locale === "en" ? "Price" : "Prix"}</span>
+                            <span className="font-semibold text-foreground text-xs">{provider.price}</span>
+                          </div>
+                        </div>
+                        <a
+                          href={provider.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[13px] text-primary hover:text-primary-hover font-semibold transition-colors mt-auto"
+                        >
+                          {locale === "en" ? "Create account" : "Créer un compte"} <ArrowRight className="size-3" />
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-end mt-5">
+                    <Button variant="secondary" size="sm" onClick={() => setShowProviderGuide(false)}>
+                      {locale === "en" ? "Close" : "Fermer"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Bulk Import Modal */}
             {showBulkImport && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowBulkImport(false)}>
-                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                <div className="bg-card rounded-lg border border-border shadow-xl w-full max-w-lg mx-4 p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold text-foreground">
                       {locale === "en" ? "Bulk Import" : "Import en masse"}

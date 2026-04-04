@@ -847,16 +847,81 @@ interface MapsResult {
 }
 
 async function searchGoogleMaps(companyName: string, city?: string): Promise<MapsResult | null> {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) {
-    console.warn("[Google Places] ⚠️ GOOGLE_PLACES_API_KEY manquante — impossible de chercher sur Google Maps");
-    return null;
+  // ── Outscraper API (preferred) ──
+  const outscrapeKey = process.env.OUTSCRAPER_API_KEY;
+  if (outscrapeKey) {
+    return searchViaOutscraperEnrich(companyName, city, outscrapeKey);
   }
 
-  const query = city ? `${companyName} ${city}` : `${companyName} Québec`;
+  // ── Google Places API (fallback) ──
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) {
+    console.warn("[searchGoogleMaps] No OUTSCRAPER_API_KEY or GOOGLE_PLACES_API_KEY configured");
+    return null;
+  }
+  return searchViaGooglePlacesEnrich(companyName, city, apiKey);
+}
+
+async function searchViaOutscraperEnrich(companyName: string, city: string | undefined, apiKey: string): Promise<MapsResult | null> {
+  const query = city ? `${companyName} ${city}` : companyName;
 
   try {
-    // Step 1: Text Search to find the place
+    const params = new URLSearchParams({
+      query,
+      limit: "5",
+      language: "en",
+      region: "US",
+    });
+
+    const res = await fetch(`https://api.app.outscraper.com/maps/search-v3?${params}`, {
+      headers: { "X-API-KEY": apiKey },
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    if (!res.ok) {
+      console.warn(`[Outscraper] Enrichment search returned ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const results: Array<{
+      name?: string;
+      full_address?: string;
+      phone?: string;
+      site?: string;
+      city?: string;
+    }> = Array.isArray(data?.data?.[0]) ? data.data[0] : (data?.data || []);
+
+    if (results.length === 0) return null;
+
+    // Find best match
+    const companyLower = companyName.toLowerCase();
+    const bestMatch = results.find((r) => {
+      const name = (r.name || "").toLowerCase();
+      return name.includes(companyLower) || companyLower.includes(name);
+    }) || results[0];
+
+    const rawPhone = bestMatch.phone || "";
+    const phoneDigits = rawPhone.replace(/\D/g, "");
+    const validPhone = phoneDigits.length >= 10 ? rawPhone : undefined;
+
+    return {
+      title: bestMatch.name,
+      address: bestMatch.full_address,
+      phone: validPhone,
+      website: bestMatch.site,
+      city: bestMatch.city ? normalizeCity(bestMatch.city) : undefined,
+    };
+  } catch (err) {
+    console.warn("[Outscraper] Enrichment error:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+async function searchViaGooglePlacesEnrich(companyName: string, city: string | undefined, apiKey: string): Promise<MapsResult | null> {
+  const query = city ? `${companyName} ${city}` : `${companyName}`;
+
+  try {
     const searchRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
       headers: {
@@ -866,8 +931,7 @@ async function searchGoogleMaps(companyName: string, city?: string): Promise<Map
       },
       body: JSON.stringify({
         textQuery: query,
-        languageCode: "fr",
-        regionCode: "CA",
+        languageCode: "en",
         maxResultCount: 5,
       }),
       signal: AbortSignal.timeout(10_000),
@@ -875,11 +939,7 @@ async function searchGoogleMaps(companyName: string, city?: string): Promise<Map
 
     if (!searchRes.ok) {
       const errText = await searchRes.text().catch(() => "");
-      if (searchRes.status === 403 || errText.includes("API_KEY")) {
-        console.error("[Google Places] ⚠️ Clé API invalide ou API non activée. Activez 'Places API (New)' sur console.cloud.google.com");
-      } else {
-        console.warn(`[Google Places] Text Search returned ${searchRes.status}: ${errText.substring(0, 200)}`);
-      }
+      console.warn(`[Google Places] Text Search returned ${searchRes.status}: ${errText.substring(0, 200)}`);
       return null;
     }
 
@@ -891,22 +951,17 @@ async function searchGoogleMaps(companyName: string, city?: string): Promise<Map
       nationalPhoneNumber?: string;
       internationalPhoneNumber?: string;
       websiteUri?: string;
-      addressComponents?: Array<{
-        longText?: string;
-        types?: string[];
-      }>;
+      addressComponents?: Array<{ longText?: string; types?: string[] }>;
     }> = searchData.places || [];
 
     if (places.length === 0) return null;
 
-    // Find best match: prefer results whose name matches the company name
     const companyLower = companyName.toLowerCase();
     const bestMatch = places.find((p) => {
       const name = p.displayName?.text?.toLowerCase() || "";
       return name.includes(companyLower) || companyLower.includes(name);
     }) || places[0];
 
-    // Extract city from addressComponents
     let extractedCity: string | null = null;
     if (bestMatch.addressComponents) {
       for (const comp of bestMatch.addressComponents) {
@@ -916,12 +971,10 @@ async function searchGoogleMaps(companyName: string, city?: string): Promise<Map
         }
       }
     }
-    // Fallback: extract city from formatted address
     if (!extractedCity && bestMatch.formattedAddress) {
       extractedCity = extractCityFromAddressText(bestMatch.formattedAddress);
     }
 
-    // Validate phone (must have at least 10 digits)
     const rawPhone = bestMatch.nationalPhoneNumber || bestMatch.internationalPhoneNumber || "";
     const phoneDigits = rawPhone.replace(/\D/g, "");
     const validPhone = phoneDigits.length >= 10 ? rawPhone : undefined;

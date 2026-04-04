@@ -51,6 +51,7 @@ DATABASE_TCP_URL        — PostgreSQL connection string
 ANTHROPIC_API_KEY       — Claude AI
 GOOGLE_API_KEY          — Discovery
 GOOGLE_CX               — Custom Search Engine ID
+OUTSCRAPER_API_KEY      — Google Maps scraping (primary discovery)
 SERPER_API_KEY          — Alternative search
 OPENAI_API_KEY          — Whisper transcription + keyword expansion
 SMTP_HOST/USER/PASS     — Email sending

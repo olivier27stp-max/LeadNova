@@ -42,6 +42,57 @@ function matchesBlockedKeyword(text: string, blockedKeywords: string[]): boolean
   return blockedKeywords.some((bk) => lower.includes(bk));
 }
 
+// ─── Relevance filtering ─────────────────────────────────
+// Detects when a Google result is from a completely different industry
+// even though it shares a keyword (e.g. "vitres" → window cleaning vs auto glass)
+
+// Map of search terms → unrelated industry indicators in company name/address
+const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[] }> = [
+  // Window cleaning ≠ auto glass
+  { keywords: ["lavage de vitres", "nettoyage de vitres", "vitres résidentielles", "vitres commerciales"],
+    exclude: ["auto", "automobile", "pare-brise", "windshield", "carrosserie", "d'autos", "d'auto", "car wash"] },
+  // Pressure washing ≠ car wash
+  { keywords: ["lavage à pression", "lavage pression"],
+    exclude: ["auto", "automobile", "car wash", "lave-auto"] },
+  // Building cleaning ≠ duct cleaning, chimney
+  { keywords: ["nettoyage", "entretien ménager", "femme de ménage"],
+    exclude: ["conduit", "ventilation", "cheminée", "ramonage", "fosse septique", "drain"] },
+  // Landscaping ≠ snow removal only companies
+  { keywords: ["aménagement paysager", "paysagiste"],
+    exclude: ["déneigement", "excavation", "asphalte"] },
+  // Plumbing ≠ HVAC
+  { keywords: ["plombier", "plomberie"],
+    exclude: ["climatisation", "chauffage", "thermopompe", "hvac"] },
+  // Painting ≠ auto painting
+  { keywords: ["peinture", "peintre"],
+    exclude: ["auto", "automobile", "carrosserie", "débosselage"] },
+  // Roofing ≠ solar panels
+  { keywords: ["toiture", "couvreur"],
+    exclude: ["solaire", "solar", "panneau"] },
+  // Window washing ≠ window installation
+  { keywords: ["lavage de vitres", "nettoyage de vitres"],
+    exclude: ["installation", "remplacement", "fenêtre", "porte et fenêtre", "vitrerie"] },
+];
+
+/** Check if a result is irrelevant based on the search keyword vs company name mismatch */
+function isIrrelevantResult(companyName: string, searchKeyword: string): boolean {
+  const nameLower = companyName.toLowerCase();
+  const kwLower = searchKeyword.toLowerCase();
+
+  for (const rule of INDUSTRY_EXCLUSIONS) {
+    // Check if the search keyword matches this rule
+    const keywordMatches = rule.keywords.some((k) => kwLower.includes(k));
+    if (!keywordMatches) continue;
+
+    // If it does, check if the company name contains excluded terms
+    if (rule.exclude.some((ex) => nameLower.includes(ex))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // ─── City name normalization (merge variants) ────────────
 const CITY_CANONICAL: Record<string, string> = {
   "montreal": "Montréal",
@@ -105,6 +156,7 @@ interface SearchResult {
   industry: string;
   source: string;
   reviewCount?: number;
+  _searchQuery?: string; // internal: the query that found this result
 }
 
 interface DiscoveryDiagnostics {
@@ -131,10 +183,148 @@ interface PlacesResult {
   userRatingCount?: number;
 }
 
+// Coordinates of QC cities for locationBias (lat, lng, radiusMeters)
+// Radius of 30km covers surrounding towns (ex: Wickham for Drummondville)
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  "montréal": { lat: 45.5017, lng: -73.5673 },
+  "québec": { lat: 46.8139, lng: -71.2080 },
+  "laval": { lat: 45.6066, lng: -73.7124 },
+  "gatineau": { lat: 45.4765, lng: -75.7013 },
+  "longueuil": { lat: 45.5312, lng: -73.5185 },
+  "sherbrooke": { lat: 45.4042, lng: -71.8929 },
+  "lévis": { lat: 46.8032, lng: -71.1780 },
+  "trois-rivières": { lat: 46.3432, lng: -72.5419 },
+  "saguenay": { lat: 48.4280, lng: -71.0686 },
+  "terrebonne": { lat: 45.6960, lng: -73.6474 },
+  "saint-jean-sur-richelieu": { lat: 45.3073, lng: -73.2629 },
+  "repentigny": { lat: 45.7422, lng: -73.4499 },
+  "brossard": { lat: 45.4584, lng: -73.4551 },
+  "drummondville": { lat: 45.8838, lng: -72.4843 },
+  "saint-jérôme": { lat: 45.7804, lng: -74.0036 },
+  "granby": { lat: 45.4000, lng: -72.7333 },
+  "blainville": { lat: 45.6704, lng: -73.8813 },
+  "mirabel": { lat: 45.6501, lng: -74.0826 },
+  "shawinigan": { lat: 46.5500, lng: -72.7500 },
+  "saint-hyacinthe": { lat: 45.6307, lng: -72.9571 },
+  "rimouski": { lat: 48.4490, lng: -68.5234 },
+  "victoriaville": { lat: 46.0500, lng: -71.9667 },
+  "sorel-tracy": { lat: 46.0333, lng: -73.1167 },
+  "joliette": { lat: 46.0167, lng: -73.4333 },
+  "magog": { lat: 45.2667, lng: -72.1500 },
+  "val-d'or": { lat: 48.1000, lng: -77.7833 },
+  "rouyn-noranda": { lat: 48.2333, lng: -79.0167 },
+  "alma": { lat: 48.5500, lng: -71.6500 },
+  "rivière-du-loup": { lat: 47.8333, lng: -69.5333 },
+  "baie-comeau": { lat: 49.2167, lng: -68.1500 },
+  "sept-îles": { lat: 50.2167, lng: -66.3833 },
+  "thetford mines": { lat: 46.1000, lng: -71.3000 },
+  "saint-georges": { lat: 46.1167, lng: -70.6667 },
+  "cowansville": { lat: 45.2000, lng: -72.7500 },
+};
+
+function getCityCoords(city: string): { lat: number; lng: number } | null {
+  const key = city.toLowerCase().trim();
+  // Direct match
+  if (CITY_COORDS[key]) return CITY_COORDS[key];
+  // Try canonical name
+  const canonical = CITY_CANONICAL[key];
+  if (canonical) return CITY_COORDS[canonical.toLowerCase()] || null;
+  return null;
+}
+
+const SEARCH_RADIUS_METERS = 30000; // 30km — covers surrounding towns
+
 async function searchPlaces(query: string, city: string): Promise<SearchResult[]> {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) {
-    throw new Error("GOOGLE_PLACES_API_KEY not configured");
+  // ── Outscraper API (Google Maps scraping) ──
+  const outscrapeKey = process.env.OUTSCRAPER_API_KEY;
+  // Fallback to Google Places API if Outscraper not configured
+  const placesKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  if (outscrapeKey) {
+    return searchViaOutscraper(query, city, outscrapeKey);
+  }
+  if (placesKey) {
+    return searchViaGooglePlaces(query, city, placesKey);
+  }
+  throw new Error("OUTSCRAPER_API_KEY or GOOGLE_PLACES_API_KEY not configured");
+}
+
+// ─── Outscraper implementation ──────────────
+
+interface OutscraperResult {
+  name?: string;
+  full_address?: string;
+  phone?: string;
+  site?: string;
+  google_maps_url?: string;
+  city?: string;
+  reviews?: number;
+  type?: string;
+  category?: string;
+}
+
+async function searchViaOutscraper(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
+  const searchQuery = `${query} ${city}`;
+  const params = new URLSearchParams({
+    query: searchQuery,
+    limit: "20",
+    language: "en",
+    region: "US",
+  });
+
+  const res = await fetch(`https://api.app.outscraper.com/maps/search-v3?${params}`, {
+    headers: { "X-API-KEY": apiKey },
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Outscraper API error: ${res.status} - ${text}`);
+  }
+
+  const data = await res.json();
+  // Outscraper returns { data: [[...results]] } for search-v3
+  const results: OutscraperResult[] = Array.isArray(data?.data?.[0]) ? data.data[0] : (data?.data || []);
+
+  return results
+    .filter((r) => r.name)
+    .map((r) => {
+      let website = r.site || undefined;
+      if (website && !/^https?:\/\//i.test(website)) {
+        website = "https://" + website;
+      }
+
+      return {
+        companyName: r.name!,
+        website,
+        address: r.full_address || undefined,
+        phone: r.phone || undefined,
+        googleMapsUrl: r.google_maps_url || undefined,
+        city: normalizeCityName(city),
+        industry: query.replace(city, "").trim(),
+        source: "outscraper",
+        reviewCount: r.reviews,
+      };
+    });
+}
+
+// ─── Google Places fallback ─────────────────
+
+async function searchViaGooglePlaces(query: string, city: string, apiKey: string): Promise<SearchResult[]> {
+  const requestBody: Record<string, unknown> = {
+    textQuery: query,
+    languageCode: "en",
+    maxResultCount: 20,
+  };
+
+  const coords = getCityCoords(city);
+  if (coords) {
+    requestBody.locationBias = {
+      circle: {
+        center: { latitude: coords.lat, longitude: coords.lng },
+        radius: SEARCH_RADIUS_METERS,
+      },
+    };
   }
 
   const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
@@ -144,11 +334,7 @@ async function searchPlaces(query: string, city: string): Promise<SearchResult[]
       "X-Goog-Api-Key": apiKey,
       "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.userRatingCount",
     },
-    body: JSON.stringify({
-      textQuery: query,
-      languageCode: "fr",
-      maxResultCount: 20,
-    }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(15_000),
   });
 
@@ -193,12 +379,26 @@ export async function discoverProspects(
   const settings = await loadTargetingSettings(workspaceId);
 
   // Build queries from user settings: searchQueries (with {city} replacement) + keyword × city combinations
+  // Also generate query variations for deeper coverage
   const queries: string[] = [];
+  const addedQueries = new Set<string>();
+  function addQuery(q: string) {
+    const key = q.toLowerCase().trim();
+    if (!addedQueries.has(key)) {
+      addedQueries.add(key);
+      queries.push(q);
+    }
+  }
   for (const sq of settings.searchQueries) {
-    queries.push(sq.replace(/\{city\}/gi, city));
+    addQuery(sq.replace(/\{city\}/gi, city));
   }
   for (const kw of settings.keywords) {
-    queries.push(`${kw} ${city}`);
+    // Base query: keyword + city
+    addQuery(`${kw} ${city}`);
+    // Variation: "keyword près de city" (finds businesses in surrounding areas)
+    addQuery(`${kw} près de ${city}`);
+    // Variation: "keyword région de city"
+    addQuery(`${kw} région de ${city}`);
   }
   if (queries.length === 0) {
     return { found: 0, new: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
@@ -222,6 +422,7 @@ export async function discoverProspects(
           ...r,
           city: normalizedCity,
           industry: industry || r.industry,
+          _searchQuery: query,
         }))
       );
     } catch (error) {
@@ -243,13 +444,19 @@ export async function discoverProspects(
     return true;
   });
 
+  // Filter out irrelevant results (wrong industry despite matching keyword)
+  const afterRelevance = unique.filter((r) => {
+    if (!r._searchQuery) return true;
+    return !isIrrelevantResult(r.companyName, r._searchQuery);
+  });
+
   // Filter out prospects matching blocked keywords
   const afterBlocked = blockedKeywords.length > 0
-    ? unique.filter((r) => {
+    ? afterRelevance.filter((r) => {
         const textToCheck = [r.companyName, r.industry, r.website, r.address].filter(Boolean).join(" ");
         return !matchesBlockedKeyword(textToCheck, blockedKeywords);
       })
-    : unique;
+    : afterRelevance;
 
   // Filter by review count (from targeting settings)
   const { minReviews, maxReviews } = settings;
