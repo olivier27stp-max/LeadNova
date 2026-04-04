@@ -554,6 +554,17 @@ export async function discoverProspects(
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
+        // Prospect already exists — update its batchId so it gets added to campaign
+        if (batchId) {
+          try {
+            await prisma.prospect.updateMany({
+              where: { companyName: finalName, city: result.city },
+              data: { importBatchId: batchId },
+            });
+          } catch {
+            // Non-critical
+          }
+        }
         continue;
       }
       throw error;
