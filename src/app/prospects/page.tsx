@@ -1431,36 +1431,32 @@ export default function ProspectsPage() {
     return sortOrder === "desc" ? <ArrowDown className="inline w-3.5 h-3.5 text-primary ml-1" /> : <ArrowUp className="inline w-3.5 h-3.5 text-primary ml-1" />;
   }
 
+  // More actions dropdown
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const moreActionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showMoreActions) return;
+    function handleClick(e: MouseEvent) {
+      if (moreActionsRef.current && !moreActionsRef.current.contains(e.target as Node)) setShowMoreActions(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showMoreActions]);
+
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">{t("prospects", "title")}</h1>
-            <p className="text-sm text-foreground-muted mt-0.5">
-              {total} {total !== 1 ? t("prospects", "totalCountPlural") : t("prospects", "totalCount")} {t("common", "total")}
-            </p>
-          </div>
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="border border-border bg-card text-foreground px-3 py-2 rounded-md text-sm font-medium hover:bg-card-hover flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-            {t("prospects", "importBtn")}
-          </button>
-          <button
-            onClick={() => { setShowFindBar(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
-            className="border border-border bg-card text-foreground-secondary px-3 py-2 rounded-md text-sm font-medium hover:bg-card-hover flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            {t("prospects", "quickSearch")}
-          </button>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="text-lg font-semibold text-foreground">{t("prospects", "title")}</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
+            {total} {total !== 1 ? t("prospects", "totalCountPlural") : t("prospects", "totalCount")} {t("common", "total")}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex gap-2 mr-2">
-            <div className="relative group rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs cursor-default">
-              <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "discoveriesToday")}</p>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1.5 mr-1">
+            <div className="relative group rounded-md border border-border bg-card px-2.5 py-1 text-center cursor-default">
+              <p className="text-[9px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "discoveriesToday")}</p>
               <p className="text-sm font-semibold text-foreground tabular-nums">{scrapedToday}</p>
               <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-50">
                 <div className="bg-card border border-border rounded-lg shadow-lg px-4 py-3 whitespace-nowrap text-xs text-foreground-muted">
@@ -1471,40 +1467,76 @@ export default function ProspectsPage() {
                 </div>
               </div>
             </div>
-            <div className="rounded-md border border-border bg-card px-3 py-1.5 text-center shadow-xs">
-              <p className="text-[10px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "enrichedToday")}</p>
+            <div className="rounded-md border border-border bg-card px-2.5 py-1 text-center">
+              <p className="text-[9px] font-medium text-foreground-muted uppercase tracking-wide">{t("prospects", "enrichedToday")}</p>
               <p className="text-sm font-semibold text-foreground tabular-nums">{enrichedToday}</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <button
+            onClick={() => setShowDiscoverConfirm(true)}
+            disabled={actionLoading === "discover"}
+            className="bg-primary text-white px-3.5 py-1.5 rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
+          >
+            {actionLoading === "discover" ? t("prospects", "discovering") : t("prospects", "discover")}
+          </button>
+          <button
+            onClick={() => setShowEnrichConfirm(true)}
+            disabled={actionLoading === "enrich"}
+            className="border border-border bg-card text-foreground px-3.5 py-1.5 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
+          >
+            {actionLoading === "enrich" ? t("prospects", "enriching") : t("prospects", "enrich")}
+          </button>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="border border-border bg-card text-foreground-secondary px-3 py-1.5 rounded-md text-sm font-medium hover:bg-card-hover flex items-center gap-1"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            {t("prospects", "importBtn")}
+          </button>
+          {/* More actions dropdown */}
+          <div className="relative" ref={moreActionsRef}>
             <button
-              onClick={() => setShowDiscoverConfirm(true)}
-              disabled={actionLoading === "discover"}
-              className="bg-primary text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
+              onClick={() => setShowMoreActions(!showMoreActions)}
+              className="border border-border bg-card text-foreground-secondary px-2.5 py-1.5 rounded-md text-sm hover:bg-card-hover"
+              title="Plus d'actions"
             >
-              {actionLoading === "discover" ? t("prospects", "discovering") : t("prospects", "discover")}
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
             </button>
-            <button
-              onClick={() => setShowEnrichConfirm(true)}
-              disabled={actionLoading === "enrich"}
-              className="border border-border bg-card text-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
-            >
-              {actionLoading === "enrich" ? t("prospects", "enriching") : t("prospects", "enrich")}
-            </button>
-            <button
-              onClick={handleDeduplicate}
-              disabled={actionLoading === "deduplicate"}
-              className="border border-border bg-card text-foreground-secondary px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
-            >
-              {actionLoading === "deduplicate" ? t("prospects", "removingDuplicates") : t("prospects", "removeDuplicates")}
-            </button>
-            <button
-              onClick={handleCleanupIrrelevant}
-              disabled={actionLoading === "cleanup-irrelevant"}
-              className="border border-border bg-card text-foreground-secondary px-4 py-2 rounded-md text-sm font-medium hover:bg-card-hover disabled:opacity-50"
-            >
-              {actionLoading === "cleanup-irrelevant" ? "Nettoyage..." : "Nettoyer non pertinents"}
-            </button>
+            {showMoreActions && (
+              <div className="absolute right-0 top-full mt-1 w-56 bg-card border border-border rounded-lg shadow-lg z-50 py-1">
+                <button
+                  onClick={() => { setShowMoreActions(false); setShowFindBar(true); setTimeout(() => findInputRef.current?.focus(), 50); }}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-card-hover flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  {t("prospects", "quickSearch")}
+                </button>
+                <button
+                  onClick={() => { setShowMoreActions(false); handleDeduplicate(); }}
+                  disabled={actionLoading === "deduplicate"}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-card-hover flex items-center gap-2 disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  {actionLoading === "deduplicate" ? t("prospects", "removingDuplicates") : t("prospects", "removeDuplicates")}
+                </button>
+                <button
+                  onClick={() => { setShowMoreActions(false); handleCleanupIrrelevant(); }}
+                  disabled={actionLoading === "cleanup-irrelevant"}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-card-hover flex items-center gap-2 disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
+                  {actionLoading === "cleanup-irrelevant" ? "Nettoyage..." : "Nettoyer non pertinents"}
+                </button>
+                <div className="border-t border-border my-1" />
+                <button
+                  onClick={() => { setShowMoreActions(false); fetchProspects(); }}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-card-hover flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  Rafraîchir
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
