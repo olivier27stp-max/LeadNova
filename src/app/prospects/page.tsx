@@ -677,11 +677,12 @@ export default function ProspectsPage() {
         body: JSON.stringify({ _action: "cleanupIrrelevant" }),
       });
       const data = await res.json();
-      stopCleanupPolling();
-      if (!res.ok) throw new Error(data.error || "Cleanup failed");
-      setCleanupProgress({ status: data.cancelled ? "cancelled" : "done", checked: data.checked, total: data.checked, archived: data.archived, currentProspect: "", startedAt: cleanupProgress?.startedAt || Date.now() });
-      fetchProspects();
-      setTimeout(() => setCleanupProgress(null), 5000);
+      if (!res.ok) {
+        stopCleanupPolling();
+        throw new Error(data.error || "Cleanup failed");
+      }
+      // Background task started — keep polling, don't stop here
+      // The polling callback handles status "done"/"cancelled" and stops itself
     } catch (err) {
       stopCleanupPolling();
       setCleanupProgress(null);
