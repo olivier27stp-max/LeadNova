@@ -174,6 +174,49 @@ function checkSingleRelevance(
     return { relevant: true, reason: "Pas de données pour vérifier" };
   }
 
+  // ─── Build English service keywords from the search query ───
+  // This handles cases where positiveKeywords are in French but sites are in English
+  const QUERY_TO_ENGLISH_KEYWORDS: Record<string, string[]> = {
+    "window": ["window", "glass", "pane"],
+    "clean": ["clean", "wash", "janitorial", "maid"],
+    "pressure": ["pressure wash", "power wash", "soft wash"],
+    "gutter": ["gutter", "eavestrough", "downspout", "rain"],
+    "fence": ["fence", "fencing", "gate", "deck", "railing"],
+    "roof": ["roof", "roofing", "shingle", "gutters"],
+    "siding": ["siding", "exterior", "cladding", "vinyl", "hardie"],
+    "paving": ["paving", "paver", "asphalt", "concrete", "driveway", "interlock"],
+    "renovation": ["renovation", "remodel", "general contractor", "home improvement", "construction"],
+    "demolition": ["demolition", "demo", "deconstruction", "excavat", "tear down"],
+    "detailing": ["detailing", "auto detail", "car detail", "ceramic coat", "paint correction"],
+    "couvreur": ["roof", "roofing", "shingle"],
+    "clôture": ["fence", "fencing"],
+    "lavage": ["wash", "clean", "pressure"],
+    "nettoyage": ["clean", "wash", "janitorial"],
+    "gouttière": ["gutter", "eavestrough"],
+    "revêtement": ["siding", "exterior", "cladding"],
+    "pavé": ["paving", "paver", "interlock"],
+    "rénovation": ["renovation", "remodel", "contractor"],
+    "démolition": ["demolition", "demo", "tear down"],
+    "immobilier": ["property management", "real estate", "rental", "landlord", "apartment", "building"],
+    "gestion": ["management", "property", "rental"],
+    "locati": ["rental", "lease", "tenant", "landlord"],
+  };
+
+  // Extract English keywords from the search query
+  const searchQueryLower = (input.searchKeyword || "").toLowerCase();
+  const englishServiceKeywords: string[] = [];
+  for (const [trigger, keywords] of Object.entries(QUERY_TO_ENGLISH_KEYWORDS)) {
+    if (searchQueryLower.includes(trigger)) {
+      englishServiceKeywords.push(...keywords);
+    }
+  }
+  // Also add the raw search query words as keywords
+  const rawQueryWords = searchQueryLower.split(/[\s,]+/).filter(w => w.length > 3);
+  englishServiceKeywords.push(...rawQueryWords);
+
+  // Merge with positive keywords for a bilingual check
+  const allPositiveKeywords = [...config.positiveKeywords, ...englishServiceKeywords];
+
   // ─── Step 1: Check blocked keywords (explicit user exclusions) ───
   for (const blocked of config.blockedKeywords) {
     const blockedLower = blocked.toLowerCase();
@@ -189,7 +232,7 @@ function checkSingleRelevance(
   // ─── Step 2: Score positive keywords vs search keyword context ───
   let positiveScore = 0;
   let bestPositiveMatch = "";
-  for (const kw of config.positiveKeywords) {
+  for (const kw of allPositiveKeywords) {
     const s = scoreKeywordMatch(allText, kw);
     if (s > positiveScore) {
       positiveScore = s;
@@ -211,51 +254,44 @@ function checkSingleRelevance(
 
   // ─── Step 4: If we have enough site content, check keyword presence ───
   if (siteText.length > 200) {
-    // Check if ANY positive keyword phrase (or significant part) appears on the site
-    // Use phrase matching first (strict), then multi-word matching (at least 2 words from a keyword)
-    const phraseMatch = config.positiveKeywords.some((kw) => {
+    // Check if ANY positive keyword (FR or EN) appears on the site
+    const phraseMatch = allPositiveKeywords.some((kw) => {
       const kwLower = kw.toLowerCase();
-      // Full phrase match
       if (siteText.includes(kwLower)) return true;
       if (allText.includes(kwLower)) return true;
       return false;
     });
 
     if (!phraseMatch) {
-      // No full phrase found — check if at least 2 core words from any keyword appear together
-      const multiWordMatch = config.positiveKeywords.some((kw) => {
+      // No full phrase — check partial word matches (at least 1 word from any keyword)
+      const wordMatch = allPositiveKeywords.some((kw) => {
         const words = extractWords(kw);
-        if (words.length <= 1) return siteText.includes(words[0] || "");
-        const matchCount = words.filter((w) => siteText.includes(w)).length;
-        return matchCount >= 2; // at least 2 words from the keyword phrase
+        return words.some((w) => w.length > 3 && siteText.includes(w));
       });
 
-      if (!multiWordMatch) {
-        // Also check company name + industry for relevance
+      if (!wordMatch) {
+        // Also check company name + Google category
         const nameIndustry = `${nameLower} ${(input.googleCategory || "").toLowerCase()}`;
-        const nameMatch = config.positiveKeywords.some((kw) => {
+        const nameMatch = allPositiveKeywords.some((kw) => {
           const words = extractWords(kw);
-          const matchCount = words.filter((w) => nameIndustry.includes(w)).length;
-          return matchCount >= 2 || nameIndustry.includes(kw.toLowerCase());
+          return words.some((w) => w.length > 3 && nameIndustry.includes(w));
         });
 
         if (!nameMatch) {
-          return { relevant: false, reason: "Aucun mot-clé de ciblage trouvé sur le site ou dans le nom" };
+          return { relevant: false, reason: "No service keywords found on site or in company name" };
         }
       }
     }
   } else if (!siteText || siteText.length <= 200) {
-    // No site content — check name + industry only
+    // No site content — check name + Google category only
     const nameIndustry = `${nameLower} ${(input.googleCategory || "").toLowerCase()}`;
-    const nameMatch = config.positiveKeywords.some((kw) => {
+    const nameMatch = allPositiveKeywords.some((kw) => {
       const words = extractWords(kw);
-      if (words.length <= 1) return nameIndustry.includes(words[0] || "");
-      const matchCount = words.filter((w) => nameIndustry.includes(w)).length;
-      return matchCount >= 2 || nameIndustry.includes(kw.toLowerCase());
+      return words.some((w) => w.length > 3 && nameIndustry.includes(w));
     });
 
     if (!nameMatch) {
-      return { relevant: false, reason: "Nom/industrie ne correspond pas aux mots-clés" };
+      return { relevant: false, reason: "Company name/category doesn't match target service" };
     }
   }
 
@@ -273,7 +309,7 @@ function checkSingleRelevance(
     }
   }
 
-  return { relevant: true, reason: positiveScore > 0 ? `Match: "${bestPositiveMatch}" (score: ${positiveScore})` : "OK" };
+  return { relevant: true, reason: positiveScore > 0 ? `Match: "${bestPositiveMatch}" (score: ${positiveScore})` : "Passed all checks" };
 }
 
 /** Batch check relevance. Scrapes websites and checks locally (0 tokens). */
