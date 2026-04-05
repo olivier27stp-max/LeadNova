@@ -356,7 +356,7 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string, 
         industry: r.type || r.category || query.replace(city, "").trim(),
         source: "outscraper",
         reviewCount: r.reviews,
-        googleCategory: r.type || r.category || undefined,
+        googleCategory: [r.type, r.category, r.subtypes].filter(Boolean).join(", ") || undefined,
       };
     });
 }
@@ -538,9 +538,74 @@ export async function discoverProspects(
     return !isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website);
   });
 
+  // ─── Strict Google category filter (Outscraper gives precise categories) ───
+  // If we have a Google category, verify it's actually related to the search query.
+  // Extract core English service words from the search keyword and check against category.
+  const afterCategoryFilter = afterRelevance.filter((r) => {
+    if (!r.googleCategory) return true; // No category data — keep and let other filters handle it
+
+    const catLower = r.googleCategory.toLowerCase();
+    const queryLower = (r._searchQuery || "").toLowerCase();
+
+    // Extract the core service keyword (strip city, region words, FR filler)
+    const SERVICE_STOP_WORDS = new Set([
+      "de", "du", "des", "le", "la", "les", "et", "en", "à", "au", "aux", "un", "une",
+      "près", "region", "région", "the", "and", "in", "of", "for", "near",
+      // City names shouldn't be used for matching
+      ...((r.city || "").toLowerCase().split(/[\s,]+/)),
+    ]);
+    const queryWords = queryLower.split(/[\s,]+/).filter(w => w.length > 2 && !SERVICE_STOP_WORDS.has(w));
+
+    if (queryWords.length === 0) return true;
+
+    // Check if at least ONE significant query word appears in the category/subtypes
+    const hasMatch = queryWords.some(w => catLower.includes(w));
+
+    if (hasMatch) return true;
+
+    // No direct word match — check synonyms / related terms
+    const CATEGORY_SYNONYMS: Record<string, string[]> = {
+      "cleaning": ["clean", "wash", "janitorial", "maid", "housekeep", "custodial", "sanitation"],
+      "washing": ["wash", "clean", "pressure", "power"],
+      "pressure": ["power wash", "pressure wash", "exterior clean"],
+      "window": ["glass", "vitre", "fenêtre"],
+      "gutter": ["eavestrough", "gouttière", "downspout"],
+      "fence": ["fencing", "clôture", "gate"],
+      "roof": ["roofing", "couvreur", "shingle"],
+      "paving": ["paver", "asphalt", "concrete", "driveway", "pavé"],
+      "siding": ["revêtement", "exterior", "cladding"],
+      "renovation": ["remodel", "contractor", "construction", "rénovation"],
+      "demolition": ["demo", "déconstruction", "excavat"],
+      "detailing": ["detail", "auto detail", "car detail"],
+      "landscaping": ["landscape", "lawn", "garden", "yard", "paysag"],
+      "painting": ["painter", "paint", "peintur"],
+      "plumbing": ["plumber", "plomb"],
+      "electrical": ["electrician", "électric"],
+      "hvac": ["heating", "cooling", "air condition", "climatisation", "chauffage"],
+      "immobilier": ["property", "real estate", "gestion", "locati", "rental", "apartment", "building management"],
+    };
+
+    // For each query word, check if any synonym matches the category
+    const hasSynonymMatch = queryWords.some(w => {
+      for (const [, synonyms] of Object.entries(CATEGORY_SYNONYMS)) {
+        if (synonyms.some(s => w.includes(s) || s.includes(w))) {
+          // Found a synonym group for this query word — check if category matches any synonym
+          return synonyms.some(s => catLower.includes(s));
+        }
+      }
+      return false;
+    });
+
+    if (hasSynonymMatch) return true;
+
+    // Category is completely unrelated to the search query
+    console.log(`[discovery] Category filter: "${r.companyName}" excluded — category "${r.googleCategory}" doesn't match query "${r._searchQuery}"`);
+    return false;
+  });
+
   // Filter out prospects matching blocked keywords
   const afterBlocked = blockedKeywords.length > 0
-    ? afterRelevance.filter((r) => {
+    ? afterCategoryFilter.filter((r) => {
         const textToCheck = [r.companyName, r.industry, r.website, r.address].filter(Boolean).join(" ");
         return !matchesBlockedKeyword(textToCheck, blockedKeywords);
       })
