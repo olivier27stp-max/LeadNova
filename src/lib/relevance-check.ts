@@ -211,19 +211,51 @@ function checkSingleRelevance(
 
   // ─── Step 4: If we have enough site content, check keyword presence ───
   if (siteText.length > 200) {
-    // Check if ANY positive keyword appears on the site
-    const anyPositiveOnSite = config.positiveKeywords.some((kw) => {
-      const words = extractWords(kw);
-      return words.some((w) => siteText.includes(w));
+    // Check if ANY positive keyword phrase (or significant part) appears on the site
+    // Use phrase matching first (strict), then multi-word matching (at least 2 words from a keyword)
+    const phraseMatch = config.positiveKeywords.some((kw) => {
+      const kwLower = kw.toLowerCase();
+      // Full phrase match
+      if (siteText.includes(kwLower)) return true;
+      if (allText.includes(kwLower)) return true;
+      return false;
     });
 
-    if (!anyPositiveOnSite) {
-      // Site doesn't mention anything related to any positive keyword
-      // Also check the search keyword itself
-      const searchOnSite = searchWords.some((w) => siteText.includes(w));
-      if (!searchOnSite) {
-        return { relevant: false, reason: "Aucun mot-clé de ciblage trouvé sur le site" };
+    if (!phraseMatch) {
+      // No full phrase found — check if at least 2 core words from any keyword appear together
+      const multiWordMatch = config.positiveKeywords.some((kw) => {
+        const words = extractWords(kw);
+        if (words.length <= 1) return siteText.includes(words[0] || "");
+        const matchCount = words.filter((w) => siteText.includes(w)).length;
+        return matchCount >= 2; // at least 2 words from the keyword phrase
+      });
+
+      if (!multiWordMatch) {
+        // Also check company name + industry for relevance
+        const nameIndustry = `${nameLower} ${(input.googleCategory || "").toLowerCase()}`;
+        const nameMatch = config.positiveKeywords.some((kw) => {
+          const words = extractWords(kw);
+          const matchCount = words.filter((w) => nameIndustry.includes(w)).length;
+          return matchCount >= 2 || nameIndustry.includes(kw.toLowerCase());
+        });
+
+        if (!nameMatch) {
+          return { relevant: false, reason: "Aucun mot-clé de ciblage trouvé sur le site ou dans le nom" };
+        }
       }
+    }
+  } else if (!siteText || siteText.length <= 200) {
+    // No site content — check name + industry only
+    const nameIndustry = `${nameLower} ${(input.googleCategory || "").toLowerCase()}`;
+    const nameMatch = config.positiveKeywords.some((kw) => {
+      const words = extractWords(kw);
+      if (words.length <= 1) return nameIndustry.includes(words[0] || "");
+      const matchCount = words.filter((w) => nameIndustry.includes(w)).length;
+      return matchCount >= 2 || nameIndustry.includes(kw.toLowerCase());
+    });
+
+    if (!nameMatch) {
+      return { relevant: false, reason: "Nom/industrie ne correspond pas aux mots-clés" };
     }
   }
 
