@@ -676,17 +676,29 @@ export default function ProspectsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ _action: "cleanupIrrelevant" }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      // If request completes normally, update with final result
+      if (res.ok) {
+        const data = await res.json();
+        stopCleanupPolling();
+        setCleanupProgress({ status: data.cancelled ? "cancelled" : "done", checked: data.checked || 0, total: data.checked || 0, archived: data.archived || 0, currentProspect: "", startedAt: cleanupProgress?.startedAt || Date.now() });
+        fetchProspects();
+        setTimeout(() => setCleanupProgress(null), 5000);
+      } else {
+        const data = await res.json().catch(() => ({ error: "Cleanup failed" }));
         stopCleanupPolling();
         throw new Error(data.error || "Cleanup failed");
       }
-      // Background task started — keep polling, don't stop here
-      // The polling callback handles status "done"/"cancelled" and stops itself
     } catch (err) {
-      stopCleanupPolling();
-      setCleanupProgress(null);
-      alert(err instanceof Error ? err.message : "Erreur lors du nettoyage");
+      // If fetch itself fails (timeout, network error), polling is still running
+      // and will pick up progress from the backend
+      if (err instanceof TypeError || (err instanceof Error && err.message.includes("timeout"))) {
+        // Network/timeout error — backend is still running, polling will track it
+        console.log("[cleanup] Request timed out, polling continues...");
+      } else {
+        stopCleanupPolling();
+        setCleanupProgress(null);
+        alert(err instanceof Error ? err.message : "Erreur lors du nettoyage");
+      }
     } finally {
       setActionLoading(null);
     }
