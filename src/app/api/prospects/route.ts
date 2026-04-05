@@ -321,6 +321,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Clean up prospects that don't match targeting keywords (with website scraping)
+    // Runs as fire-and-forget background task — frontend polls cleanup-progress
     if (body._action === "cleanupIrrelevant") {
       const workspaceId = await getWorkspaceId();
       if (!workspaceId) return NextResponse.json({ error: "No workspace" }, { status: 400 });
@@ -355,70 +356,89 @@ export async function POST(request: NextRequest) {
         startedAt: Date.now(),
       });
 
-      const relevanceConfig = { positiveKeywords: keywords, blockedKeywords };
-      const irrelevantIds: string[] = [];
-      const BATCH_SIZE = 10;
+      // Fire-and-forget — return immediately, frontend polls cleanup-progress
+      (async () => {
+        const relevanceConfig = { positiveKeywords: keywords, blockedKeywords };
+        const irrelevantIds: string[] = [];
+        const BATCH_SIZE = 10;
 
-      for (let i = 0; i < prospects.length; i += BATCH_SIZE) {
-        if (isCleanupCancelRequested()) break;
+        for (let i = 0; i < prospects.length; i += BATCH_SIZE) {
+          if (isCleanupCancelRequested()) break;
 
-        const batch = prospects.slice(i, i + BATCH_SIZE);
-        updateCleanupProgress({
-          checked: i,
-          currentProspect: batch[0]?.companyName || "...",
-        });
+          const batch = prospects.slice(i, i + BATCH_SIZE);
+          updateCleanupProgress({
+            checked: i + batch.length,
+            archived: irrelevantIds.length,
+            currentProspect: batch[0]?.companyName || "...",
+          });
 
-        const results = await checkRelevanceBatch(
-          batch.map((p) => ({
-            companyName: p.companyName,
-            website: p.website || undefined,
-            googleCategory: p.industry || undefined,
-            searchKeyword: keywords[0],
-          })),
-          relevanceConfig
-        );
-        for (let j = 0; j < batch.length; j++) {
-          if (results[j]?.relevant === false) {
-            irrelevantIds.push(batch[j].id);
+          try {
+            const results = await checkRelevanceBatch(
+              batch.map((p) => ({
+                companyName: p.companyName,
+                website: p.website || undefined,
+                googleCategory: p.industry || undefined,
+                searchKeyword: keywords[0],
+              })),
+              relevanceConfig
+            );
+            for (let j = 0; j < batch.length; j++) {
+              if (results[j]?.relevant === false) {
+                irrelevantIds.push(batch[j].id);
+                updateCleanupProgress({ archived: irrelevantIds.length });
+              }
+            }
+          } catch (err) {
+            console.error(`[cleanup] Batch ${i} error:`, err);
           }
         }
-      }
 
-      // Archive irrelevant prospects in batches
-      let totalArchived = 0;
-      const DELETE_BATCH = 200;
-      for (let i = 0; i < irrelevantIds.length; i += DELETE_BATCH) {
-        const batch = irrelevantIds.slice(i, i + DELETE_BATCH);
-        await prisma.campaignContact.deleteMany({ where: { prospectId: { in: batch } } });
-        await prisma.funnelProspect.deleteMany({ where: { prospectId: { in: batch } } });
-        const result = await prisma.prospect.updateMany({
-          where: { id: { in: batch } },
-          data: { archivedAt: new Date() },
+        // Archive irrelevant prospects in batches
+        let totalArchived = 0;
+        const DELETE_BATCH = 200;
+        for (let i = 0; i < irrelevantIds.length; i += DELETE_BATCH) {
+          const batch = irrelevantIds.slice(i, i + DELETE_BATCH);
+          await prisma.campaignContact.deleteMany({ where: { prospectId: { in: batch } } });
+          await prisma.funnelProspect.deleteMany({ where: { prospectId: { in: batch } } });
+          const result = await prisma.prospect.updateMany({
+            where: { id: { in: batch } },
+            data: { archivedAt: new Date() },
+          });
+          totalArchived += result.count;
+        }
+
+        const wasCancelled = isCleanupCancelRequested();
+        setCleanupProgress({
+          status: wasCancelled ? "cancelled" : "done",
+          checked: prospects.length,
+          total: prospects.length,
+          archived: totalArchived,
+          currentProspect: "",
+          startedAt: Date.now(),
         });
-        totalArchived += result.count;
-      }
 
-      const wasCancelled = isCleanupCancelRequested();
-      setCleanupProgress({
-        status: wasCancelled ? "cancelled" : "done",
-        checked: prospects.length,
-        total: prospects.length,
-        archived: totalArchived,
-        currentProspect: "",
-        startedAt: Date.now(),
+        if (totalArchived > 0) {
+          await logActivity({
+            action: "prospect_cleanup_irrelevant",
+            type: "success",
+            title: "Prospects non pertinents supprimés",
+            details: `${totalArchived} prospects archivés (ne correspondent pas aux mots-clés de ciblage)`,
+            metadata: { archived: totalArchived, totalChecked: prospects.length, keywords },
+          });
+        }
+      })().catch((err) => {
+        console.error("[cleanup] Fatal error:", err);
+        setCleanupProgress({
+          status: "done",
+          checked: prospects.length,
+          total: prospects.length,
+          archived: 0,
+          currentProspect: "",
+          startedAt: Date.now(),
+        });
       });
 
-      if (totalArchived > 0) {
-        await logActivity({
-          action: "prospect_cleanup_irrelevant",
-          type: "success",
-          title: "Prospects non pertinents supprimés",
-          details: `${totalArchived} prospects archivés (ne correspondent pas aux mots-clés de ciblage)`,
-          metadata: { archived: totalArchived, totalChecked: prospects.length, keywords },
-        });
-      }
-
-      return NextResponse.json({ archived: totalArchived, checked: prospects.length, cancelled: wasCancelled });
+      return NextResponse.json({ started: true, total: prospects.length });
     }
 
     // Clean up invalid emails/websites (punycode garbage from Google Maps)
