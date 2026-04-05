@@ -261,6 +261,8 @@ export default function ProspectsPage() {
     target: number;
     found: number;
     newCount: number;
+    filteredOut: number;
+    filterPhase?: string;
     currentCity: string;
     round: number;
     startedAt: number;
@@ -528,6 +530,8 @@ export default function ProspectsPage() {
             target: data.target || 0,
             found: data.found || 0,
             newCount: data.newCount || 0,
+            filteredOut: data.filteredOut || 0,
+            filterPhase: data.filterPhase || "",
             currentCity: data.currentCity || "",
             round: data.round || 1,
             startedAt: data.startedAt || Date.now(),
@@ -540,6 +544,8 @@ export default function ProspectsPage() {
             target: data.target || 0,
             found: data.found || 0,
             newCount: data.newCount || 0,
+            filteredOut: data.filteredOut || 0,
+            filterPhase: data.filterPhase || "",
             currentCity: data.currentCity || "",
             round: data.round || 1,
             startedAt: data.startedAt || Date.now(),
@@ -585,7 +591,7 @@ export default function ProspectsPage() {
   async function handleDiscover(city: string, count?: number) {
     const targetCount = count || discoverTarget;
     setActionLoading("discover");
-    setDiscoverProgress({ status: "running", target: targetCount, found: 0, newCount: 0, currentCity: "...", round: 1, startedAt: Date.now(), totalCities: 1, completedCities: 0 });
+    setDiscoverProgress({ status: "running", target: targetCount, found: 0, newCount: 0, filteredOut: 0, currentCity: "...", round: 1, startedAt: Date.now(), totalCities: 1, completedCities: 0 });
     startProgressPolling();
 
     try {
@@ -600,7 +606,7 @@ export default function ProspectsPage() {
         throw new Error(data.error || "Discovery failed");
       }
       const finalStatus = data.cancelled ? "cancelled" : "done";
-      setDiscoverProgress({ status: finalStatus, target: targetCount, found: data.total || data.found || 0, newCount: data.new || 0, currentCity: "", round: data.rounds || 1, startedAt: discoverProgress?.startedAt || Date.now(), totalCities: discoverProgress?.totalCities || 1, completedCities: discoverProgress?.totalCities || 1 });
+      setDiscoverProgress({ status: finalStatus, target: targetCount, found: data.total || data.found || 0, newCount: data.new || 0, filteredOut: data.filteredOut || 0, currentCity: "", round: data.rounds || 1, startedAt: discoverProgress?.startedAt || Date.now(), totalCities: discoverProgress?.totalCities || 1, completedCities: discoverProgress?.totalCities || 1 });
       fetchProspects();
       // Auto-clear progress after 5 seconds
       setTimeout(() => setDiscoverProgress(null), 5000);
@@ -1870,7 +1876,7 @@ export default function ProspectsPage() {
             currentStep: discoverProgress.completedCities + 1,
             totalSteps: discoverProgress.totalCities,
             stepUnit: t("prospects", "city"),
-            secondaryLabel: `${discoverProgress.found} ${t("prospects", "found")}, ${discoverProgress.newCount} ${t("prospects", "newOnes")}${discoverProgress.round > 1 ? ` (round ${discoverProgress.round})` : ""}`,
+            secondaryLabel: `${discoverProgress.found} ${t("prospects", "found")}, ${discoverProgress.newCount} ${t("prospects", "newOnes")}${discoverProgress.filteredOut ? `, ${discoverProgress.filteredOut} non pertinents` : ""}${discoverProgress.filterPhase ? ` — ${discoverProgress.filterPhase}` : ""}${discoverProgress.round > 1 ? ` (round ${discoverProgress.round})` : ""}`,
             error: discoverProgress.status === "error" ? t("prospects", "errorDuringSearch") : undefined,
           }}
           onStop={async () => {

@@ -120,6 +120,8 @@ export async function POST(request: NextRequest) {
       target: maxToFind,
       found: 0,
       newCount: 0,
+      filteredOut: 0,
+      filterPhase: "",
       currentCity: city === "all" ? settingsCities[0] || "" : city,
       round: 1,
       startedAt: Date.now(),

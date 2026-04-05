@@ -5,6 +5,8 @@ export interface DiscoveryProgress {
   target: number;
   found: number;
   newCount: number;
+  filteredOut?: number;
+  filterPhase?: string;
   currentCity: string;
   round: number;
   startedAt: number;

@@ -1,7 +1,7 @@
 import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
-import { isCancelRequested } from "./discovery-progress";
+import { isCancelRequested, updateDiscoveryProgress } from "./discovery-progress";
 import { validateCompanyNames, localCleanCompanyName } from "./company-name-validation";
 import { checkRelevanceBatch } from "./relevance-check";
 
@@ -532,10 +532,19 @@ export async function discoverProspects(
     return true;
   });
 
+  // ─── Filtering pipeline with real-time progress ───
+  let totalFilteredOut = 0;
+
   // Filter out irrelevant results (wrong industry despite matching keyword)
+  updateDiscoveryProgress({ filterPhase: "Filtrage par industrie..." });
   const afterRelevance = afterExisting.filter((r) => {
     if (!r._searchQuery) return true;
-    return !isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website);
+    const irrelevant = isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website);
+    if (irrelevant) {
+      totalFilteredOut++;
+      updateDiscoveryProgress({ filteredOut: totalFilteredOut });
+    }
+    return !irrelevant;
   });
 
   // ─── Strict Google category filter (Outscraper gives precise categories) ───
@@ -599,6 +608,8 @@ export async function discoverProspects(
     if (hasSynonymMatch) return true;
 
     // Category is completely unrelated to the search query
+    totalFilteredOut++;
+    updateDiscoveryProgress({ filteredOut: totalFilteredOut, filterPhase: "Filtrage par catégorie Google..." });
     console.log(`[discovery] Category filter: "${r.companyName}" excluded — category "${r.googleCategory}" doesn't match query "${r._searchQuery}"`);
     return false;
   });
@@ -632,11 +643,13 @@ export async function discoverProspects(
   const withWebsite = filtered.filter((r) => r.website && r._searchQuery);
   const withoutWebsite = filtered.filter((r) => !r.website || !r._searchQuery);
 
+  updateDiscoveryProgress({ filterPhase: "Vérification des sites web..." });
   let afterAIRelevance = [...withoutWebsite];
   if (withWebsite.length > 0 && !isCancelRequested()) {
     const RELEVANCE_BATCH_SIZE = 10;
     for (let i = 0; i < withWebsite.length; i += RELEVANCE_BATCH_SIZE) {
       if (isCancelRequested()) break;
+      updateDiscoveryProgress({ filterPhase: `Vérification des sites web... (${i + 1}/${withWebsite.length})` });
       const batch = withWebsite.slice(i, i + RELEVANCE_BATCH_SIZE);
       try {
         const results = await checkRelevanceBatch(
@@ -652,6 +665,8 @@ export async function discoverProspects(
           if (results[j]?.relevant !== false) {
             afterAIRelevance.push(batch[j]);
           } else {
+            totalFilteredOut++;
+            updateDiscoveryProgress({ filteredOut: totalFilteredOut });
             console.log(`[discovery] AI filtered: "${batch[j].companyName}" — ${results[j]?.reason}`);
           }
         }
@@ -666,6 +681,7 @@ export async function discoverProspects(
   }
 
   // ─── Company name validation (Layer 1 local + Layer 2 AI) ───
+  updateDiscoveryProgress({ filterPhase: "Validation des noms..." });
   const AI_SKIP_REVIEW_THRESHOLD = 25; // Skip AI validation if prospect has 25+ Google reviews
 
   // First pass: local rules to reject obvious garbage and clean names
@@ -740,6 +756,7 @@ export async function discoverProspects(
   }
   console.log(`[discovery] AI validation: ${needsAIValidation.length} called, ${aiTokensSaved} skipped (cache/reviews/confidence)`);
 
+  updateDiscoveryProgress({ filterPhase: "Sauvegarde des prospects..." });
   let newCount = 0;
   let processedCount = 0; // total processed (new + existing) — used to enforce target limit
 
