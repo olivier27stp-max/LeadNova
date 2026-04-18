@@ -4,6 +4,8 @@ const COOKIE_NAME = "fl_session";
 const PAID_COOKIE = "fl_paid";
 
 const PUBLIC_PATHS = [
+  "/payment",
+  "/api/payment",
   "/login",
   "/register",
   "/forgot-password",

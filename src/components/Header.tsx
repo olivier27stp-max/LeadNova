@@ -69,8 +69,8 @@ export default function Header() {
         ? Sun
         : Moon;
 
-  // Hide header on auth pages
-  if (["/login", "/register", "/forgot-password", "/reset-password"].some((p) => pathname === p || pathname.startsWith(p + "/"))) return null;
+  // Hide header on auth + paywall pages
+  if (["/login", "/register", "/forgot-password", "/reset-password", "/payment"].some((p) => pathname === p || pathname.startsWith(p + "/"))) return null;
 
   return (
     <nav className="sticky top-0 z-40 bg-card/80 backdrop-blur-lg border-b border-border">
