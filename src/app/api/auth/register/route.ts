@@ -3,9 +3,20 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { setSessionCookie } from "@/lib/session";
 import { setWorkspaceCookie } from "@/lib/workspace";
+import { hasPaidAccess } from "@/lib/payment";
 
 export async function POST(request: NextRequest) {
   try {
+    if (!(await hasPaidAccess())) {
+      return NextResponse.json(
+        {
+          error:
+            "Paiement requis. Souscrivez au plan Enterprise avant de créer un compte.",
+        },
+        { status: 402 }
+      );
+    }
+
     const { name, email, password } = await request.json();
 
     if (!name || !email || !password) {

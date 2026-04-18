@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { setSessionCookie } from "@/lib/session";
 import { setWorkspaceCookie } from "@/lib/workspace";
+import { hasPaidAccess } from "@/lib/payment";
 
 // GET — check if any users exist
 export async function GET() {
@@ -13,6 +14,16 @@ export async function GET() {
 // POST — create first admin account (only if no users exist)
 export async function POST(request: NextRequest) {
   try {
+    if (!(await hasPaidAccess())) {
+      return NextResponse.json(
+        {
+          error:
+            "Paiement requis. Souscrivez au plan Enterprise avant de créer un compte.",
+        },
+        { status: 402 }
+      );
+    }
+
     const count = await prisma.user.count();
     if (count > 0) {
       return NextResponse.json(
