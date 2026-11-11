@@ -39,6 +39,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import CampaignReports from "@/components/CampaignReports";
 import { CityDropdown } from "@/components/ui/city-dropdown";
 import { useTranslation } from "@/components/LanguageProvider";
+import { DeliverabilityScore } from "@/components/DeliverabilityScore";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -1360,6 +1361,8 @@ export default function CampaignDetailPage() {
                     />
                   </div>
 
+                  <DeliverabilityScore subject={emailSubject} body={emailBody} />
+
                   {/* Variables */}
                   <div className="bg-background-subtle rounded-md p-3">
                     <p className="text-xs font-medium text-foreground-muted mb-2">
@@ -1429,6 +1432,9 @@ export default function CampaignDetailPage() {
                       className="flex w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
                     />
                   </div>
+                  {emailBodyNoForm.trim() && (
+                    <DeliverabilityScore subject={emailSubjectNoForm || emailSubject} body={emailBodyNoForm} />
+                  )}
                   <div className="bg-background-subtle rounded-md p-3">
                     <p className="text-xs font-medium text-foreground-muted mb-2">
                       {t("campaignDetail", "clickToInsertVariable")}
@@ -1511,6 +1517,8 @@ export default function CampaignDetailPage() {
                         className="flex w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
                       />
                     </div>
+
+                    <DeliverabilityScore subject={fu.subject} body={fu.body} isFollowUp />
 
                     {/* Variables */}
                     <div className="bg-background-subtle rounded-md p-3">
