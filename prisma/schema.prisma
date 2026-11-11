@@ -136,6 +136,9 @@ model Prospect {
   rawCompanyName            String?
   companyNameConfidence     Float?
   companyNameNeedsReview    Boolean   @default(false)
+  contactFormStatus         String?   // HAS_FORM, NO_FORM, NO_WEBSITE, UNREACHABLE (null = pas encore analysé)
+  contactFormProvider       String?   // ex: Jobber, Google Forms, WordPress (Contact Form 7), HTML
+  competitorCrm             String?   // CRM concurrent détecté sur le site (Jobber, Housecall Pro…)
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
@@ -159,6 +162,8 @@ model Prospect {
   @@index([archivedAt])
   @@index([emailStatus])
   @@index([enrichedAt])
+  @@index([contactFormStatus])
+  @@index([competitorCrm])
   @@map("prospects")
 }
 
@@ -215,6 +220,8 @@ model Campaign {
   status              CampaignStatus @default(DRAFT)
   emailSubject        String?
   emailBody           String?
+  emailSubjectNoForm  String?        // Variante envoyée aux prospects SANS formulaire (ou sans site)
+  emailBodyNoForm     String?
   followUpSubject     String?
   followUpBody        String?
   followUps           Json           @default("[]")

@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
 import { logActivity } from "./activity";
+import { FormDetectionAccumulator } from "./form-detection";
 
 // Yield DB connection between prospects so other requests can get through
 // (critical for connection_limit=1 local Prisma Postgres)
@@ -1192,7 +1193,7 @@ async function findFallbackProspectData(prospect: {
 // ═══════════════════════════════════════════════════════════
 // MAIN ENRICHMENT FUNCTION
 // ═══════════════════════════════════════════════════════════
-export async function enrichProspect(prospectId: string): Promise<{
+async function enrichProspectCore(prospectId: string): Promise<{
   email?: string;
   secondaryEmail?: string;
   contactPageUrl?: string;
@@ -1334,6 +1335,7 @@ export async function enrichProspect(prospectId: string): Promise<{
   let foundCity: string | null = prospect.city || null; // Keep city from Google Places if found in Step 0
   const visitedUrls = new Set<string>();
   let pagesScanned = 0;
+  const formDetector = new FormDetectionAccumulator();
 
   // Helper to process a page (with global page limit)
   async function processPage(url: string): Promise<boolean> {
@@ -1344,6 +1346,7 @@ export async function enrichProspect(prospectId: string): Promise<{
 
     const html = await fetchPage(url);
     if (!html) return false;
+    formDetector.add(html);
 
     allEmails.push(...extractEmails(html, mailtoEmails));
     if (!linkedinUrl) linkedinUrl = extractLinkedIn(html);
@@ -1369,6 +1372,7 @@ export async function enrichProspect(prospectId: string): Promise<{
   let discoveredOtherUrls: string[] = [];
 
   if (homeHtml) {
+    formDetector.add(homeHtml);
     const $ = cheerio.load(homeHtml);
     allEmails.push(...extractEmails(homeHtml, mailtoEmails));
     linkedinUrl = extractLinkedIn(homeHtml);
@@ -1420,12 +1424,32 @@ export async function enrichProspect(prospectId: string): Promise<{
       : baseUrl.replace("http://", "https://");
     const altHtml = await fetchPage(altProtocol);
     if (altHtml) {
+      formDetector.add(altHtml);
       const $ = cheerio.load(altHtml);
       allEmails.push(...extractEmails(altHtml, mailtoEmails));
       linkedinUrl = extractLinkedIn(altHtml);
       const links = findRelevantLinks($, altProtocol);
       discoveredContactUrls = links.contactUrls;
       discoveredOtherUrls = links.otherUrls;
+    }
+  }
+
+  // ── Step 3a: Formulaire de contact ─────────────────────
+  // Les étapes précédentes s'arrêtent dès qu'on a courriel + téléphone + ville (souvent dans le
+  // pied de page). On visite quand même la page contact / soumission pour savoir s'il y a un formulaire.
+  if (!formDetector.hasForm) {
+    const formCandidates = [
+      ...discoveredContactUrls,
+      ...discoveredOtherUrls.filter((u) => /soumission|devis|estimation|quote|estimate|booking|reserv|rendez-vous|request|demande/i.test(u)),
+    ]
+      .filter((u) => !visitedUrls.has(u))
+      .slice(0, 3);
+    for (const url of formCandidates) {
+      visitedUrls.add(url);
+      const html = await fetchPage(url);
+      formDetector.add(html);
+      if (html && !contactPageUrl && discoveredContactUrls.includes(url)) contactPageUrl = url;
+      if (formDetector.hasForm) break;
     }
   }
 
@@ -1543,12 +1567,14 @@ export async function enrichProspect(prospectId: string): Promise<{
 
   // ── Enrichment summary log ─────────────────────────────
   console.log(
-    `[enrich] ${prospect.companyName} | website=${prospect.website || "NONE"} | pages=${pagesScanned} | emails=${uniqueEmails.length} (mailto: ${mailtoEmails.size})${enrichedData.emailGuessed ? " (guessed)" : ""} | top=${sorted[0] || "NONE"} score=${sorted[0] ? scoreEmail(sorted[0], companyDomain, mailtoEmails) : 0} | phone=${foundPhone || "NONE"} | city=${foundCity || "NONE"} | linkedin=${linkedinUrl ? "YES" : "NO"} | status=${status}`
+    `[enrich] ${prospect.companyName} | form=${formDetector.hasForm ? "YES" : "NO"} | website=${prospect.website || "NONE"} | pages=${pagesScanned} | emails=${uniqueEmails.length} (mailto: ${mailtoEmails.size})${enrichedData.emailGuessed ? " (guessed)" : ""} | top=${sorted[0] || "NONE"} score=${sorted[0] ? scoreEmail(sorted[0], companyDomain, mailtoEmails) : 0} | phone=${foundPhone || "NONE"} | city=${foundCity || "NONE"} | linkedin=${linkedinUrl ? "YES" : "NO"} | status=${status}`
   );
 
   // Update prospect (safe: handles unique constraint conflicts)
+  const formFields = formDetector.toProspectFields();
   const updatedProspect = await safeUpdateProspect(prospectId, {
     ...enrichedData,
+    ...(formFields || {}),
     status,
     ...(foundSomething ? { enrichedAt: new Date() } : {}),
   });
@@ -1563,6 +1589,86 @@ export async function enrichProspect(prospectId: string): Promise<{
     ...enrichedData,
     noData: !foundSomething,
   };
+}
+
+/**
+ * Enrichit un prospect puis complète la segmentation par formulaire :
+ * un prospect qui n'a toujours pas de site après l'enrichissement est classé NO_WEBSITE.
+ */
+export async function enrichProspect(prospectId: string): Promise<Awaited<ReturnType<typeof enrichProspectCore>>> {
+  const result = await enrichProspectCore(prospectId);
+  const after = await prisma.prospect.findUnique({ where: { id: prospectId } });
+  if (after && !after.website && after.contactFormStatus !== "NO_WEBSITE") {
+    const updated = await safeUpdateProspect(prospectId, {
+      contactFormStatus: "NO_WEBSITE",
+      contactFormProvider: null,
+      competitorCrm: null,
+    });
+    if (updated) await safeUpdateProspect(prospectId, { leadScore: calculateLeadScore(updated) });
+  }
+  return result;
+}
+
+/**
+ * Analyse légère (sans rescraper les courriels) : page d'accueil + pages contact/soumission.
+ * Sert à classer les prospects déjà enrichis avant l'ajout de la segmentation.
+ */
+export async function detectProspectForms(prospectId: string): Promise<{ status: string | null; provider: string | null; crm: string | null }> {
+  const prospect = await prisma.prospect.findUnique({ where: { id: prospectId } });
+  if (!prospect) return { status: null, provider: null, crm: null };
+
+  if (!prospect.website || !isValidWebsiteCandidate(prospect.website)) {
+    const updated = await safeUpdateProspect(prospectId, { contactFormStatus: "NO_WEBSITE", contactFormProvider: null, competitorCrm: null });
+    if (updated) await safeUpdateProspect(prospectId, { leadScore: calculateLeadScore(updated) });
+    return { status: "NO_WEBSITE", provider: null, crm: null };
+  }
+
+  const baseUrl = normalizeBaseUrl(prospect.website);
+  const detector = new FormDetectionAccumulator();
+  let homeHtml = await fetchPage(baseUrl);
+  let effectiveBase = baseUrl;
+  if (!homeHtml) {
+    effectiveBase = baseUrl.startsWith("https://") ? baseUrl.replace("https://", "http://") : baseUrl.replace("http://", "https://");
+    homeHtml = await fetchPage(effectiveBase);
+  }
+  detector.add(homeHtml);
+
+  if (homeHtml && !detector.hasForm) {
+    const $ = cheerio.load(homeHtml);
+    const links = findRelevantLinks($, effectiveBase);
+    const candidates = [
+      ...(prospect.contactPageUrl ? [prospect.contactPageUrl] : []),
+      ...links.contactUrls,
+      ...links.otherUrls.filter((u) => /soumission|devis|estimation|quote|estimate|booking|reserv|rendez-vous|request|demande/i.test(u)),
+    ];
+    const seen = new Set<string>([effectiveBase]);
+    for (const url of candidates) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      if (seen.size > 4) break; // accueil + 3 pages max
+      detector.add(await fetchPage(url));
+      if (detector.hasForm) break;
+    }
+    // Aucun lien contact trouvé : essayer les chemins usuels
+    if (!detector.hasForm && links.contactUrls.length === 0 && !prospect.contactPageUrl) {
+      for (const path of CONTACT_PATHS.slice(0, 3)) {
+        const html = await fetchPage(`${effectiveBase}${path}`);
+        detector.add(html);
+        if (detector.hasForm) break;
+      }
+    }
+  }
+
+  const fields = detector.toProspectFields();
+  if (!fields) {
+    // Site injoignable : marqué pour ne pas le reprendre en boucle. Reçoit le message principal.
+    await safeUpdateProspect(prospectId, { contactFormStatus: "UNREACHABLE" });
+    return { status: "UNREACHABLE", provider: null, crm: null };
+  }
+
+  const updated = await safeUpdateProspect(prospectId, fields);
+  if (updated) await safeUpdateProspect(prospectId, { leadScore: calculateLeadScore(updated) });
+  return { status: fields.contactFormStatus, provider: fields.contactFormProvider, crm: fields.competitorCrm };
 }
 
 // ─── Per-prospect timeout wrapper (max 90s per prospect) ──

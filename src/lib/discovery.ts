@@ -265,6 +265,7 @@ function getCityCoords(city: string): { lat: number; lng: number } | null {
 }
 
 const SEARCH_RADIUS_METERS = 30000; // 30km — covers surrounding towns
+const MAX_PLACES_PAGES = 3; // 3 × 20 = 60 résultats max par requête (limite de Google)
 
 async function searchPlaces(query: string, city: string, region = "CA"): Promise<SearchResult[]> {
   const outscrapeKey = process.env.OUTSCRAPER_API_KEY;
@@ -380,24 +381,36 @@ async function searchViaGooglePlaces(query: string, city: string, apiKey: string
     };
   }
 
-  const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.userRatingCount",
-    },
-    body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(15_000),
-  });
+  // Places API (New) renvoie 20 résultats par page, 3 pages max (60 résultats) via nextPageToken.
+  const places: PlacesResult[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < MAX_PLACES_PAGES; page++) {
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.userRatingCount,nextPageToken",
+      },
+      body: JSON.stringify(pageToken ? { ...requestBody, pageToken } : requestBody),
+      signal: AbortSignal.timeout(15_000),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Google Places API error: ${res.status} - ${text}`);
+    if (!res.ok) {
+      const text = await res.text();
+      // Une page suivante qui échoue ne doit pas faire perdre les résultats déjà obtenus
+      if (page > 0) {
+        console.warn(`[discovery] Google Places page ${page + 1} failed for "${query}": ${res.status}`);
+        break;
+      }
+      throw new Error(`Google Places API error: ${res.status} - ${text}`);
+    }
+
+    const data = await res.json();
+    places.push(...((data.places || []) as PlacesResult[]));
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
   }
-
-  const data = await res.json();
-  const places: PlacesResult[] = data.places || [];
 
   return places
     .filter((p) => p.displayName?.text)

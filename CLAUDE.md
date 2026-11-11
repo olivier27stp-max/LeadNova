@@ -33,7 +33,8 @@ src/lib/config.ts       — TARGET_CITIES, TARGET_INDUSTRIES, COMPANY_INFO
 src/lib/enrichment.ts   — Web scraping (Cheerio), 64KB
 src/lib/discovery.ts    — Google Search API discovery, 64KB
 src/lib/outreach.ts     — Claude AI email generation
-src/lib/lead-scoring.ts — Score: website+20, email+15, phone+10, city+10, industry+5
+src/lib/lead-scoring.ts — Score /100 profil Lume : courriel réel 20 (deviné 5), tél 10, site 5, ville 5, avis 20–300 → 20, CRM concurrent 30, industrie 10
+src/lib/form-detection.ts — Détection formulaire de contact + CRM concurrent (Jobber…) ; choix du message de campagne par segment
 src/lib/activity.ts     — logActivity() helper
 src/lib/email-sender.ts — Nodemailer SMTP
 prisma/schema.prisma    — Full DB schema

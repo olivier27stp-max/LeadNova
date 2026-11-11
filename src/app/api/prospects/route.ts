@@ -30,6 +30,9 @@ export async function GET(request: NextRequest) {
     const contactType = searchParams.get("contactType");
     const emailStatus = searchParams.get("emailStatus");
     const campaignId = searchParams.get("campaignId");
+    const formStatus = searchParams.get("formStatus"); // HAS_FORM | NO_FORM | NO_WEBSITE | UNREACHABLE | NO_FORM_ANY | unknown
+    const competitorCrm = searchParams.get("competitorCrm"); // "any" ou nom du CRM
+    const coldCall = searchParams.get("coldCall") === "1"; // téléphone sans courriel réel
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -46,6 +49,15 @@ export async function GET(request: NextRequest) {
     if (contactType) where.contactType = contactType;
     if (emailStatus === "unknown") where.OR = [{ emailStatus: "unknown" }, { emailStatus: null }];
     else if (emailStatus) where.emailStatus = emailStatus;
+    if (formStatus === "unknown") where.contactFormStatus = null;
+    else if (formStatus === "NO_FORM_ANY") where.contactFormStatus = { in: ["NO_FORM", "NO_WEBSITE"] };
+    else if (formStatus) where.contactFormStatus = formStatus;
+    if (competitorCrm === "any") where.competitorCrm = { not: null };
+    else if (competitorCrm) where.competitorCrm = competitorCrm;
+    // Liste d'appels : on a un téléphone mais pas de courriel fiable (absent ou deviné)
+    const coldCallCondition = coldCall
+      ? { AND: [{ phone: { not: null } }, { NOT: { phone: "" } }, { OR: [{ email: null }, { emailGuessed: true }] }] }
+      : null;
     if (campaignId === "none") {
       where.campaignContacts = { none: {} };
     } else if (campaignId) {
@@ -74,6 +86,10 @@ export async function GET(request: NextRequest) {
       } else {
         where.OR = searchConditions;
       }
+    }
+
+    if (coldCallCondition) {
+      where.AND = [...((where.AND as Record<string, unknown>[] | undefined) || []), coldCallCondition];
     }
 
     // Build orderBy
@@ -124,6 +140,9 @@ export async function GET(request: NextRequest) {
         emailVerifiedAt: true,
         reviewCount: true,
         companyNameNeedsReview: true,
+        contactFormStatus: true,
+        contactFormProvider: true,
+        competitorCrm: true,
         createdAt: true,
         campaignContacts: {
           select: {

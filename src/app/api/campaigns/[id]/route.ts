@@ -81,6 +81,8 @@ export async function PATCH(
         ...(body.status !== undefined && { status: body.status }),
         ...(body.emailSubject !== undefined && { emailSubject: body.emailSubject }),
         ...(body.emailBody !== undefined && { emailBody: body.emailBody }),
+        ...(body.emailSubjectNoForm !== undefined && { emailSubjectNoForm: body.emailSubjectNoForm }),
+        ...(body.emailBodyNoForm !== undefined && { emailBodyNoForm: body.emailBodyNoForm }),
         ...(body.followUpSubject !== undefined && { followUpSubject: body.followUpSubject }),
         ...(body.followUpBody !== undefined && { followUpBody: body.followUpBody }),
         ...(body.followUps !== undefined && { followUps: body.followUps }),
