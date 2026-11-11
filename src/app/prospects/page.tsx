@@ -24,6 +24,9 @@ interface ProspectListItem {
   emailGuessed: boolean;
   reviewCount: number | null;
   companyNameNeedsReview?: boolean;
+  contactFormStatus?: string | null;
+  contactFormProvider?: string | null;
+  competitorCrm?: string | null;
   createdAt: string;
   campaignId: string | null;
   campaignNumber: number | null;
@@ -92,6 +95,23 @@ const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
   );
 });
 
+// Segment « formulaire de contact » : détermine quel message de campagne le prospect reçoit
+function FormBadge({ status, provider, crm }: { status?: string | null; provider?: string | null; crm?: string | null }) {
+  if (crm) {
+    return <span className="text-[10px] bg-success-subtle text-success px-1.5 py-0.5 rounded shrink-0 font-medium" title={`CRM concurrent détecté : ${crm}`}>{crm}</span>;
+  }
+  if (status === "HAS_FORM") {
+    return <span className="text-[10px] bg-primary-subtle text-primary px-1.5 py-0.5 rounded shrink-0 font-medium" title={`Formulaire détecté : ${provider || "oui"}`}>Formulaire</span>;
+  }
+  if (status === "NO_FORM") {
+    return <span className="text-[10px] bg-background-muted text-foreground-secondary px-1.5 py-0.5 rounded shrink-0 font-medium" title="Aucun formulaire de contact sur le site">Sans form.</span>;
+  }
+  if (status === "NO_WEBSITE") {
+    return <span className="text-[10px] bg-background-muted text-foreground-secondary px-1.5 py-0.5 rounded shrink-0 font-medium" title="Aucun site web">Sans site</span>;
+  }
+  return null;
+}
+
 function SkeletonRow() {
   return (
     <tr className="border-b border-border animate-pulse">
@@ -158,6 +178,7 @@ const ProspectRow = memo(function ProspectRow({
           {prospect.companyNameNeedsReview && (
             <span className="text-[10px] bg-warning-subtle text-warning px-1.5 py-0.5 rounded shrink-0 font-medium" title="Nom à vérifier">Review</span>
           )}
+          <FormBadge status={prospect.contactFormStatus} provider={prospect.contactFormProvider} crm={prospect.competitorCrm} />
         </div>
         {prospect.industry && <p className="text-xs text-foreground-muted truncate">{prospect.industry}</p>}
       </td>
@@ -233,6 +254,9 @@ export default function ProspectsPage() {
   const [contactTypeFilter, setContactTypeFilter] = useState("");
   const [cityFilter, setCityFilter] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("");
+  const [formFilter, setFormFilter] = useState(""); // HAS_FORM | NO_FORM_ANY | NO_FORM | NO_WEBSITE | unknown | crm | coldcall
+  const [formStats, setFormStats] = useState<{ hasForm: number; noForm: number; noWebsite: number; unreachable: number; competitorCrm: number; remaining: number } | null>(null);
+  const [formDetectRunning, setFormDetectRunning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const { t, locale } = useTranslation();
@@ -340,7 +364,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -362,6 +386,9 @@ export default function ProspectsPage() {
     if (contactTypeFilter) params.set("contactType", contactTypeFilter);
     if (campaignFilter && campaignFilter !== "none") params.set("campaignId", campaignFilter);
     if (campaignFilter === "none") params.set("campaignId", "none");
+    if (formFilter === "crm") params.set("competitorCrm", "any");
+    else if (formFilter === "coldcall") params.set("coldCall", "1");
+    else if (formFilter) params.set("formStatus", formFilter);
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
     if (sortOrder) params.set("sortOrder", sortOrder);
@@ -387,7 +414,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -1313,13 +1340,43 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || debouncedSearch || searchQuery;
+  const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || formFilter || debouncedSearch || searchQuery;
+
+  // ─── Segmentation par formulaire de contact ───
+  const fetchFormStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prospects/detect-forms");
+      if (res.ok) setFormStats(await res.json());
+    } catch { /* silencieux */ }
+  }, []);
+  useEffect(() => { fetchFormStats(); }, [fetchFormStats]);
+
+  async function runFormDetection() {
+    setFormDetectRunning(true);
+    try {
+      // Lots successifs côté serveur jusqu'à ce que tous les prospects soient classés
+      for (let i = 0; i < 500; i++) {
+        const res = await fetch("/api/prospects/detect-forms", { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: { processed: number; remaining: number } = await res.json();
+        await fetchFormStats();
+        if (data.remaining === 0 || data.processed === 0) break;
+      }
+      await fetchProspects();
+    } catch (error) {
+      console.error("Form detection failed:", error);
+    } finally {
+      setFormDetectRunning(false);
+    }
+  }
+
   function resetFilters() {
     setStatusFilter("");
     setCityFilter("");
     setSourceFilter("");
     setContactTypeFilter("");
     setCampaignFilter("");
+    setFormFilter("");
     setSearchQuery("");
     setDebouncedSearch("");
      }
@@ -2025,6 +2082,31 @@ export default function ProspectsPage() {
             <option key={c.id} value={c.id}>#{c.number} — {c.name}</option>
           ))}
         </select>
+        <select
+          value={formFilter}
+          onChange={(e) => { setFormFilter(e.target.value); }}
+          className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+          title="Segment selon le formulaire de contact du site"
+        >
+          <option value="">Tous les segments</option>
+          <option value="HAS_FORM">Avec formulaire{formStats ? ` (${formStats.hasForm})` : ""}</option>
+          <option value="NO_FORM_ANY">Sans formulaire ou sans site{formStats ? ` (${formStats.noForm + formStats.noWebsite})` : ""}</option>
+          <option value="NO_FORM">— Site sans formulaire{formStats ? ` (${formStats.noForm})` : ""}</option>
+          <option value="NO_WEBSITE">— Sans site web{formStats ? ` (${formStats.noWebsite})` : ""}</option>
+          <option value="crm">CRM concurrent (Jobber…){formStats ? ` (${formStats.competitorCrm})` : ""}</option>
+          <option value="coldcall">Liste d&apos;appels (tél. sans courriel)</option>
+          <option value="unknown">Pas encore analysés{formStats ? ` (${formStats.remaining})` : ""}</option>
+        </select>
+        {formStats && formStats.remaining > 0 && (
+          <button
+            onClick={runFormDetection}
+            disabled={formDetectRunning}
+            className="text-sm border border-primary/30 text-primary rounded-md px-3 py-2 hover:bg-primary-subtle disabled:opacity-60"
+            title="Visite le site de chaque prospect pour détecter un formulaire de contact ou un CRM concurrent"
+          >
+            {formDetectRunning ? `Analyse… (${formStats.remaining} restants)` : `Analyser les formulaires (${formStats.remaining})`}
+          </button>
+        )}
         {hasFilters && (
           <button
             onClick={resetFilters}

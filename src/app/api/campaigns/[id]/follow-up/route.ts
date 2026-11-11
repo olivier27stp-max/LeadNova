@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { sendEmail, canSendEmail, getRandomDelay } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
+import { formProviderLabel } from "@/lib/form-detection";
 
 interface CompanySettings {
   name?: string;
@@ -22,11 +23,12 @@ function titleCase(str: string): string {
 
 function interpolate(
   template: string,
-  prospect: { companyName: string; city: string | null; email: string | null },
+  prospect: { companyName: string; city: string | null; email: string | null; contactFormProvider?: string | null },
   company: CompanySettings
 ): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
+    .replace(/\{\{form_provider\}\}/g, formProviderLabel(prospect))
     .replace(/\{\{city\}\}/g, titleCase(prospect.city || "votre région"))
     .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
     .replace(/\{\{company_email\}\}/g, company.email || "")
@@ -116,6 +118,7 @@ export async function GET(
             companyName: true,
             email: true,
             city: true,
+            contactFormProvider: true,
             status: true,
           },
         },
@@ -256,6 +259,7 @@ export async function POST(
             companyName: true,
             email: true,
             city: true,
+            contactFormProvider: true,
           },
         },
       },

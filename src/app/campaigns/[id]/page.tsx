@@ -53,6 +53,8 @@ interface Campaign {
   status: string;
   emailSubject: string | null;
   emailBody: string | null;
+  emailSubjectNoForm?: string | null;
+  emailBodyNoForm?: string | null;
   followUpSubject: string | null;
   followUpBody: string | null;
   followUps: FollowUpItem[];
@@ -101,6 +103,7 @@ const TEMPLATE_VARIABLES = [
   { key: "{{company_name}}", label: "Nom de l'entreprise (prospect)" },
   { key: "{{city}}", label: "Ville (prospect)" },
   { key: "{{contact_name}}", label: "Nom du contact" },
+  { key: "{{form_provider}}", label: "Formulaire / CRM du prospect" },
   { key: "{{sender_name}}", label: "Votre entreprise" },
   { key: "{{company_phone}}", label: "Votre téléphone" },
   { key: "{{company_website}}", label: "Votre site web" },
@@ -127,6 +130,8 @@ export default function CampaignDetailPage() {
   // Message tab state
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
+  const [emailSubjectNoForm, setEmailSubjectNoForm] = useState("");
+  const [emailBodyNoForm, setEmailBodyNoForm] = useState("");
   const [followUps, setFollowUps] = useState<FollowUpItem[]>([{ subject: "", body: "" }]);
   const [hasUnsaved, setHasUnsaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -485,6 +490,8 @@ export default function CampaignDetailPage() {
           setCampaign(data);
           setEmailSubject(data.emailSubject || "");
           setEmailBody(data.emailBody || "");
+          setEmailSubjectNoForm(data.emailSubjectNoForm || "");
+          setEmailBodyNoForm(data.emailBodyNoForm || "");
           // Load follow-ups: prefer new array, fall back to legacy fields
           if (Array.isArray(data.followUps) && data.followUps.length > 0) {
             setFollowUps(data.followUps);
@@ -603,7 +610,7 @@ export default function CampaignDetailPage() {
       const res = await fetch(`/api/campaigns/${campaignId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailSubject, emailBody, followUpSubject: followUps[0]?.subject || "", followUpBody: followUps[0]?.body || "", followUps }),
+        body: JSON.stringify({ emailSubject, emailBody, emailSubjectNoForm, emailBodyNoForm, followUpSubject: followUps[0]?.subject || "", followUpBody: followUps[0]?.body || "", followUps }),
       });
       if (!res.ok) throw new Error("Save failed");
       const updated = await res.json();
@@ -1308,9 +1315,14 @@ export default function CampaignDetailPage() {
               {/* Main email editor */}
               <Card>
                 <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Send className="size-4 text-primary" />
-                    <CardTitle className="text-lg">{t("campaignDetail", "mainMessage")}</CardTitle>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Send className="size-4 text-primary" />
+                      <CardTitle className="text-lg">{t("campaignDetail", "mainMessage")}</CardTitle>
+                    </div>
+                    <p className="text-xs text-foreground-muted mt-1">
+                      Envoyé aux prospects <strong>avec formulaire</strong> sur leur site, et à ceux pas encore analysés.
+                    </p>
                   </div>
                   {hasUnsaved && (
                     <Badge variant="warning">{t("campaignDetail", "unsaved")}</Badge>
@@ -1365,7 +1377,75 @@ export default function CampaignDetailPage() {
                           className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
                           title={`Insère ${v.key}`}
                         >
-                          {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : t("campaignDetail", "contactName")}
+                          {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : v.key === "{{contact_name}}" ? t("campaignDetail", "contactName") : v.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Variante : prospects sans formulaire de contact (ou sans site) */}
+              <Card>
+                <CardHeader>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Send className="size-4 text-accent" />
+                      <CardTitle className="text-lg">Message — prospects sans formulaire</CardTitle>
+                    </div>
+                    <p className="text-xs text-foreground-muted mt-1">
+                      Envoyé aux prospects dont le site n&apos;a <strong>aucun formulaire</strong> de contact, ou qui n&apos;ont pas de site.
+                      Laisser vide pour leur envoyer le message principal. Sujet vide = sujet du message principal.
+                    </p>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-secondary mb-1">
+                      {t("campaignDetail", "emailSubject")}
+                    </label>
+                    <Input
+                      type="text"
+                      value={emailSubjectNoForm}
+                      onChange={(e) => {
+                        setEmailSubjectNoForm(e.target.value);
+                        setHasUnsaved(true);
+                      }}
+                      placeholder={emailSubject || t("campaignDetail", "emailSubjectPlaceholder")}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-secondary mb-1">
+                      {t("campaignDetail", "emailBody")}
+                    </label>
+                    <textarea
+                      value={emailBodyNoForm}
+                      onChange={(e) => {
+                        setEmailBodyNoForm(e.target.value);
+                        setHasUnsaved(true);
+                      }}
+                      rows={10}
+                      placeholder="Bonjour,&#10;&#10;En visitant le site de {{company_name}}, j'ai remarqué qu'il n'y a pas de formulaire pour demander une soumission..."
+                      className="flex w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-foreground-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50 font-mono resize-y"
+                    />
+                  </div>
+                  <div className="bg-background-subtle rounded-md p-3">
+                    <p className="text-xs font-medium text-foreground-muted mb-2">
+                      {t("campaignDetail", "clickToInsertVariable")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {TEMPLATE_VARIABLES.map((v) => (
+                        <button
+                          key={v.key}
+                          type="button"
+                          onClick={() => {
+                            setEmailBodyNoForm((prev) => prev + v.key);
+                            setHasUnsaved(true);
+                          }}
+                          className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
+                          title={`Insère ${v.key}`}
+                        >
+                          {v.label}
                         </button>
                       ))}
                     </div>
@@ -1451,7 +1531,7 @@ export default function CampaignDetailPage() {
                             className="text-xs bg-card border border-border rounded-md px-2 py-1 hover:bg-card-hover hover:border-primary/30 text-foreground-secondary transition-colors cursor-pointer"
                             title={`Insère ${v.key}`}
                           >
-                            {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : t("campaignDetail", "contactName")}
+                            {v.key === "{{company_name}}" ? t("campaignDetail", "companyName") : v.key === "{{city}}" ? t("campaignDetail", "cityVar") : v.key === "{{contact_name}}" ? t("campaignDetail", "contactName") : v.label}
                           </button>
                         ))}
                       </div>

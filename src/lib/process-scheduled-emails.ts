@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { sendEmail, canSendEmail } from "./email-sender";
 import { logActivity } from "./activity";
+import { pickCampaignMessage, formProviderLabel } from "./form-detection";
 
 interface CompanySettings {
   name?: string;
@@ -28,11 +29,12 @@ function skipWeekend(date: Date): Date {
 
 function interpolate(
   template: string,
-  prospect: { companyName: string; city?: string | null },
+  prospect: { companyName: string; city?: string | null; contactFormProvider?: string | null },
   company: CompanySettings
 ): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
+    .replace(/\{\{form_provider\}\}/g, formProviderLabel(prospect))
     .replace(/\{\{city\}\}/g, titleCase(prospect.city || "votre région"))
     .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
     .replace(/\{\{company_email\}\}/g, company.email || "")
@@ -95,6 +97,8 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
             workspaceId: true,
             emailSubject: true,
             emailBody: true,
+            emailSubjectNoForm: true,
+            emailBodyNoForm: true,
           },
         });
 
@@ -136,7 +140,7 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         // Load prospects from snapshot IDs
         const allProspects = await prisma.prospect.findMany({
           where: { id: { in: prospectIds } },
-          select: { id: true, companyName: true, email: true, city: true },
+          select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true },
         });
         const withEmail = allProspects.filter((p) => p.email);
 
@@ -158,8 +162,12 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
           const { allowed } = await canSendEmail();
           if (!allowed) break;
 
-          const subject = interpolate(campaign.emailSubject, prospect, companySettings);
-          const body = interpolate(campaign.emailBody, prospect, companySettings);
+          const message = pickCampaignMessage(
+            { emailSubject: campaign.emailSubject, emailBody: campaign.emailBody, emailSubjectNoForm: campaign.emailSubjectNoForm, emailBodyNoForm: campaign.emailBodyNoForm },
+            prospect
+          );
+          const subject = interpolate(message.subject, prospect, companySettings);
+          const body = interpolate(message.body, prospect, companySettings);
           const result = await sendEmail(prospect.id, subject, body, campaign.id);
           if (result.success) sent++;
           else failed++;
@@ -298,7 +306,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       where: { campaignId: campaign.id },
       include: {
         prospect: {
-          select: { id: true, companyName: true, email: true, city: true, status: true },
+          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true },
         },
       },
     });

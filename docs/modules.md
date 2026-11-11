@@ -32,6 +32,8 @@ GET    /api/prospects/enrich   — poll enrichment progress
 POST   /api/prospects/enrich   — start enrichment job
 DELETE /api/prospects/enrich   — cancel enrichment job
 POST   /api/prospects/archive  — soft delete (sets archivedAt)
+GET    /api/prospects/detect-forms — répartition des segments formulaire + restants
+POST   /api/prospects/detect-forms — classe un lot de prospects (formulaire / sans formulaire / sans site / CRM)
 GET    /api/prospects/cities   — list distinct cities
 ```
 
@@ -42,6 +44,11 @@ GET    /api/prospects/cities   — list distinct cities
 **API:** `src/app/api/campaigns/*`
 
 **Purpose:** Email campaign management with contact assignment.
+
+**Segmentation par formulaire :** chaque campagne a un message principal (prospects AVEC formulaire,
+non analysés ou injoignables) et une variante optionnelle `emailSubjectNoForm` / `emailBodyNoForm`
+envoyée aux prospects `NO_FORM` et `NO_WEBSITE` (voir `pickCampaignMessage` dans `src/lib/form-detection.ts`).
+Variable de gabarit : `{{form_provider}}` (ex. « Jobber », sinon « votre formulaire de contact »).
 
 **Features:**
 - Campaign list with status (DRAFT/ACTIVE/PAUSED/COMPLETED)
