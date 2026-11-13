@@ -152,9 +152,14 @@ function PaymentPageInner() {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 text-xs text-foreground-muted">
-            <Lock className="size-3.5" />
-            Paiement sécurisé · SSL 256-bit
+          <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-2 text-xs text-foreground-muted">
+              <Lock className="size-3.5" />
+              Paiement sécurisé · SSL 256-bit
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => router.push("/login")}>
+              Se connecter
+            </Button>
           </div>
         </div>
 
@@ -492,7 +497,14 @@ function PaymentPageInner() {
               </div>
             </div>
 
-            <p className="text-center text-xs text-foreground-muted mt-5">
+            <p className="text-center text-sm text-foreground-secondary mt-5">
+              Déjà un compte ?{" "}
+              <a href="/login" className="text-primary font-medium hover:underline">
+                Se connecter
+              </a>
+            </p>
+
+            <p className="text-center text-xs text-foreground-muted mt-2">
               Besoin d'aide ?{" "}
               <a
                 href="mailto:support@leadnova.app"
