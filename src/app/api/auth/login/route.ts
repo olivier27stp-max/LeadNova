@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { setSessionCookie } from "@/lib/session";
+import { setPaidCookie } from "@/lib/payment";
 
 export async function POST(request: NextRequest) {
   try {
@@ -73,6 +74,9 @@ export async function POST(request: NextRequest) {
       role: user.role,
     });
     setSessionCookie(res, user.id);
+    // Un compte existant a déjà accès : on mémorise l'accès payé sur ce navigateur
+    // pour qu'il ne retombe pas sur la page de paiement à l'expiration de la session.
+    setPaidCookie(res, "paid");
     return res;
   } catch (error) {
     console.error("Login error:", error);

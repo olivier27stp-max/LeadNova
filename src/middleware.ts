@@ -27,6 +27,13 @@ const PUBLIC_PATHS = [
 const PAYWALL_FREE_PATHS = [
   "/payment",
   "/api/payment",
+  // Les comptes existants doivent toujours pouvoir se connecter (ou réinitialiser
+  // leur mot de passe) sans repasser par le paiement.
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/auth/me",
   "/api/auth/login",
   "/api/auth/logout",
@@ -38,15 +45,10 @@ const PAYWALL_FREE_PATHS = [
 // Paths where a visitor who has NOT paid must be redirected to /payment
 // even though they are otherwise "public" (login/register/setup/forgot/etc.).
 const PAYWALL_GATED_PUBLIC_PATHS = [
-  "/login",
   "/register",
-  "/forgot-password",
-  "/reset-password",
   "/invite",
   "/api/auth/setup",
   "/api/auth/register",
-  "/api/auth/forgot-password",
-  "/api/auth/reset-password",
 ];
 
 function matchesAny(pathname: string, paths: string[]): boolean {
