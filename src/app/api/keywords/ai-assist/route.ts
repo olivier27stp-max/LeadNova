@@ -40,10 +40,10 @@ L'utilisateur te donne une instruction. Tu dois retourner des requêtes de reche
 
 RÈGLES:
 - Les requêtes doivent utiliser {city} comme placeholder pour la ville
-- Exemples: "entreprise de toiture {city}", "landscaping company {city}"
+- Exemples: "entreprise de toiture {city}", "paysagiste {city}"
 - Si l'utilisateur demande d'ajouter, retourne dans "add"
 - Si l'utilisateur demande de supprimer ou modifier, utilise "remove" et "add" en conséquence
-- Génère des requêtes variées: français, anglais, synonymes, termes commerciaux
+- Génère des requêtes variées EN FRANÇAIS SEULEMENT (synonymes, termes commerciaux) — aucune requête en anglais, sauf si l'utilisateur le demande explicitement
 ${currentList}
 
 RÉPONDS UNIQUEMENT EN JSON VALIDE:
@@ -61,7 +61,7 @@ L'utilisateur te donne une instruction en langage naturel. Tu dois retourner les
 
 RÈGLES:
 - Génère des mots-clés pratiques pour trouver des entreprises sur Google/Google Maps
-- Inclus les variations françaises ET anglaises
+- Mots-clés EN FRANÇAIS SEULEMENT (termes québécois inclus) — aucun mot-clé en anglais, sauf si l'utilisateur le demande explicitement
 - Inclus singulier/pluriel, abréviations, synonymes
 - Si l'utilisateur demande d'ajouter un secteur, génère 15-30 mots-clés pertinents
 - Si l'utilisateur demande de retirer un secteur ou des termes spécifiques, liste-les dans "remove"
