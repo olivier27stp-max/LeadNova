@@ -7,6 +7,7 @@ import { getSessionUser } from "@/lib/session";
 import { getActiveWorkspaceId } from "@/lib/workspace";
 import { industryValuesForGroup } from "@/lib/industry-groups";
 import { conversionChance } from "@/lib/conversion-score";
+import { engagementScore } from "@/lib/engagement-score";
 
 // Allow long-running cleanup operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
     const minScore = parseInt(searchParams.get("minScore") || "", 10);
     const reviews = searchParams.get("reviews"); // ideal (20–300) | small (<20) | large (>300)
     const owner = searchParams.get("owner"); // found | not_found | pending
+    const callback = searchParams.get("callback"); // due = rappel prévu aujourd'hui ou en retard
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -66,6 +68,11 @@ export async function GET(request: NextRequest) {
     if (owner === "found") where.ownerName = { not: null };
     else if (owner === "not_found") { where.ownerName = null; where.ownerCheckedAt = { not: null }; }
     else if (owner === "pending") where.ownerCheckedAt = null;
+    if (callback === "due") {
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+      where.callbackAt = { lte: endOfToday };
+    }
     if (reviews === "ideal") where.reviewCount = { gte: 20, lte: 300 };
     else if (reviews === "large") where.reviewCount = { gt: 300 };
     // Conditions combinées en AND (pour ne pas écraser les OR de la recherche)
@@ -180,6 +187,29 @@ export async function GET(request: NextRequest) {
         ownerRole: true,
         ownerConfidence: true,
         ownerCheckedAt: true,
+        siteAnalyzedAt: true,
+        hiring: true,
+        complaintCount: true,
+        ownerRepliesReviews: true,
+        reviewsLast6m: true,
+        onlineBooking: true,
+        onlinePayment: true,
+        teamsCount: true,
+        serviceSegment: true,
+        emailOpenCount: true,
+        emailClickCount: true,
+        siteVisitCount: true,
+        lastReplySentiment: true,
+        lastEngagedAt: true,
+        lastCallAt: true,
+        lastCallOutcome: true,
+        lastCallWho: true,
+        lastObjection: true,
+        currentTool: true,
+        employeeCount: true,
+        callbackAt: true,
+        salesStage: true,
+        lostReason: true,
         competitorCrm: true,
         createdAt: true,
         campaignContacts: {
@@ -197,6 +227,7 @@ export async function GET(request: NextRequest) {
     const flatProspects = prospects.map(({ campaignContacts, ...rest }) => ({
       ...rest,
       conversion: conversionChance(rest),
+      engagement: engagementScore(rest),
       campaignId: campaignContacts[0]?.campaign?.id ?? null,
       campaignNumber: campaignContacts[0]?.campaign?.number ?? null,
     }));
@@ -621,7 +652,7 @@ export async function POST(request: NextRequest) {
       if (!prospect) {
         return NextResponse.json({ error: "Prospect not found" }, { status: 404 });
       }
-      return NextResponse.json({ ...prospect, conversion: conversionChance(prospect) });
+      return NextResponse.json({ ...prospect, conversion: conversionChance(prospect), engagement: engagementScore(prospect) });
     }
 
     // Otherwise, create a new prospect

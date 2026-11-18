@@ -1,4 +1,5 @@
 import { ImapFlow } from "imapflow";
+import { recordReplyClassification } from "@/lib/reply-classifier";
 import { prisma } from "./db";
 import { logActivity } from "./activity";
 import { decrypt, isEncrypted } from "./crypto";
@@ -142,6 +143,7 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
 
     const lock = await client.getMailboxLock("INBOX");
     const bounceUids: number[] = [];
+    const replyToClassify: Array<{ uid: number; activityId: string; prospectId: string }> = [];
     try {
       // ── Pass 1: scan envelopes for replies & collect bounce UIDs ──
       const messages = client.fetch(
@@ -178,6 +180,7 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
 
         for (const activity of matched) {
           if (!activity.replyReceived) {
+            replyToClassify.push({ uid: msg.uid, activityId: activity.id, prospectId: activity.prospectId });
             await prisma.emailActivity.update({
               where: { id: activity.id },
               data: { replyReceived: true },
@@ -214,6 +217,17 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
             activity.replyReceived = true;
             replies++;
           }
+        }
+      }
+
+      // ── Pass 1b : lire le texte des réponses pour en classer le ton ──
+      for (const r of replyToClassify) {
+        try {
+          const fetched = await client.fetchOne(String(r.uid), { source: true }, { uid: true });
+          const rawSource = fetched ? (fetched as unknown as { source?: Buffer }).source : undefined;
+          await recordReplyClassification(r.activityId, r.prospectId, rawSource ? rawSource.toString() : "", workspaceId);
+        } catch (err) {
+          console.error("[imap] reply classification failed:", err);
         }
       }
 

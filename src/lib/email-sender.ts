@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { buildClickUrl } from "@/lib/tracking";
 import { Resend } from "resend";
 import fs from "fs";
 import pathMod from "path";
@@ -468,7 +469,8 @@ export async function sendEmail(
     ? `${trackingBase}/api/track/unsubscribe/${activity.id}`
     : undefined;
 
-  const html = wrapInEmailTemplate(body, senderInfo.companyInfo, trackingPixelUrl, unsubscribeUrl, senderInfo.logoEnabled);
+  const trackLink = trackingBase ? (url: string) => buildClickUrl(trackingBase, activity.id, url) : undefined;
+  const html = wrapInEmailTemplate(body, senderInfo.companyInfo, trackingPixelUrl, unsubscribeUrl, senderInfo.logoEnabled, trackLink);
   const text = body + getTextFooter(senderInfo.companyInfo, unsubscribeUrl);
 
   try {

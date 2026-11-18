@@ -14,13 +14,22 @@ export async function GET(
   const { activityId } = await params;
 
   try {
-    await prisma.emailActivity.updateMany({
-      where: {
-        id: activityId,
-        openedAt: null, // only set once
-      },
-      data: { openedAt: new Date() },
+    // Chaque ouverture est comptée (3+ ouvertures = probablement relu ou transféré au patron)
+    const activity = await prisma.emailActivity.findUnique({
+      where: { id: activityId },
+      select: { prospectId: true, openedAt: true },
     });
+    if (activity) {
+      const now = new Date();
+      await prisma.emailActivity.update({
+        where: { id: activityId },
+        data: { openCount: { increment: 1 }, lastOpenedAt: now, ...(activity.openedAt ? {} : { openedAt: now }) },
+      });
+      await prisma.prospect.update({
+        where: { id: activity.prospectId },
+        data: { emailOpenCount: { increment: 1 }, lastEngagedAt: now },
+      });
+    }
   } catch {
     // silently ignore — always return the pixel
   }
