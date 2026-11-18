@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/activity";
 import { getSessionUser } from "@/lib/session";
 import { getActiveWorkspaceId } from "@/lib/workspace";
 import { industryValuesForGroup } from "@/lib/industry-groups";
+import { conversionChance } from "@/lib/conversion-score";
 
 // Allow long-running cleanup operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -195,6 +196,7 @@ export async function GET(request: NextRequest) {
     // Flatten campaign data for frontend
     const flatProspects = prospects.map(({ campaignContacts, ...rest }) => ({
       ...rest,
+      conversion: conversionChance(rest),
       campaignId: campaignContacts[0]?.campaign?.id ?? null,
       campaignNumber: campaignContacts[0]?.campaign?.number ?? null,
     }));
@@ -619,7 +621,7 @@ export async function POST(request: NextRequest) {
       if (!prospect) {
         return NextResponse.json({ error: "Prospect not found" }, { status: 404 });
       }
-      return NextResponse.json(prospect);
+      return NextResponse.json({ ...prospect, conversion: conversionChance(prospect) });
     }
 
     // Otherwise, create a new prospect
