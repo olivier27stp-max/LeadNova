@@ -5,6 +5,7 @@ import { DAILY_DISCOVERY_LIMIT } from "@/lib/config";
 import { logActivity } from "@/lib/activity";
 import { getSessionUser } from "@/lib/session";
 import { getActiveWorkspaceId } from "@/lib/workspace";
+import { industryValuesForGroup } from "@/lib/industry-groups";
 
 // Allow long-running cleanup operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -33,6 +34,10 @@ export async function GET(request: NextRequest) {
     const formStatus = searchParams.get("formStatus"); // HAS_FORM | NO_FORM | NO_WEBSITE | UNREACHABLE | NO_FORM_ANY | unknown
     const competitorCrm = searchParams.get("competitorCrm"); // "any" ou nom du CRM
     const coldCall = searchParams.get("coldCall") === "1"; // téléphone sans courriel réel
+    const industryGroup = searchParams.get("industryGroup"); // clé de src/lib/industry-groups.ts
+    const reach = searchParams.get("reach"); // email_real | email_guessed | no_email
+    const minScore = parseInt(searchParams.get("minScore") || "", 10);
+    const reviews = searchParams.get("reviews"); // ideal (20–300) | small (<20) | large (>300)
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -53,7 +58,28 @@ export async function GET(request: NextRequest) {
     else if (formStatus === "NO_FORM_ANY") where.contactFormStatus = { in: ["NO_FORM", "NO_WEBSITE"] };
     else if (formStatus) where.contactFormStatus = formStatus;
     if (competitorCrm === "any") where.competitorCrm = { not: null };
+    else if (competitorCrm === "none") where.competitorCrm = null;
     else if (competitorCrm) where.competitorCrm = competitorCrm;
+    if (!isNaN(minScore) && minScore > 0) where.leadScore = { gte: minScore };
+    if (reviews === "ideal") where.reviewCount = { gte: 20, lte: 300 };
+    else if (reviews === "large") where.reviewCount = { gt: 300 };
+    // Conditions combinées en AND (pour ne pas écraser les OR de la recherche)
+    const extraConditions: Record<string, unknown>[] = [];
+    if (reviews === "small") extraConditions.push({ OR: [{ reviewCount: null }, { reviewCount: { lt: 20 } }] });
+    if (reach === "email_real") extraConditions.push({ email: { not: null } }, { NOT: { email: "" } }, { emailGuessed: false });
+    else if (reach === "email_guessed") extraConditions.push({ email: { not: null } }, { emailGuessed: true });
+    else if (reach === "no_email") extraConditions.push({ OR: [{ email: null }, { email: "" }] });
+    if (industryGroup) {
+      // Le regroupement se fait en JS sur les valeurs distinctes, puis filtre exact en base
+      const distinct = await prisma.prospect.groupBy({
+        by: ["industry"],
+        where: workspaceId ? { archivedAt: null, workspaceId } : { archivedAt: null },
+      });
+      const { values, includeNull } = industryValuesForGroup(distinct.map((d) => d.industry), industryGroup);
+      const industryOr: Record<string, unknown>[] = [{ industry: { in: values } }];
+      if (includeNull) industryOr.push({ industry: null });
+      extraConditions.push({ OR: industryOr });
+    }
     // Liste d'appels : on a un téléphone mais pas de courriel fiable (absent ou deviné)
     const coldCallCondition = coldCall
       ? { AND: [{ phone: { not: null } }, { NOT: { phone: "" } }, { OR: [{ email: null }, { emailGuessed: true }] }] }
@@ -90,6 +116,9 @@ export async function GET(request: NextRequest) {
 
     if (coldCallCondition) {
       where.AND = [...((where.AND as Record<string, unknown>[] | undefined) || []), coldCallCondition];
+    }
+    if (extraConditions.length > 0) {
+      where.AND = [...((where.AND as Record<string, unknown>[] | undefined) || []), ...extraConditions];
     }
 
     // Build orderBy
