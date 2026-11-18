@@ -36,6 +36,7 @@ src/lib/outreach.ts     — Claude AI email generation
 src/lib/lead-scoring.ts — Score /100 profil Lume : courriel réel 20 (deviné 5), tél 10, site 5, ville 5, avis 20–300 → 20, CRM concurrent 30, industrie 10
 src/lib/form-detection.ts — Détection formulaire de contact + CRM concurrent (Jobber…) ; choix du message de campagne par segment
 src/lib/industry-groups.ts — Regroupe les catégories Google en grands métiers (filtre Segmentation de /prospects)
+src/lib/owner-finder.ts  — IA (Claude) qui trouve le propriétaire sur le site (accueil, À propos, équipe, contact) ; nom et extrait vérifiés mot pour mot. Modèle : OWNER_AI_MODEL (défaut claude-opus-5-5)
 src/lib/activity.ts     — logActivity() helper
 src/lib/email-sender.ts — Nodemailer SMTP
 prisma/schema.prisma    — Full DB schema

@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
     const reach = searchParams.get("reach"); // email_real | email_guessed | no_email
     const minScore = parseInt(searchParams.get("minScore") || "", 10);
     const reviews = searchParams.get("reviews"); // ideal (20–300) | small (<20) | large (>300)
+    const owner = searchParams.get("owner"); // found | not_found | pending
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -61,6 +62,9 @@ export async function GET(request: NextRequest) {
     else if (competitorCrm === "none") where.competitorCrm = null;
     else if (competitorCrm) where.competitorCrm = competitorCrm;
     if (!isNaN(minScore) && minScore > 0) where.leadScore = { gte: minScore };
+    if (owner === "found") where.ownerName = { not: null };
+    else if (owner === "not_found") { where.ownerName = null; where.ownerCheckedAt = { not: null }; }
+    else if (owner === "pending") where.ownerCheckedAt = null;
     if (reviews === "ideal") where.reviewCount = { gte: 20, lte: 300 };
     else if (reviews === "large") where.reviewCount = { gt: 300 };
     // Conditions combinées en AND (pour ne pas écraser les OR de la recherche)
@@ -171,6 +175,10 @@ export async function GET(request: NextRequest) {
         companyNameNeedsReview: true,
         contactFormStatus: true,
         contactFormProvider: true,
+        ownerName: true,
+        ownerRole: true,
+        ownerConfidence: true,
+        ownerCheckedAt: true,
         competitorCrm: true,
         createdAt: true,
         campaignContacts: {

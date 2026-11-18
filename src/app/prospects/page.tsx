@@ -28,6 +28,10 @@ interface ProspectListItem {
   contactFormStatus?: string | null;
   contactFormProvider?: string | null;
   competitorCrm?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  ownerConfidence?: string | null;
+  ownerCheckedAt?: string | null;
   createdAt: string;
   campaignId: string | null;
   campaignNumber: number | null;
@@ -40,6 +44,8 @@ interface CampaignOption {
 }
 
 interface ProspectDetail extends ProspectListItem {
+  ownerSourceUrl?: string | null;
+  ownerEvidence?: string | null;
   address: string | null;
   secondaryEmail: string | null;
   contactPageUrl: string | null;
@@ -181,7 +187,13 @@ const ProspectRow = memo(function ProspectRow({
           )}
           <FormBadge status={prospect.contactFormStatus} provider={prospect.contactFormProvider} crm={prospect.competitorCrm} />
         </div>
-        {prospect.industry && <p className="text-xs text-foreground-muted truncate">{prospect.industry}</p>}
+        {prospect.ownerName ? (
+          <p className="text-xs text-foreground-secondary truncate" title={`${prospect.ownerRole || "Propriétaire"} — confiance ${prospect.ownerConfidence === "high" ? "élevée" : "moyenne"}`}>
+            <span className="text-success">●</span> {prospect.ownerName}{prospect.ownerRole ? ` · ${prospect.ownerRole}` : ""}
+          </p>
+        ) : prospect.industry ? (
+          <p className="text-xs text-foreground-muted truncate">{prospect.industry}</p>
+        ) : null}
       </td>
       <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.city || "—"}</td>
       <td className="px-4 py-3 overflow-hidden">
@@ -261,6 +273,10 @@ export default function ProspectsPage() {
   const [reachFilter, setReachFilter] = useState(""); // email_real | email_guessed | no_email | coldcall
   const [minScoreFilter, setMinScoreFilter] = useState("");
   const [reviewsFilter, setReviewsFilter] = useState(""); // ideal | small | large
+  const [ownerFilter, setOwnerFilter] = useState(""); // found | not_found | pending
+  const [ownerStats, setOwnerStats] = useState<{ found: number; notFound: number; remaining: number } | null>(null);
+  const [ownerRun, setOwnerRun] = useState<{ processed: number; found: number; total: number } | null>(null);
+  const ownerStopRef = useRef(false);
   const [industryGroups, setIndustryGroups] = useState<{ key: string; label: string; count: number }[]>([]);
   const [formStats, setFormStats] = useState<{ hasForm: number; noForm: number; noWebsite: number; unreachable: number; competitorCrm: number; remaining: number } | null>(null);
   const [formDetectRunning, setFormDetectRunning] = useState(false);
@@ -371,7 +387,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -400,6 +416,7 @@ export default function ProspectsPage() {
     else if (reachFilter) params.set("reach", reachFilter);
     if (minScoreFilter) params.set("minScore", minScoreFilter);
     if (reviewsFilter) params.set("reviews", reviewsFilter);
+    if (ownerFilter) params.set("owner", ownerFilter);
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
     if (sortOrder) params.set("sortOrder", sortOrder);
@@ -425,7 +442,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -1351,7 +1368,7 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter);
+  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter);
   const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || hasSegmentFilters || debouncedSearch || searchQuery;
 
   // Répartition A / B des résultats affichés (selon le formulaire de contact)
@@ -1372,6 +1389,46 @@ export default function ProspectsPage() {
     setReachFilter("");
     setMinScoreFilter("");
     setReviewsFilter("");
+    setOwnerFilter("");
+  }
+
+  // ─── Propriétaires (IA) ───
+  const fetchOwnerStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prospects/find-owners");
+      if (res.ok) setOwnerStats(await res.json());
+    } catch { /* silencieux */ }
+  }, []);
+  useEffect(() => { fetchOwnerStats(); }, [fetchOwnerStats]);
+
+  async function runOwnerSearch(ids?: string[]) {
+    ownerStopRef.current = false;
+    const total = ids ? ids.length : ownerStats?.remaining ?? 0;
+    setOwnerRun({ processed: 0, found: 0, total });
+    let processed = 0;
+    let found = 0;
+    try {
+      for (let i = 0; i < 1000 && !ownerStopRef.current; i++) {
+        const res = await fetch("/api/prospects/find-owners", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ids ? { ids } : {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        processed += data.processed;
+        found += data.counts?.found ?? 0;
+        setOwnerRun({ processed, found, total });
+        if (data.remaining === 0 || data.processed === 0) break;
+        if (data.stalled) throw new Error("L'IA ne répond pas (vérifier ANTHROPIC_API_KEY et le crédit Anthropic)");
+      }
+      await fetchProspects();
+    } catch (error) {
+      alert(`Recherche des propriétaires interrompue : ${error instanceof Error ? error.message : "erreur"}`);
+    } finally {
+      setOwnerRun(null);
+      fetchOwnerStats();
+    }
   }
 
   const fetchIndustryGroups = useCallback(async () => {
@@ -2194,6 +2251,17 @@ export default function ProspectsPage() {
           <option value="large">Grande (&gt; 300 avis)</option>
         </select>
         <select
+          value={ownerFilter}
+          onChange={(e) => setOwnerFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", ownerFilter && "border-primary text-primary")}
+          title="Nom du propriétaire trouvé par l'IA sur le site web"
+        >
+          <option value="">Propriétaire : tous</option>
+          <option value="found">Propriétaire trouvé{ownerStats ? ` (${ownerStats.found})` : ""}</option>
+          <option value="not_found">Non trouvé{ownerStats ? ` (${ownerStats.notFound})` : ""}</option>
+          <option value="pending">Pas encore cherché</option>
+        </select>
+        <select
           value={minScoreFilter}
           onChange={(e) => setMinScoreFilter(e.target.value)}
           className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", minScoreFilter && "border-primary text-primary")}
@@ -2212,6 +2280,23 @@ export default function ProspectsPage() {
             title="Visite le site de chaque prospect pour détecter un formulaire de contact ou un CRM concurrent"
           >
             {formDetectRunning ? `Analyse… (${formStats.remaining} restants)` : `Analyser les formulaires (${formStats.remaining})`}
+          </button>
+        )}
+        {ownerRun ? (
+          <button
+            onClick={() => { ownerStopRef.current = true; }}
+            className="text-sm border border-warning/40 text-warning rounded-md px-3 py-2 hover:bg-warning-subtle"
+            title="Arrêter après le lot en cours"
+          >
+            Propriétaires… {ownerRun.processed}/{ownerRun.total} · {ownerRun.found} trouvés — Arrêter
+          </button>
+        ) : ownerStats && ownerStats.remaining > 0 && (
+          <button
+            onClick={() => runOwnerSearch()}
+            className="text-sm border border-primary/30 text-primary rounded-md px-3 py-2 hover:bg-primary-subtle"
+            title="L'IA lit l'accueil, la page À propos, l'équipe et le contact de chaque site pour trouver le nom du propriétaire"
+          >
+            Trouver les propriétaires ({ownerStats.remaining})
           </button>
         )}
         {hasSegmentFilters && (
@@ -2283,6 +2368,14 @@ export default function ProspectsPage() {
             className="text-sm border border-border bg-card text-foreground px-3 py-1.5 rounded-md hover:bg-card-hover disabled:opacity-50"
           >
             {actionLoading === "bulk-enrich" ? t("prospects", "enriching") : t("prospects", "enrichSelection")}
+          </button>
+          <button
+            onClick={() => runOwnerSearch(Array.from(selectedIds))}
+            disabled={!!ownerRun}
+            className="text-sm border border-border bg-card text-foreground px-3 py-1.5 rounded-md hover:bg-card-hover disabled:opacity-50"
+            title="Cherche le propriétaire des prospects sélectionnés qui n'ont pas encore été analysés"
+          >
+            Trouver les propriétaires
           </button>
           <button
             onClick={handleBulkDelete}
@@ -2482,6 +2575,23 @@ export default function ProspectsPage() {
                     <p className="text-foreground-muted text-sm">
                       {selectedProspect.industry} — {selectedProspect.city}
                     </p>
+                    {selectedProspect.ownerName && (
+                      <div className="mt-2 text-sm">
+                        <p className="text-foreground">
+                          <span className="text-success">●</span> {selectedProspect.ownerName}
+                          {selectedProspect.ownerRole && <span className="text-foreground-muted"> · {selectedProspect.ownerRole}</span>}
+                          <span className="text-xs text-foreground-muted"> (confiance {selectedProspect.ownerConfidence === "high" ? "élevée" : "moyenne"})</span>
+                        </p>
+                        {selectedProspect.ownerEvidence && (
+                          <p className="text-xs text-foreground-muted italic mt-0.5">
+                            « {selectedProspect.ownerEvidence} »
+                            {selectedProspect.ownerSourceUrl && (
+                              <> — <a href={selectedProspect.ownerSourceUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline not-italic">source</a></>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {!editing && (
