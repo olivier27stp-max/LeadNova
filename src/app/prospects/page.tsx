@@ -32,6 +32,7 @@ interface ProspectListItem {
   ownerRole?: string | null;
   ownerConfidence?: string | null;
   ownerCheckedAt?: string | null;
+  conversion?: { score: number; reasons: string[] };
   createdAt: string;
   campaignId: string | null;
   campaignNumber: number | null;
@@ -103,6 +104,17 @@ const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
 });
 
 // Segment « formulaire de contact » : détermine quel message de campagne le prospect reçoit
+function ConversionPill({ conversion }: { conversion?: { score: number; reasons: string[] } }) {
+  if (!conversion) return <span className="text-foreground-muted">—</span>;
+  const { score, reasons } = conversion;
+  const tone = score >= 7 ? "bg-success-subtle text-success" : score >= 4 ? "bg-warning-subtle text-warning" : "bg-background-muted text-foreground-muted";
+  return (
+    <span className={cn("inline-block rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums", tone)} title={reasons.join("\n") || "Peu de signaux"}>
+      {score}/10
+    </span>
+  );
+}
+
 function FormBadge({ status, provider, crm }: { status?: string | null; provider?: string | null; crm?: string | null }) {
   if (crm) {
     return <span className="text-[10px] bg-success-subtle text-success px-1.5 py-0.5 rounded shrink-0 font-medium" title={`CRM concurrent détecté : ${crm}`}>{crm}</span>;
@@ -224,6 +236,9 @@ const ProspectRow = memo(function ProspectRow({
         <span className="font-mono font-medium text-foreground tabular-nums">{prospect.leadScore}</span>
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
+        <ConversionPill conversion={prospect.conversion} />
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap">
         <StatusBadge status={prospect.status} />
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
@@ -273,6 +288,7 @@ export default function ProspectsPage() {
   const [reachFilter, setReachFilter] = useState(""); // email_real | email_guessed | no_email | coldcall
   const [minScoreFilter, setMinScoreFilter] = useState("");
   const [reviewsFilter, setReviewsFilter] = useState(""); // ideal | small | large
+  const [minChanceFilter, setMinChanceFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState(""); // found | not_found | pending
   const [ownerStats, setOwnerStats] = useState<{ found: number; notFound: number; remaining: number } | null>(null);
   const [ownerRun, setOwnerRun] = useState<{ processed: number; found: number; total: number } | null>(null);
@@ -387,7 +403,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, minChanceFilter]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -496,6 +512,11 @@ export default function ProspectsPage() {
   // Client-side filtered prospects: instant filter using searchQuery + cityFilter (no debounce wait)
   const displayProspects = useMemo(() => {
     let result = prospects;
+    if (minChanceFilter) result = result.filter((p) => (p.conversion?.score ?? 0) >= Number(minChanceFilter));
+    if (sortBy === "conversion") {
+      const dir = sortOrder === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => ((a.conversion?.score ?? 0) - (b.conversion?.score ?? 0)) * dir || b.leadScore - a.leadScore);
+    }
     if (cityFilter) result = result.filter((p) => p.city?.trim().toLowerCase() === cityFilter.trim().toLowerCase());
     const q = searchQuery.toLowerCase();
     if (!q) return result;
@@ -515,7 +536,7 @@ export default function ProspectsPage() {
       }
       return false;
     });
-  }, [prospects, searchQuery, cityFilter]);
+  }, [prospects, searchQuery, cityFilter, minChanceFilter, sortBy, sortOrder]);
 
   // Fetch targeting cities from settings + provinces list
   useEffect(() => {
@@ -1368,7 +1389,7 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter);
+  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || minChanceFilter);
   const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || hasSegmentFilters || debouncedSearch || searchQuery;
 
   // Répartition A / B des résultats affichés (selon le formulaire de contact)
@@ -1390,6 +1411,7 @@ export default function ProspectsPage() {
     setMinScoreFilter("");
     setReviewsFilter("");
     setOwnerFilter("");
+    setMinChanceFilter("");
   }
 
   // ─── Propriétaires (IA) ───
@@ -2262,6 +2284,17 @@ export default function ProspectsPage() {
           <option value="pending">Pas encore cherché</option>
         </select>
         <select
+          value={minChanceFilter}
+          onChange={(e) => setMinChanceFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", minChanceFilter && "border-primary text-primary")}
+          title="Chance de conversion estimée sur 10"
+        >
+          <option value="">Chance : toutes</option>
+          <option value="8">Chance ≥ 8/10</option>
+          <option value="7">Chance ≥ 7/10</option>
+          <option value="5">Chance ≥ 5/10</option>
+        </select>
+        <select
           value={minScoreFilter}
           onChange={(e) => setMinScoreFilter(e.target.value)}
           className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", minScoreFilter && "border-primary text-primary")}
@@ -2496,6 +2529,9 @@ export default function ProspectsPage() {
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("leadScore")}>
                 {t("prospects", "score")} <SortIcon field="leadScore" />
               </th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("conversion")} title="Chance de conversion estimée sur 10 (métier, taille, besoin, joignabilité)">
+                Chance <SortIcon field="conversion" />
+              </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("status")}>
                 {t("prospects", "status")} <SortIcon field="status" />
               </th>
@@ -2516,7 +2552,7 @@ export default function ProspectsPage() {
               </>
             ) : displayProspects.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-12 text-foreground-muted">
+                <td colSpan={12} className="text-center py-12 text-foreground-muted">
                   <div className="space-y-2">
                     <p className="text-base">{t("prospects", "noProspectFound")}</p>
                     {hasFilters ? (
@@ -2710,6 +2746,15 @@ export default function ProspectsPage() {
                     <p className="text-xs text-foreground-muted uppercase">{t("prospects", "score")}</p>
                     <p className="text-sm font-mono font-semibold text-foreground tabular-nums">{selectedProspect.leadScore}</p>
                   </div>
+                  {selectedProspect.conversion && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-foreground-muted uppercase">Chance de conversion</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <ConversionPill conversion={selectedProspect.conversion} />
+                        <span className="text-xs text-foreground-muted">{selectedProspect.conversion.reasons.join(" · ") || "Peu de signaux"}</span>
+                      </div>
+                    </div>
+                  )}
                   {selectedProspect.reviewCount != null && (
                     <div>
                       <p className="text-xs text-foreground-muted uppercase">{t("prospects", "reviews")}</p>
