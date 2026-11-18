@@ -114,7 +114,7 @@ function randomUserAgent(): string {
 }
 
 // ─── Fetch with better headers + timeout ─────────────────
-async function fetchPage(url: string, timeoutMs = 15000): Promise<string | null> {
+export async function fetchPage(url: string, timeoutMs = 15000): Promise<string | null> {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(timeoutMs),
@@ -1135,7 +1135,7 @@ async function searchWebForCompany(companyName: string, city?: string): Promise<
 }
 
 // ─── Normalize base URL ─────────────────────────────────
-function normalizeBaseUrl(url: string): string {
+export function normalizeBaseUrl(url: string): string {
   let u = url.trim();
   if (!u.startsWith("http://") && !u.startsWith("https://")) {
     u = `https://${u}`;
@@ -1144,7 +1144,7 @@ function normalizeBaseUrl(url: string): string {
   return u.replace(/\/+$/, "");
 }
 
-function isValidWebsiteCandidate(url: string | null | undefined): boolean {
+export function isValidWebsiteCandidate(url: string | null | undefined): boolean {
   if (!url) return false;
 
   try {

@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { contactGreetingName } from "@/lib/owner-name";
 import { sendEmail, canSendEmail } from "./email-sender";
 import { logActivity } from "./activity";
 import { pickCampaignMessage, formProviderLabel } from "./form-detection";
@@ -29,14 +30,14 @@ function skipWeekend(date: Date): Date {
 
 function interpolate(
   template: string,
-  prospect: { companyName: string; city?: string | null; contactFormProvider?: string | null },
+  prospect: { companyName: string; city?: string | null; contactFormProvider?: string | null; ownerFirstName?: string | null; ownerConfidence?: string | null },
   company: CompanySettings
 ): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
     .replace(/\{\{form_provider\}\}/g, formProviderLabel(prospect))
     .replace(/\{\{city\}\}/g, titleCase(prospect.city || "votre région"))
-    .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
+    .replace(/\{\{contact_name\}\}/g, contactGreetingName(prospect))
     .replace(/\{\{company_email\}\}/g, company.email || "")
     .replace(/\{\{company_phone\}\}/g, company.phone || "")
     .replace(/\{\{company_website\}\}/g, company.website || "")
@@ -140,7 +141,7 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         // Load prospects from snapshot IDs
         const allProspects = await prisma.prospect.findMany({
           where: { id: { in: prospectIds } },
-          select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true },
+          select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true },
         });
         const withEmail = allProspects.filter((p) => p.email);
 
@@ -306,7 +307,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       where: { campaignId: campaign.id },
       include: {
         prospect: {
-          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true },
+          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true },
         },
       },
     });

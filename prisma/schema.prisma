@@ -138,6 +138,13 @@ model Prospect {
   companyNameNeedsReview    Boolean   @default(false)
   contactFormStatus         String?   // HAS_FORM, NO_FORM, NO_WEBSITE, UNREACHABLE (null = pas encore analysé)
   contactFormProvider       String?   // ex: Jobber, Google Forms, WordPress (Contact Form 7), HTML
+  ownerName                 String?   // Propriétaire / dirigeant trouvé sur le site (IA)
+  ownerFirstName            String?
+  ownerRole                 String?   // ex: Propriétaire, Président, Fondateur
+  ownerConfidence           String?   // high | medium | low
+  ownerSourceUrl            String?   // page où le nom a été trouvé
+  ownerEvidence             String?   // extrait exact de la page
+  ownerCheckedAt            DateTime? // null = pas encore cherché
   competitorCrm             String?   // CRM concurrent détecté sur le site (Jobber, Housecall Pro…)
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
@@ -163,6 +170,7 @@ model Prospect {
   @@index([emailStatus])
   @@index([enrichedAt])
   @@index([contactFormStatus])
+  @@index([ownerCheckedAt])
   @@index([competitorCrm])
   @@map("prospects")
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { contactGreetingName } from "@/lib/owner-name";
 import { prisma } from "@/lib/db";
 import { sendEmail, canSendEmail, getRandomDelay } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
@@ -23,14 +24,14 @@ function titleCase(str: string): string {
 
 function interpolate(
   template: string,
-  prospect: { companyName: string; city: string | null; email: string | null; contactFormProvider?: string | null },
+  prospect: { companyName: string; city: string | null; email: string | null; contactFormProvider?: string | null; ownerFirstName?: string | null; ownerConfidence?: string | null },
   company: CompanySettings
 ): string {
   return template
     .replace(/\{\{company_name\}\}/g, prospect.companyName)
     .replace(/\{\{form_provider\}\}/g, formProviderLabel(prospect))
     .replace(/\{\{city\}\}/g, titleCase(prospect.city || "votre région"))
-    .replace(/\{\{contact_name\}\}/g, "Madame, Monsieur")
+    .replace(/\{\{contact_name\}\}/g, contactGreetingName(prospect))
     .replace(/\{\{company_email\}\}/g, company.email || "")
     .replace(/\{\{company_phone\}\}/g, company.phone || "")
     .replace(/\{\{company_website\}\}/g, company.website || "")
@@ -119,6 +120,8 @@ export async function GET(
             email: true,
             city: true,
             contactFormProvider: true,
+            ownerFirstName: true,
+            ownerConfidence: true,
             status: true,
           },
         },
@@ -260,6 +263,8 @@ export async function POST(
             email: true,
             city: true,
             contactFormProvider: true,
+            ownerFirstName: true,
+            ownerConfidence: true,
           },
         },
       },
