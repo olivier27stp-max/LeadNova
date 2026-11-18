@@ -7,6 +7,7 @@ import { CityDropdown } from "@/components/ui/city-dropdown";
 import JobProgressBar from "@/components/prospects/JobProgressBar";
 import { useEnrichment } from "@/components/EnrichmentProvider";
 import { useTranslation } from "@/components/LanguageProvider";
+import { cn } from "@/lib/utils";
 
 // ---------- Types ----------
 interface ProspectListItem {
@@ -255,6 +256,12 @@ export default function ProspectsPage() {
   const [cityFilter, setCityFilter] = useState("");
   const [campaignFilter, setCampaignFilter] = useState("");
   const [formFilter, setFormFilter] = useState(""); // HAS_FORM | NO_FORM_ANY | NO_FORM | NO_WEBSITE | unknown | crm | coldcall
+  const [industryGroupFilter, setIndustryGroupFilter] = useState("");
+  const [crmFilter, setCrmFilter] = useState(""); // any | none
+  const [reachFilter, setReachFilter] = useState(""); // email_real | email_guessed | no_email | coldcall
+  const [minScoreFilter, setMinScoreFilter] = useState("");
+  const [reviewsFilter, setReviewsFilter] = useState(""); // ideal | small | large
+  const [industryGroups, setIndustryGroups] = useState<{ key: string; label: string; count: number }[]>([]);
   const [formStats, setFormStats] = useState<{ hasForm: number; noForm: number; noWebsite: number; unreachable: number; competitorCrm: number; remaining: number } | null>(null);
   const [formDetectRunning, setFormDetectRunning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -364,7 +371,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -386,9 +393,13 @@ export default function ProspectsPage() {
     if (contactTypeFilter) params.set("contactType", contactTypeFilter);
     if (campaignFilter && campaignFilter !== "none") params.set("campaignId", campaignFilter);
     if (campaignFilter === "none") params.set("campaignId", "none");
-    if (formFilter === "crm") params.set("competitorCrm", "any");
-    else if (formFilter === "coldcall") params.set("coldCall", "1");
-    else if (formFilter) params.set("formStatus", formFilter);
+    if (formFilter) params.set("formStatus", formFilter);
+    if (industryGroupFilter) params.set("industryGroup", industryGroupFilter);
+    if (crmFilter) params.set("competitorCrm", crmFilter);
+    if (reachFilter === "coldcall") params.set("coldCall", "1");
+    else if (reachFilter) params.set("reach", reachFilter);
+    if (minScoreFilter) params.set("minScore", minScoreFilter);
+    if (reviewsFilter) params.set("reviews", reviewsFilter);
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
     if (sortOrder) params.set("sortOrder", sortOrder);
@@ -414,7 +425,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -1340,7 +1351,36 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || formFilter || debouncedSearch || searchQuery;
+  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter);
+  const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || hasSegmentFilters || debouncedSearch || searchQuery;
+
+  // Répartition A / B des résultats affichés (selon le formulaire de contact)
+  const segmentSplit = useMemo(() => {
+    let a = 0, b = 0, unknown = 0;
+    for (const p of displayProspects) {
+      if (p.contactFormStatus === "HAS_FORM") a++;
+      else if (p.contactFormStatus === "NO_FORM" || p.contactFormStatus === "NO_WEBSITE") b++;
+      else unknown++;
+    }
+    return { a, b, unknown };
+  }, [displayProspects]);
+
+  function resetSegmentFilters() {
+    setFormFilter("");
+    setIndustryGroupFilter("");
+    setCrmFilter("");
+    setReachFilter("");
+    setMinScoreFilter("");
+    setReviewsFilter("");
+  }
+
+  const fetchIndustryGroups = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prospects/industry-groups");
+      if (res.ok) setIndustryGroups((await res.json()).groups || []);
+    } catch { /* silencieux */ }
+  }, []);
+  useEffect(() => { fetchIndustryGroups(); }, [fetchIndustryGroups]);
 
   // ─── Segmentation par formulaire de contact ───
   const fetchFormStats = useCallback(async () => {
@@ -1376,7 +1416,7 @@ export default function ProspectsPage() {
     setSourceFilter("");
     setContactTypeFilter("");
     setCampaignFilter("");
-    setFormFilter("");
+    resetSegmentFilters();
     setSearchQuery("");
     setDebouncedSearch("");
      }
@@ -2082,20 +2122,87 @@ export default function ProspectsPage() {
             <option key={c.id} value={c.id}>#{c.number} — {c.name}</option>
           ))}
         </select>
+        {hasFilters && (
+          <button
+            onClick={resetFilters}
+            className="text-sm text-danger hover:text-danger/80 px-2 py-1"
+          >
+            {t("common", "reset")}
+          </button>
+        )}
+      </div>
+
+      {/* Segmentation — filtres combinables pour séparer les listes (A / B, métier, CRM…) */}
+      <div className="flex flex-wrap gap-3 mb-4 items-center p-3 rounded-md border border-border bg-background-subtle/40">
+        <span className="text-xs font-semibold uppercase tracking-wide text-foreground-muted mr-1">Segmentation</span>
+        <select
+          value={industryGroupFilter}
+          onChange={(e) => setIndustryGroupFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", industryGroupFilter && "border-primary text-primary")}
+          title="Grand métier (regroupe les catégories Google similaires)"
+        >
+          <option value="">Tous les métiers</option>
+          {industryGroups.map((g) => (
+            <option key={g.key} value={g.key}>{g.label} ({g.count})</option>
+          ))}
+        </select>
         <select
           value={formFilter}
-          onChange={(e) => { setFormFilter(e.target.value); }}
-          className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+          onChange={(e) => setFormFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", formFilter && "border-primary text-primary")}
           title="Segment selon le formulaire de contact du site"
         >
-          <option value="">Tous les segments</option>
-          <option value="HAS_FORM">Avec formulaire{formStats ? ` (${formStats.hasForm})` : ""}</option>
-          <option value="NO_FORM_ANY">Sans formulaire ou sans site{formStats ? ` (${formStats.noForm + formStats.noWebsite})` : ""}</option>
-          <option value="NO_FORM">— Site sans formulaire{formStats ? ` (${formStats.noForm})` : ""}</option>
-          <option value="NO_WEBSITE">— Sans site web{formStats ? ` (${formStats.noWebsite})` : ""}</option>
-          <option value="crm">CRM concurrent (Jobber…){formStats ? ` (${formStats.competitorCrm})` : ""}</option>
-          <option value="coldcall">Liste d&apos;appels (tél. sans courriel)</option>
+          <option value="">Message A et B</option>
+          <option value="HAS_FORM">A — avec formulaire{formStats ? ` (${formStats.hasForm})` : ""}</option>
+          <option value="NO_FORM_ANY">B — sans formulaire ou sans site{formStats ? ` (${formStats.noForm + formStats.noWebsite})` : ""}</option>
+          <option value="NO_FORM">B · site sans formulaire{formStats ? ` (${formStats.noForm})` : ""}</option>
+          <option value="NO_WEBSITE">B · sans site web{formStats ? ` (${formStats.noWebsite})` : ""}</option>
+          <option value="UNREACHABLE">Site inaccessible{formStats ? ` (${formStats.unreachable})` : ""}</option>
           <option value="unknown">Pas encore analysés{formStats ? ` (${formStats.remaining})` : ""}</option>
+        </select>
+        <select
+          value={crmFilter}
+          onChange={(e) => setCrmFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", crmFilter && "border-primary text-primary")}
+          title="CRM concurrent détecté sur le site (Jobber, Housecall Pro…)"
+        >
+          <option value="">CRM : tous</option>
+          <option value="any">Utilise un CRM concurrent{formStats ? ` (${formStats.competitorCrm})` : ""}</option>
+          <option value="none">Aucun CRM détecté</option>
+        </select>
+        <select
+          value={reachFilter}
+          onChange={(e) => setReachFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", reachFilter && "border-primary text-primary")}
+          title="Comment joindre le prospect"
+        >
+          <option value="">Contact : tous</option>
+          <option value="email_real">Courriel réel (cold email)</option>
+          <option value="email_guessed">Courriel deviné</option>
+          <option value="coldcall">Liste d&apos;appels (tél. sans courriel réel)</option>
+          <option value="no_email">Aucun courriel</option>
+        </select>
+        <select
+          value={reviewsFilter}
+          onChange={(e) => setReviewsFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", reviewsFilter && "border-primary text-primary")}
+          title="Taille estimée selon le nombre d'avis Google"
+        >
+          <option value="">Taille : toutes</option>
+          <option value="ideal">Idéale (20–300 avis)</option>
+          <option value="small">Petite (&lt; 20 avis)</option>
+          <option value="large">Grande (&gt; 300 avis)</option>
+        </select>
+        <select
+          value={minScoreFilter}
+          onChange={(e) => setMinScoreFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", minScoreFilter && "border-primary text-primary")}
+          title="Score minimum du prospect"
+        >
+          <option value="">Score : tous</option>
+          <option value="30">Score ≥ 30</option>
+          <option value="50">Score ≥ 50</option>
+          <option value="70">Score ≥ 70</option>
         </select>
         {formStats && formStats.remaining > 0 && (
           <button
@@ -2107,13 +2214,34 @@ export default function ProspectsPage() {
             {formDetectRunning ? `Analyse… (${formStats.remaining} restants)` : `Analyser les formulaires (${formStats.remaining})`}
           </button>
         )}
-        {hasFilters && (
-          <button
-            onClick={resetFilters}
-            className="text-sm text-danger hover:text-danger/80 px-2 py-1"
-          >
-            {t("common", "reset")}
+        {hasSegmentFilters && (
+          <button onClick={resetSegmentFilters} className="text-sm text-danger hover:text-danger/80 px-2 py-1">
+            Effacer la segmentation
           </button>
+        )}
+        {!loading && displayProspects.length > 0 && (
+          <div className="flex items-center gap-2 text-xs ml-auto">
+            <span className="text-foreground-muted">{displayProspects.length} résultats :</span>
+            <button
+              onClick={() => setFormFilter(formFilter === "HAS_FORM" ? "" : "HAS_FORM")}
+              className={cn("rounded-full px-2.5 py-1 border", formFilter === "HAS_FORM" ? "bg-primary text-white border-primary" : "border-border hover:bg-background-subtle")}
+              title="Prospects qui recevront le message A"
+            >
+              A · {segmentSplit.a}
+            </button>
+            <button
+              onClick={() => setFormFilter(formFilter === "NO_FORM_ANY" ? "" : "NO_FORM_ANY")}
+              className={cn("rounded-full px-2.5 py-1 border", formFilter === "NO_FORM_ANY" ? "bg-primary text-white border-primary" : "border-border hover:bg-background-subtle")}
+              title="Prospects qui recevront le message B"
+            >
+              B · {segmentSplit.b}
+            </button>
+            {segmentSplit.unknown > 0 && (
+              <span className="text-foreground-muted" title="Pas encore analysés ou site inaccessible : recevront le message A par défaut">
+                ? · {segmentSplit.unknown}
+              </span>
+            )}
+          </div>
         )}
       </div>
 
