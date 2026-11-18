@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { recordReplyClassification } from "@/lib/reply-classifier";
 import nodemailer from "nodemailer";
 import { prisma } from "./db";
 import { encrypt, decrypt, isEncrypted } from "./crypto";
@@ -272,6 +273,8 @@ export async function pollGmailForUpdates(workspaceId: string): Promise<{ replie
         where: { id: activity.id },
         data: { replyReceived: true },
       });
+      // Ton de la réponse (positive / négative / absence / désabonnement)
+      await recordReplyClassification(activity.id, activity.prospect.id, full.data.snippet || "", workspaceId);
 
       // Update prospect status to REPLIED if not already beyond that
       if (activity.prospect.status !== "QUALIFIED") {

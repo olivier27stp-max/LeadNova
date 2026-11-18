@@ -45,6 +45,7 @@ export const translations = {
     calendar: { fr: "Calendrier", en: "Calendar" },
     campaigns: { fr: "Campagnes", en: "Campaigns" },
     funnel: { fr: "Funnel", en: "Funnel" },
+    calls: { fr: "Appels", en: "Calls" },
     settings: { fr: "Paramètres", en: "Settings" },
     theme: { fr: "Thème", en: "Theme" },
     themeAuto: { fr: "Auto", en: "Auto" },

@@ -145,10 +145,46 @@ model Prospect {
   ownerSourceUrl            String?   // page où le nom a été trouvé
   ownerEvidence             String?   // extrait exact de la page
   ownerCheckedAt            DateTime? // null = pas encore cherché
+  // ── Analyse IA du site + avis Google (signaux de conversion) ──
+  siteAnalyzedAt            DateTime?
+  hiring                    Boolean?  // offre d'emploi / « on embauche » sur le site
+  hiringEvidence            String?
+  onlineBooking             Boolean?  // réservation / soumission en ligne
+  onlinePayment             Boolean?  // paiement en ligne
+  bookingTool               String?   // ex: Calendly, Square, Stripe
+  teamsCount                Int?      // nb d'équipes / camions mentionné
+  teamsEvidence             String?
+  serviceSegment            String?   // residential | commercial | both
+  reviewsCheckedAt          DateTime?
+  reviewsSource             String?   // outscraper | google_places
+  reviewsSampleSize         Int?
+  reviewsLast6m             Int?      // avis publiés dans les 6 derniers mois (dans l'échantillon)
+  lastReviewAt              DateTime?
+  complaintCount            Int?      // avis qui se plaignent du suivi, retards, soumission…
+  complaintEvidence         String?
+  ownerRepliesReviews       Boolean?  // le propriétaire répond lui-même aux avis (Outscraper seulement)
+  // ── Engagement (dénormalisé pour les notes) ──
+  emailOpenCount            Int       @default(0)
+  emailClickCount           Int       @default(0)
+  siteVisitCount            Int       @default(0)
+  lastSiteVisitAt           DateTime?
+  lastReplySentiment        String?   // positive | neutral | negative | out_of_office | unsubscribe
+  lastEngagedAt             DateTime?
+  // ── Appels et vente ──
+  employeeCount             Int?
+  currentTool               String?   // JOBBER, HOUSECALL, OTHER_CRM, GOOGLE_FORMS, EXCEL, PAPER, NONE, OTHER
+  salesStage                String?   // DEMO_BOOKED | DEMO_DONE | TRIAL | WON | LOST
+  lostReason                String?
+  lastCallAt                DateTime?
+  lastCallOutcome           String?
+  lastCallWho               String?
+  lastObjection             String?
+  callbackAt                DateTime?
   competitorCrm             String?   // CRM concurrent détecté sur le site (Jobber, Housecall Pro…)
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
+  callLogs         CallLog[]
   campaignContacts CampaignContact[]
   funnelProspect   FunnelProspect?
 
@@ -171,6 +207,8 @@ model Prospect {
   @@index([enrichedAt])
   @@index([contactFormStatus])
   @@index([ownerCheckedAt])
+  @@index([siteAnalyzedAt])
+  @@index([callbackAt])
   @@index([competitorCrm])
   @@map("prospects")
 }
@@ -190,6 +228,14 @@ model EmailActivity {
   isFollowUp      Boolean   @default(false)
   followUpIndex   Int       @default(0)
   gmailMessageId  String?
+  openCount       Int       @default(0)
+  lastOpenedAt    DateTime?
+  clickCount      Int       @default(0)
+  firstClickedAt  DateTime?
+  lastClickedAt   DateTime?
+  repliedAt       DateTime?
+  replySentiment  String?   // positive | neutral | negative | out_of_office | unsubscribe
+  replySnippet    String?
 
   prospect        Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -660,4 +706,25 @@ model EmailSendLog {
   @@index([emailAccountId, sentAt])
   @@index([sentAt])
   @@map("email_send_logs")
+}
+
+model CallLog {
+  id            String    @id @default(cuid())
+  prospectId    String
+  workspaceId   String?
+  userId        String?
+  createdAt     DateTime  @default(now())
+  outcome       String    // NO_ANSWER | VOICEMAIL | WRONG_NUMBER | REFUSED | CALLBACK | CONNECTED | DEMO_BOOKED
+  whoAnswered   String?   // OWNER | EMPLOYEE | RECEPTIONIST | UNKNOWN
+  currentTool   String?
+  employeeCount Int?
+  objection     String?   // PRICE | TIMING | HAS_TOOL | NO_NEED | OTHER | NONE
+  callbackAt    DateTime?
+  notes         String?
+
+  prospect      Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId])
+  @@index([workspaceId, createdAt])
+  @@map("call_logs")
 }

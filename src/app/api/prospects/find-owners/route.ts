@@ -14,20 +14,18 @@ function pendingWhere(workspaceId: string, ids?: string[]) {
   return {
     workspaceId,
     archivedAt: null,
-    ownerCheckedAt: null,
-    website: { not: null },
-    NOT: { website: "" },
+    siteAnalyzedAt: null,
     ...(ids && ids.length > 0 ? { id: { in: ids } } : {}),
   };
 }
 
-// GET /api/prospects/find-owners — propriétaires trouvés / restants à analyser
+// GET /api/prospects/find-owners — propriétaires trouvés / prospects restants à analyser (site + avis)
 export async function GET() {
   try {
     const ctx = await requireWorkspaceContext();
     const base = { workspaceId: ctx.workspaceId, archivedAt: null };
     const found = await prisma.prospect.count({ where: { ...base, ownerName: { not: null } } });
-    const checked = await prisma.prospect.count({ where: { ...base, ownerCheckedAt: { not: null } } });
+    const checked = await prisma.prospect.count({ where: { ...base, siteAnalyzedAt: { not: null } } });
     const remaining = await prisma.prospect.count({ where: pendingWhere(ctx.workspaceId) });
     return NextResponse.json({ found, notFound: checked - found, remaining });
   } catch (error) {
@@ -47,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     const batch = await prisma.prospect.findMany({
       where: pendingWhere(ctx.workspaceId, ids),
-      select: { id: true, companyName: true, website: true },
+      select: { id: true, companyName: true, website: true, city: true },
       orderBy: { leadScore: "desc" },
       take: BATCH_SIZE,
     });
@@ -59,7 +57,7 @@ export async function POST(request: NextRequest) {
       while (cursor < batch.length) {
         const p = batch[cursor++];
         try {
-          results.push({ id: p.id, analysis: await analyzeOwner(p.companyName, p.website) });
+          results.push({ id: p.id, analysis: await analyzeOwner(p.companyName, p.website, p.city) });
         } catch (err) {
           console.error(`[find-owners] ${p.id} failed:`, err);
           results.push({ id: p.id, analysis: { status: "error", reason: "exception", fields: null } });
@@ -84,7 +82,7 @@ export async function POST(request: NextRequest) {
       await logActivity({
         action: "find_owners",
         type: "success",
-        title: `Propriétaires : ${counts.found} trouvé(s) sur ${batch.length} site(s)`,
+        title: `Analyse IA : ${counts.found} propriétaire(s) trouvé(s) sur ${batch.length} prospect(s)`,
         details: `${counts.notFound} non trouvé(s), ${counts.unreachable} site(s) inaccessible(s), ${counts.errors} erreur(s) IA`,
         workspaceId: ctx.workspaceId,
         userId: ctx.userId,

@@ -14,6 +14,7 @@ import {
   CalendarDays,
   Megaphone,
   Filter,
+  PhoneCall,
   Settings,
   Sun,
   Moon,
@@ -32,6 +33,7 @@ const NAV_KEYS = [
   { href: "/calendar", labelKey: "calendar" as const, icon: CalendarDays },
   { href: "/campaigns", labelKey: "campaigns" as const, icon: Megaphone },
   { href: "/funnel", labelKey: "funnel" as const, icon: Filter },
+  { href: "/calls", labelKey: "calls" as const, icon: PhoneCall },
   { href: "/settings", labelKey: "settings" as const, icon: Settings },
 ];
 

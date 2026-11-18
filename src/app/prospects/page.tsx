@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import { CityDropdown } from "@/components/ui/city-dropdown";
 import JobProgressBar from "@/components/prospects/JobProgressBar";
+import ProspectInsights from "@/components/prospects/ProspectInsights";
 import { useEnrichment } from "@/components/EnrichmentProvider";
 import { useTranslation } from "@/components/LanguageProvider";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,31 @@ interface ProspectListItem {
   ownerConfidence?: string | null;
   ownerCheckedAt?: string | null;
   conversion?: { score: number; reasons: string[] };
+  engagement?: { score: number; reasons: string[]; hot: boolean };
+  // Signaux site & avis, engagement, appels
+  siteAnalyzedAt?: string | null;
+  hiring?: boolean | null;
+  complaintCount?: number | null;
+  ownerRepliesReviews?: boolean | null;
+  reviewsLast6m?: number | null;
+  onlineBooking?: boolean | null;
+  onlinePayment?: boolean | null;
+  teamsCount?: number | null;
+  serviceSegment?: string | null;
+  emailOpenCount?: number | null;
+  emailClickCount?: number | null;
+  siteVisitCount?: number | null;
+  lastReplySentiment?: string | null;
+  lastEngagedAt?: string | null;
+  lastCallAt?: string | null;
+  lastCallOutcome?: string | null;
+  lastCallWho?: string | null;
+  lastObjection?: string | null;
+  currentTool?: string | null;
+  employeeCount?: number | null;
+  callbackAt?: string | null;
+  salesStage?: string | null;
+  lostReason?: string | null;
   createdAt: string;
   campaignId: string | null;
   campaignNumber: number | null;
@@ -46,6 +72,12 @@ interface CampaignOption {
 
 interface ProspectDetail extends ProspectListItem {
   ownerSourceUrl?: string | null;
+  hiringEvidence?: string | null;
+  complaintEvidence?: string | null;
+  reviewsSampleSize?: number | null;
+  reviewsSource?: string | null;
+  bookingTool?: string | null;
+  teamsEvidence?: string | null;
   ownerEvidence?: string | null;
   address: string | null;
   secondaryEmail: string | null;
@@ -111,6 +143,17 @@ function ConversionPill({ conversion }: { conversion?: { score: number; reasons:
   return (
     <span className={cn("inline-block rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums", tone)} title={reasons.join("\n") || "Peu de signaux"}>
       {score}/10
+    </span>
+  );
+}
+
+function EngagementPill({ engagement }: { engagement?: { score: number; reasons: string[]; hot: boolean } }) {
+  if (!engagement) return <span className="text-foreground-muted">—</span>;
+  const { score, reasons, hot } = engagement;
+  const tone = score >= 6 ? "bg-success-subtle text-success" : score >= 3 ? "bg-warning-subtle text-warning" : "bg-background-muted text-foreground-muted";
+  return (
+    <span className={cn("inline-block rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums", tone)} title={reasons.join("\n") || "Aucune interaction"}>
+      {hot ? "🔥 " : ""}{score}/10
     </span>
   );
 }
@@ -239,6 +282,9 @@ const ProspectRow = memo(function ProspectRow({
         <ConversionPill conversion={prospect.conversion} />
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
+        <EngagementPill engagement={prospect.engagement} />
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap">
         <StatusBadge status={prospect.status} />
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
@@ -289,6 +335,8 @@ export default function ProspectsPage() {
   const [minScoreFilter, setMinScoreFilter] = useState("");
   const [reviewsFilter, setReviewsFilter] = useState(""); // ideal | small | large
   const [minChanceFilter, setMinChanceFilter] = useState("");
+  const [engagementFilter, setEngagementFilter] = useState(""); // "3" | "5" | "7" | hot
+  const [callbackFilter, setCallbackFilter] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState(""); // found | not_found | pending
   const [ownerStats, setOwnerStats] = useState<{ found: number; notFound: number; remaining: number } | null>(null);
   const [ownerRun, setOwnerRun] = useState<{ processed: number; found: number; total: number } | null>(null);
@@ -403,7 +451,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, minChanceFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, minChanceFilter, engagementFilter, callbackFilter]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -433,6 +481,7 @@ export default function ProspectsPage() {
     if (minScoreFilter) params.set("minScore", minScoreFilter);
     if (reviewsFilter) params.set("reviews", reviewsFilter);
     if (ownerFilter) params.set("owner", ownerFilter);
+    if (callbackFilter) params.set("callback", "due");
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
     if (sortOrder) params.set("sortOrder", sortOrder);
@@ -458,7 +507,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, callbackFilter, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -513,9 +562,14 @@ export default function ProspectsPage() {
   const displayProspects = useMemo(() => {
     let result = prospects;
     if (minChanceFilter) result = result.filter((p) => (p.conversion?.score ?? 0) >= Number(minChanceFilter));
+    if (engagementFilter === "hot") result = result.filter((p) => p.engagement?.hot);
+    else if (engagementFilter) result = result.filter((p) => (p.engagement?.score ?? 0) >= Number(engagementFilter));
     if (sortBy === "conversion") {
       const dir = sortOrder === "asc" ? 1 : -1;
       result = [...result].sort((a, b) => ((a.conversion?.score ?? 0) - (b.conversion?.score ?? 0)) * dir || b.leadScore - a.leadScore);
+    } else if (sortBy === "engagement") {
+      const dir = sortOrder === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => ((a.engagement?.score ?? 0) - (b.engagement?.score ?? 0)) * dir || (b.conversion?.score ?? 0) - (a.conversion?.score ?? 0));
     }
     if (cityFilter) result = result.filter((p) => p.city?.trim().toLowerCase() === cityFilter.trim().toLowerCase());
     const q = searchQuery.toLowerCase();
@@ -536,7 +590,7 @@ export default function ProspectsPage() {
       }
       return false;
     });
-  }, [prospects, searchQuery, cityFilter, minChanceFilter, sortBy, sortOrder]);
+  }, [prospects, searchQuery, cityFilter, minChanceFilter, engagementFilter, sortBy, sortOrder]);
 
   // Fetch targeting cities from settings + provinces list
   useEffect(() => {
@@ -554,6 +608,40 @@ export default function ProspectsPage() {
         if (data?.provinces) setProvinces(data.provinces);
       })
       .catch(() => {});
+  }, []);
+
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => { selectedIdRef.current = selectedProspect?.id ?? null; }, [selectedProspect]);
+
+  // Recharge la fiche ouverte (après un appel) sans la fermer, puis la liste
+  const refreshSelected = useCallback(async () => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    try {
+      const res = await fetch("/api/prospects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _action: "getDetail", id }),
+      });
+      if (res.ok) setSelectedProspect(await res.json());
+    } catch { /* silencieux */ }
+    fetchProspects();
+  }, [fetchProspects]);
+
+  // Lien direct depuis la page Appels : /prospects?open=<id>
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id) return;
+    setDetailLoading(true);
+    fetch("/api/prospects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ _action: "getDetail", id }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setSelectedProspect(d))
+      .catch(() => {})
+      .finally(() => setDetailLoading(false));
   }, []);
 
   // Fetch full detail for modal
@@ -1389,7 +1477,7 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || minChanceFilter);
+  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || minChanceFilter || engagementFilter || callbackFilter);
   const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || hasSegmentFilters || debouncedSearch || searchQuery;
 
   // Répartition A / B des résultats affichés (selon le formulaire de contact)
@@ -1412,6 +1500,8 @@ export default function ProspectsPage() {
     setReviewsFilter("");
     setOwnerFilter("");
     setMinChanceFilter("");
+    setEngagementFilter("");
+    setCallbackFilter(false);
   }
 
   // ─── Propriétaires (IA) ───
@@ -2295,6 +2385,26 @@ export default function ProspectsPage() {
           <option value="5">Chance ≥ 5/10</option>
         </select>
         <select
+          value={engagementFilter}
+          onChange={(e) => setEngagementFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", engagementFilter && "border-primary text-primary")}
+          title="Engagement sur 10 : ouvertures, clics, visites du site, réponses, appels"
+        >
+          <option value="">Engagement : tous</option>
+          <option value="hot">🔥 À appeler maintenant</option>
+          <option value="7">Engagement ≥ 7/10</option>
+          <option value="5">Engagement ≥ 5/10</option>
+          <option value="3">Engagement ≥ 3/10</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => setCallbackFilter((v) => !v)}
+          className={cn("border rounded-md px-3 py-2 text-sm", callbackFilter ? "border-primary bg-primary-subtle text-primary" : "border-border text-foreground-secondary hover:bg-background-subtle")}
+          title="Prospects avec un rappel prévu aujourd'hui ou en retard"
+        >
+          📞 Rappels du jour
+        </button>
+        <select
           value={minScoreFilter}
           onChange={(e) => setMinScoreFilter(e.target.value)}
           className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", minScoreFilter && "border-primary text-primary")}
@@ -2327,9 +2437,9 @@ export default function ProspectsPage() {
           <button
             onClick={() => runOwnerSearch()}
             className="text-sm border border-primary/30 text-primary rounded-md px-3 py-2 hover:bg-primary-subtle"
-            title="L'IA lit l'accueil, la page À propos, l'équipe et le contact de chaque site pour trouver le nom du propriétaire"
+            title="L'IA lit le site (accueil, À propos, équipe, carrières, contact) et les avis Google : propriétaire, embauche, équipes, réservation en ligne, plaintes sur le suivi"
           >
-            Trouver les propriétaires ({ownerStats.remaining})
+            Analyser sites + avis (IA) ({ownerStats.remaining})
           </button>
         )}
         {hasSegmentFilters && (
@@ -2532,6 +2642,9 @@ export default function ProspectsPage() {
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("conversion")} title="Chance de conversion estimée sur 10 (métier, taille, besoin, joignabilité)">
                 Chance <SortIcon field="conversion" />
               </th>
+              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("engagement")} title="Engagement sur 10 : ouvertures, clics, visites du site, réponses, appels. 🔥 = à appeler maintenant">
+                Engagement <SortIcon field="engagement" />
+              </th>
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("status")}>
                 {t("prospects", "status")} <SortIcon field="status" />
               </th>
@@ -2552,7 +2665,7 @@ export default function ProspectsPage() {
               </>
             ) : displayProspects.length === 0 ? (
               <tr>
-                <td colSpan={12} className="text-center py-12 text-foreground-muted">
+                <td colSpan={13} className="text-center py-12 text-foreground-muted">
                   <div className="space-y-2">
                     <p className="text-base">{t("prospects", "noProspectFound")}</p>
                     {hasFilters ? (
@@ -2776,6 +2889,10 @@ export default function ProspectsPage() {
                     </p>
                   </div>
                 </div>
+                )}
+
+                {!editing && (
+                  <ProspectInsights key={selectedProspect.id} prospect={selectedProspect} onChanged={refreshSelected} />
                 )}
 
                 {/* Recent emails */}

@@ -57,13 +57,21 @@ export function wrapInEmailTemplate(
   companyInfo?: CompanyInfo,
   trackingPixelUrl?: string,
   unsubscribeUrl?: string,
-  logoEnabled?: boolean
+  logoEnabled?: boolean,
+  trackLink?: (url: string) => string
 ): string {
   const info = companyInfo || {};
+  const track = trackLink || ((u: string) => u);
+  // Les adresses web écrites dans le message deviennent des liens suivis (clics)
+  const linkify = (text: string) =>
+    text.replace(/\b((?:https?:\/\/|www\.)[^\s<>"]+[^\s<>".,;:!?)])/g, (m) => {
+      const href = m.startsWith("http") ? m : `https://${m}`;
+      return `<a href="${escapeHtml(track(href))}" style="color:#2563eb;">${m}</a>`;
+    });
   const htmlBody = body
     .split(/\n\n+/)
     .map((para) =>
-      `<p style="margin:0 0 16px 0;line-height:1.6;">${para.trim().replace(/\n/g, "<br>")}</p>`
+      `<p style="margin:0 0 16px 0;line-height:1.6;">${linkify(para.trim()).replace(/\n/g, "<br>")}</p>`
     )
     .join("\n");
 
@@ -114,7 +122,7 @@ export function wrapInEmailTemplate(
   // Phone · Website on same line
   const contactParts: string[] = [];
   if (phone) contactParts.push(`<a href="tel:${escapeHtml(phone)}" style="color:#374151;text-decoration:none;font-size:12px;">${escapeHtml(phone)}</a>`);
-  if (website) contactParts.push(`<a href="${escapeHtml(websiteHref)}" style="color:#2563eb;text-decoration:none;font-size:12px;">${escapeHtml(websiteDisplay)}</a>`);
+  if (website) contactParts.push(`<a href="${escapeHtml(track(websiteHref))}" style="color:#2563eb;text-decoration:none;font-size:12px;">${escapeHtml(websiteDisplay)}</a>`);
   if (contactParts.length > 0) fullSigLines.push(contactParts.join(` <span style="color:#d1d5db;"> &middot; </span> `));
 
   // Country

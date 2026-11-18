@@ -37,7 +37,13 @@ src/lib/lead-scoring.ts — Score /100 profil Lume : courriel réel 20 (deviné 
 src/lib/form-detection.ts — Détection formulaire de contact + CRM concurrent (Jobber…) ; choix du message de campagne par segment
 src/lib/industry-groups.ts — Regroupe les catégories Google en grands métiers (filtre Segmentation de /prospects)
 src/lib/owner-finder.ts  — IA (Claude) qui trouve le propriétaire sur le site (accueil, À propos, équipe, contact) ; nom et extrait vérifiés mot pour mot. Modèle : OWNER_AI_MODEL (défaut claude-opus-5-5)
-src/lib/conversion-score.ts — Chance de conversion /10 (métier, taille, besoin, joignabilité, statut), calculée à la volée
+src/lib/conversion-score.ts — Chance de conversion /10 (profil + signaux site/avis + appels + étape de vente), calculée à la volée
+src/lib/engagement-score.ts — Engagement /10 (ouvertures, clics, visites du site, réponses, appels ; 🔥 = signal < 48 h)
+src/lib/reviews.ts       — Avis Google récents (Outscraper si OUTSCRAPER_API_KEY, sinon Places 5 avis)
+src/lib/tracking.ts      — Liens de clic signés (HMAC) ; routes publiques /api/track/{open,click,visit}
+src/lib/reply-classifier.ts — Ton des réponses (positive/neutre/négative/absence/désabonnement) via Claude
+src/lib/call-options.ts  — Listes du journal d'appels (résultat, qui, outil, objection, étape, raison de perte)
+src/app/calls/page.tsx   — Page « Appels » : KPI, entonnoir, objections, calibrage de la Chance, rappels du jour, prospects chauds
 src/lib/activity.ts     — logActivity() helper
 src/lib/email-sender.ts — Nodemailer SMTP
 prisma/schema.prisma    — Full DB schema
