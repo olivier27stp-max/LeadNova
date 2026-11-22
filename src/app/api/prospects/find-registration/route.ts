@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 import { analyzeRegistration, saveRegistration, type RegistrationResult } from "@/lib/registration-finder";
+import { loadTargetingSettings } from "@/lib/discovery";
 
 // Chaque appel traite un petit lot (recherche web = lent) ; le frontend rappelle tant que `remaining > 0`.
 export const maxDuration = 300;
@@ -10,13 +11,23 @@ export const maxDuration = 300;
 const BATCH_SIZE = 6;
 const CONCURRENCY = 3;
 
-function pendingWhere(workspaceId: string, ids?: string[]) {
+function pendingWhere(workspaceId: string, ids?: string[], batchId?: string) {
   return {
     workspaceId,
     archivedAt: null,
     registrationCheckedAt: null,
     ...(ids && ids.length > 0 ? { id: { in: ids } } : {}),
+    ...(batchId ? { importBatchId: batchId } : {}),
   };
+}
+
+/** Années d'immatriculation qui correspondent à l'âge voulu (lt3 = moins de 3 ans, gte3 = 3 ans et plus…). */
+function ageYearRange(age: string, nowYear: number): { gt?: number; lte?: number } | null {
+  const maxAge = ({ lt3: 3, lt5: 5 } as Record<string, number>)[age];
+  const minAge = ({ gte3: 3, gte5: 5, gte10: 10 } as Record<string, number>)[age];
+  if (maxAge) return { gt: nowYear - maxAge };
+  if (minAge) return { lte: nowYear - minAge };
+  return null;
 }
 
 // GET /api/prospects/find-registration — combien ont une année, combien restent à chercher
@@ -44,9 +55,12 @@ export async function POST(request: NextRequest) {
     }
     const body = await request.json().catch(() => ({}));
     const ids: string[] | undefined = Array.isArray(body?.ids) ? body.ids.filter((x: unknown) => typeof x === "string") : undefined;
+    // Après une découverte : ne traiter que ce lot, puis ajouter à la campagne ceux qui ont l'âge du Ciblage
+    const batchId: string | undefined = typeof body?.batchId === "string" ? body.batchId : undefined;
+    const campaignId: string | undefined = typeof body?.campaignId === "string" ? body.campaignId : undefined;
 
     const batch = await prisma.prospect.findMany({
-      where: pendingWhere(ctx.workspaceId, ids),
+      where: pendingWhere(ctx.workspaceId, ids, batchId),
       select: { id: true, companyName: true, city: true, phone: true, website: true },
       orderBy: { leadScore: "desc" },
       take: BATCH_SIZE,
@@ -77,7 +91,43 @@ export async function POST(request: NextRequest) {
       else counts.notFound++;
     }
 
-    const remaining = await prisma.prospect.count({ where: pendingWhere(ctx.workspaceId, ids) });
+    const remaining = await prisma.prospect.count({ where: pendingWhere(ctx.workspaceId, ids, batchId) });
+
+    // Lot de découverte terminé : ajoute à la campagne les prospects qui ont l'âge voulu (sources sûres seulement)
+    let addedToCampaign: number | null = null;
+    let matched: number | null = null;
+    if (remaining === 0 && batchId && campaignId) {
+      const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, workspaceId: ctx.workspaceId }, select: { id: true } });
+      const targeting = await loadTargetingSettings(ctx.workspaceId);
+      const range = targeting.companyAge ? ageYearRange(targeting.companyAge, new Date().getFullYear()) : null;
+      if (campaign) {
+        const keep = await prisma.prospect.findMany({
+          where: {
+            workspaceId: ctx.workspaceId,
+            archivedAt: null,
+            importBatchId: batchId,
+            ...(range ? { registrationYear: range, registrationSource: { not: "domaine" } } : {}),
+          },
+          select: { id: true },
+        });
+        matched = keep.length;
+        addedToCampaign = 0;
+        for (const p of keep) {
+          try {
+            await prisma.campaignContact.create({ data: { campaignId: campaign.id, prospectId: p.id } });
+            addedToCampaign++;
+          } catch { /* déjà dans la campagne */ }
+        }
+        await logActivity({
+          action: "find_registration",
+          type: "success",
+          title: `Ciblage par âge : ${addedToCampaign} prospect(s) ajouté(s) à la campagne`,
+          details: `${matched} prospect(s) de la découverte ont l'âge voulu (${targeting.companyAge ?? "tous"}, sources sûres)`,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userId,
+        });
+      }
+    }
     if (batch.length > 0) {
       await logActivity({
         action: "find_registration",
@@ -90,7 +140,7 @@ export async function POST(request: NextRequest) {
     }
 
     const stalled = batch.length > 0 && counts.errors === batch.length;
-    return NextResponse.json({ processed: batch.length, remaining, counts, stalled });
+    return NextResponse.json({ processed: batch.length, remaining, counts, stalled, matched, addedToCampaign });
   } catch (error) {
     return handleWorkspaceError(error);
   }

@@ -14,7 +14,11 @@ interface TargetingSettings {
   region: string;
   minReviews?: number;
   maxReviews?: number;
+  /** Âge voulu de l'entreprise (année d'immatriculation) : lt3 | gte3 | lt5 | gte5 | gte10 ; vide = tous */
+  companyAge?: string;
 }
+
+export const COMPANY_AGE_VALUES = ["lt3", "gte3", "lt5", "gte5", "gte10"] as const;
 
 export async function loadTargetingSettings(workspaceId?: string | null): Promise<TargetingSettings> {
   const empty: TargetingSettings = { keywords: [], blockedKeywords: [], cities: [], searchQueries: [], region: "CA" };
@@ -33,6 +37,7 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
       region: typeof targeting.region === "string" ? (targeting.region as string) : "CA",
       minReviews: typeof targeting.minReviews === "number" ? targeting.minReviews : undefined,
       maxReviews: typeof targeting.maxReviews === "number" ? targeting.maxReviews : undefined,
+      companyAge: (COMPANY_AGE_VALUES as readonly string[]).includes(targeting.companyAge as string) ? (targeting.companyAge as string) : undefined,
     };
   } catch {
     return empty;
