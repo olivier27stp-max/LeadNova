@@ -7,7 +7,8 @@ export const CALL_OUTCOMES = {
   REFUSED: "Refus",
   CALLBACK: "Rappeler",
   CONNECTED: "Conversation",
-  DEMO_BOOKED: "Démo prise",
+  SETTING_BOOKED: "Setting call pris",
+  DEMO_BOOKED: "Closing call pris",
 } as const;
 
 export const CALL_WHO = {
@@ -37,13 +38,8 @@ export const OBJECTIONS = {
   OTHER: "Autre",
 } as const;
 
-export const SALES_STAGES = {
-  DEMO_BOOKED: "Démo prise",
-  DEMO_DONE: "Démo faite",
-  TRIAL: "Essai gratuit",
-  WON: "Vendu",
-  LOST: "Perdu",
-} as const;
+// Étapes de vente : voir src/lib/sales-stages.ts (PIPELINE_STAGES)
+export { SALES_STAGES } from "@/lib/sales-stages";
 
 export const LOST_REASONS = {
   PRICE: "Prix",
@@ -55,4 +51,4 @@ export const LOST_REASONS = {
 } as const;
 
 /** Issues où on a vraiment parlé à quelqu'un (signal d'engagement) */
-export const CONNECTED_OUTCOMES = new Set(["REFUSED", "CALLBACK", "CONNECTED", "DEMO_BOOKED"]);
+export const CONNECTED_OUTCOMES = new Set(["REFUSED", "CALLBACK", "CONNECTED", "SETTING_BOOKED", "DEMO_BOOKED"]);

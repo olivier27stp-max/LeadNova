@@ -188,8 +188,8 @@ export default function CallsPage() {
             <StatCard label="Appels" value={k.calls} subtitle={`${k.prospectsCalled} prospects`} icon={<PhoneCall size={16} />} iconColor="bg-primary-subtle text-primary" />
             <StatCard label="Taux de joints" value={pct(k.connectRate)} subtitle="Quelqu'un a répondu et parlé" icon={<PhoneIncoming size={16} />} iconColor="bg-primary-subtle text-primary" />
             <StatCard label="Propriétaire joint" value={pct(k.ownerRate)} subtitle="Parmi les appels joints" icon={<UserCheck size={16} />} iconColor="bg-primary-subtle text-primary" />
-            <StatCard label="Démos" value={k.demos} subtitle="Prises (ou plus loin)" icon={<CalendarCheck size={16} />} iconColor="bg-warning-subtle text-warning" />
-            <StatCard label="Ventes" value={k.won} subtitle={k.demoToWin != null ? `${pct(k.demoToWin)} des démos` : undefined} icon={<Trophy size={16} />} iconColor="bg-success-subtle text-success" />
+            <StatCard label="Closing calls" value={k.demos} subtitle="Prévus (ou plus loin)" icon={<CalendarCheck size={16} />} iconColor="bg-warning-subtle text-warning" />
+            <StatCard label="Payants" value={k.won} subtitle={k.demoToWin != null ? `${pct(k.demoToWin)} des closing calls` : undefined} icon={<Trophy size={16} />} iconColor="bg-success-subtle text-success" />
             <StatCard label="Taux de close" value={pct(k.closeRate)} subtitle="Ventes / prospects joints" icon={<Percent size={16} />} iconColor="bg-success-subtle text-success" />
           </div>
 
@@ -229,7 +229,7 @@ export default function CallsPage() {
                         <th className="text-left font-medium py-1.5">Chance</th>
                         <th className="text-right font-medium">Appelés</th>
                         <th className="text-right font-medium">Joints</th>
-                        <th className="text-right font-medium">Démos</th>
+                        <th className="text-right font-medium">Closing</th>
                         <th className="text-right font-medium">Ventes</th>
                         <th className="text-right font-medium">Taux de vente</th>
                       </tr>

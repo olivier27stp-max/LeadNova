@@ -6,8 +6,8 @@ import { engagementScore } from "@/lib/engagement-score";
 import {
   CALL_OUTCOMES, CURRENT_TOOLS, OBJECTIONS, LOST_REASONS, CONNECTED_OUTCOMES,
 } from "@/lib/call-options";
+import { stageRank } from "@/lib/sales-stages";
 
-const STAGE_RANK: Record<string, number> = { DEMO_BOOKED: 1, DEMO_DONE: 2, TRIAL: 3, WON: 4 };
 
 const PROSPECT_SELECT = {
   id: true, companyName: true, city: true, phone: true, industry: true, reviewCount: true,
@@ -51,18 +51,22 @@ export async function GET(request: NextRequest) {
 
     // ── Entonnoir (par prospect) ──
     const connectedIds = new Set(connectedCalls.map((c) => c.prospectId));
+    const settingCallIds = new Set(calls.filter((c) => c.outcome === "SETTING_BOOKED").map((c) => c.prospectId));
     const demoCallIds = new Set(calls.filter((c) => c.outcome === "DEMO_BOOKED").map((c) => c.prospectId));
-    const rank = (p: (typeof prospects)[number]) => Math.max(STAGE_RANK[p.salesStage ?? ""] ?? 0, demoCallIds.has(p.id) ? 1 : 0);
+    // Rang du pipeline (sales-stages) : 2 = setting call prévu, 4 = closing call prévu, 6 = inscrit, 7 = payant
+    const rank = (p: (typeof prospects)[number]) =>
+      Math.max(stageRank(p.salesStage), demoCallIds.has(p.id) ? 4 : settingCallIds.has(p.id) ? 2 : 0);
     const funnel = [
       { key: "called", label: "Appelés", count: prospectIds.length },
       { key: "connected", label: "Joints", count: connectedIds.size },
-      { key: "demo_booked", label: "Démo prise", count: prospects.filter((p) => rank(p) >= 1).length },
-      { key: "demo_done", label: "Démo faite", count: prospects.filter((p) => rank(p) >= 2).length },
-      { key: "trial", label: "Essai", count: prospects.filter((p) => rank(p) >= 3).length },
-      { key: "won", label: "Vendu", count: prospects.filter((p) => rank(p) >= 4).length },
+      { key: "setting", label: "Setting call", count: prospects.filter((p) => rank(p) >= 2).length },
+      { key: "demo_booked", label: "Closing call prévu", count: prospects.filter((p) => rank(p) >= 4).length },
+      { key: "demo_done", label: "Closing call fait", count: prospects.filter((p) => rank(p) >= 5).length },
+      { key: "trial", label: "Inscrit", count: prospects.filter((p) => rank(p) >= 6).length },
+      { key: "won", label: "Payant", count: prospects.filter((p) => rank(p) >= 7).length },
     ];
-    const won = funnel[5].count;
-    const demos = funnel[2].count;
+    const won = funnel[6].count;
+    const demos = funnel[3].count;
 
     // ── Calibrage : la Chance (sans tenir compte de l'étape de vente) prédit-elle les ventes ? ──
     const buckets = [
@@ -82,8 +86,8 @@ export async function GET(request: NextRequest) {
       if (!b) continue;
       b.called++;
       if (connectedIds.has(p.id)) b.connected++;
-      if (rank(p) >= 1) b.demos++;
-      if (rank(p) >= 4) b.won++;
+      if (rank(p) >= 4) b.demos++;
+      if (rank(p) >= 7) b.won++;
     }
 
     // ── Listes d'action (indépendantes de la période) ──
