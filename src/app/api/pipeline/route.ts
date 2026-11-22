@@ -57,7 +57,8 @@ async function distinctProspects(workspaceId: string, where: Record<string, unkn
   return new Set(rows.map((r) => r.prospectId));
 }
 
-// GET /api/pipeline?period=7|30|90|all — colonnes du pipeline + funnel de conversion de la période
+// GET /api/pipeline?period=7|30|90|all&campaignId=<id> — colonnes du pipeline + funnel + KPI de la période.
+// Sans campaignId (ou « all ») : toutes les campagnes ensemble.
 export async function GET(request: NextRequest) {
   try {
     const { workspaceId, userId } = await requireWorkspaceContext();
@@ -68,13 +69,26 @@ export async function GET(request: NextRequest) {
 
     await importOldFunnel(workspaceId, userId);
 
+    const campaigns = await prisma.campaign.findMany({
+      where: { workspaceId },
+      select: { id: true, name: true, number: true },
+      orderBy: { createdAt: "desc" },
+    });
+    const campaignParam = request.nextUrl.searchParams.get("campaignId");
+    const campaignId = campaigns.some((c) => c.id === campaignParam) ? campaignParam! : null;
+    // Prospects d'une campagne : dans ses contacts, ou ayant reçu un de ses courriels
+    const inCampaign = campaignId
+      ? { OR: [{ campaignContacts: { some: { campaignId } } }, { emailActivities: { some: { campaignId } } }] }
+      : {};
+    const activityFilter = campaignId ? { campaignId } : {};
+
     // ── Colonnes ──
     const active = await prisma.prospect.findMany({
-      where: { workspaceId, archivedAt: null, salesStage: { in: PIPELINE_STAGES.map((s) => s.key) } },
+      where: { workspaceId, archivedAt: null, salesStage: { in: PIPELINE_STAGES.map((s) => s.key) }, ...inCampaign },
       select: CARD_SELECT,
     });
     const lost = await prisma.prospect.findMany({
-      where: { workspaceId, archivedAt: null, salesStage: "LOST" },
+      where: { workspaceId, archivedAt: null, salesStage: "LOST", ...inCampaign },
       select: CARD_SELECT,
       orderBy: { updatedAt: "desc" },
       take: 100,
@@ -119,14 +133,22 @@ export async function GET(request: NextRequest) {
 
     // ── Funnel de la période ──
     // Haut : courriels (par prospect). Bas : plus haute étape atteinte dans la période (historique daté).
-    const emailed = await distinctProspects(workspaceId, { sentAt: inPeriod });
-    const replied = await distinctProspects(workspaceId, { replyReceived: true, ...(since ? { OR: [{ repliedAt: inPeriod }, { repliedAt: null, sentAt: inPeriod }] } : {}) });
-    const positive = await distinctProspects(workspaceId, { replySentiment: "positive", ...(since ? { OR: [{ repliedAt: inPeriod }, { repliedAt: null, sentAt: inPeriod }] } : {}) });
+    const emailed = await distinctProspects(workspaceId, { ...activityFilter, sentAt: inPeriod });
+    const replied = await distinctProspects(workspaceId, { ...activityFilter, replyReceived: true, ...(since ? { OR: [{ repliedAt: inPeriod }, { repliedAt: null, sentAt: inPeriod }] } : {}) });
+    const positive = await distinctProspects(workspaceId, { ...activityFilter, replySentiment: "positive", ...(since ? { OR: [{ repliedAt: inPeriod }, { repliedAt: null, sentAt: inPeriod }] } : {}) });
 
-    const events = await prisma.activityLog.findMany({
+    let events = await prisma.activityLog.findMany({
       where: { workspaceId, action: "sales_stage", createdAt: inPeriod },
       select: { relatedEntityId: true, metadata: true, title: true },
     });
+    if (campaignId && events.length) {
+      const ids = await prisma.prospect.findMany({
+        where: { workspaceId, id: { in: [...new Set(events.map((e) => e.relatedEntityId).filter((x): x is string => !!x))] }, ...inCampaign },
+        select: { id: true },
+      });
+      const keep = new Set(ids.map((r) => r.id));
+      events = events.filter((e) => e.relatedEntityId && keep.has(e.relatedEntityId));
+    }
     const reached = new Map<string, number>();
     const bump = (id: string, r: number) => { if (r > (reached.get(id) ?? 0)) reached.set(id, r); };
     for (const e of events) if (e.relatedEntityId) bump(e.relatedEntityId, stageRank(eventStage(e)));
@@ -145,7 +167,21 @@ export async function GET(request: NextRequest) {
       rate: i === 0 || !steps[i - 1].count ? null : s.count / steps[i - 1].count,
     }));
 
-    return NextResponse.json({ period, columns, funnel, lostInPeriod: lostIds.size });
+    // ── KPI demandés ──
+    const count = (key: string) => steps.find((s) => s.key === key)?.count ?? 0;
+    const ratio = (a: number, b: number) => (b ? a / b : null);
+    const kpis = {
+      replyRate: ratio(count("replied"), count("emailed")),
+      positiveRate: ratio(count("POSITIVE_REPLY"), count("emailed")),
+      positiveOfReplies: ratio(count("POSITIVE_REPLY"), count("replied")),
+      emailToSignup: ratio(count("TRIAL"), count("emailed")),
+      signupToPaid: ratio(count("WON"), count("TRIAL")),
+      emailed: count("emailed"),
+      signups: count("TRIAL"),
+      paid: count("WON"),
+    };
+
+    return NextResponse.json({ period, campaignId, campaigns, columns, funnel, kpis, lostInPeriod: lostIds.size });
   } catch (error) {
     return handleWorkspaceError(error);
   }

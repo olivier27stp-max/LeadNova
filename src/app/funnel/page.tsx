@@ -18,8 +18,9 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { CalendarClock, ChevronRight, Flame, MapPin, Phone, Plus, Search, X } from "lucide-react";
+import { CalendarClock, ChevronRight, CreditCard, Flame, MailCheck, MapPin, Phone, Plus, Reply, Search, ThumbsUp, UserPlus, X } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { LOST_REASONS } from "@/lib/call-options";
@@ -47,7 +48,18 @@ interface Card {
 }
 interface Column { key: string; label: string; cards: Card[] }
 interface Step { key: string; label: string; count: number; rate: number | null }
-interface PipelineData { columns: Column[]; funnel: Step[]; lostInPeriod: number }
+interface Kpis {
+  replyRate: number | null; positiveRate: number | null; positiveOfReplies: number | null;
+  emailToSignup: number | null; signupToPaid: number | null; emailed: number; signups: number; paid: number;
+}
+interface PipelineData {
+  campaignId: string | null;
+  campaigns: Array<{ id: string; name: string; number: number }>;
+  columns: Column[];
+  funnel: Step[];
+  kpis: Kpis;
+  lostInPeriod: number;
+}
 interface SearchResult { id: string; companyName: string; ownerName: string | null; city: string | null; salesStage: string | null }
 
 const COLUMN_TONE: Record<string, string> = {
@@ -61,7 +73,11 @@ const COLUMN_TONE: Record<string, string> = {
   LOST: "bg-danger",
 };
 
-const pct = (v: number | null) => (v == null ? "—" : `${Math.round(v * 100)} %`);
+const pct = (v: number | null) => {
+  if (v == null) return "—";
+  const x = v * 100;
+  return `${x > 0 && x < 10 ? x.toFixed(1).replace(".", ",") : Math.round(x)} %`;
+};
 
 function daysLabel(d: number) {
   return d <= 0 ? "aujourd'hui" : d === 1 ? "1 jour" : `${d} jours`;
@@ -255,21 +271,22 @@ const columnUnderPointer: CollisionDetection = (args) => {
 
 export default function PipelinePage() {
   const [period, setPeriod] = useState<Period>("30");
+  const [campaignId, setCampaignId] = useState<string>("all");
   const [data, setData] = useState<PipelineData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   const [pendingLost, setPendingLost] = useState<Card | null>(null);
 
-  const load = useCallback(async (p: Period) => {
+  const load = useCallback(async (p: Period, c: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/pipeline?period=${p}`);
+      const res = await fetch(`/api/pipeline?period=${p}&campaignId=${encodeURIComponent(c)}`);
       if (res.ok) setData(await res.json());
     } finally {
       setLoading(false);
     }
   }, []);
-  useEffect(() => { load(period); }, [load, period]);
+  useEffect(() => { load(period, campaignId); }, [load, period, campaignId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -299,8 +316,8 @@ export default function PipelinePage() {
       body: JSON.stringify({ prospectId, salesStage: to ?? "", lostReason }),
     });
     if (!res.ok) alert(`Étape non enregistrée : ${(await res.json().catch(() => ({}))).error || "erreur"}`);
-    load(period); // recalcule le funnel et les notes
-  }, [load, period]);
+    load(period, campaignId); // recalcule le funnel et les notes
+  }, [load, period, campaignId]);
 
   function onDragStart(e: DragStartEvent) {
     setActiveCard(cardsById.get(String(e.active.id)) ?? null);
@@ -322,6 +339,15 @@ export default function PipelinePage() {
         description="Cold email → setting call → closing call → inscription → payant. Glisse les prospects d'une étape à l'autre."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={campaignId}
+              onChange={(e) => setCampaignId(e.target.value)}
+              className="max-w-56 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+              aria-label="Campagne"
+            >
+              <option value="all">Toutes les campagnes</option>
+              {data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.number ? `#${c.number} · ` : ""}{c.name}</option>)}
+            </select>
             <AddProspect onAdd={(id, stage) => saveStage(id, stage)} />
             <div className="flex rounded-md border border-border p-0.5">
               {([["7", "7 j"], ["30", "30 j"], ["90", "90 j"], ["all", "Tout"]] as const).map(([v, label]) => (
@@ -346,6 +372,13 @@ export default function PipelinePage() {
       ) : data && (
         <>
           <div className={cn(loading && "opacity-70")}>
+            <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+              <StatCard label="Taux de réponse" value={pct(data.kpis.replyRate)} subtitle={`sur ${data.kpis.emailed} prospects écrits`} icon={<Reply size={16} />} iconColor="bg-primary-subtle text-primary" />
+              <StatCard label="Réponses positives" value={pct(data.kpis.positiveRate)} subtitle={`des écrits · ${pct(data.kpis.positiveOfReplies)} des réponses`} icon={<ThumbsUp size={16} />} iconColor="bg-primary-subtle text-primary" />
+              <StatCard label="Courriel → inscription" value={pct(data.kpis.emailToSignup)} subtitle={`${data.kpis.signups} inscrit${data.kpis.signups > 1 ? "s" : ""}`} icon={<UserPlus size={16} />} iconColor="bg-warning-subtle text-warning" />
+              <StatCard label="Inscription → payant" value={pct(data.kpis.signupToPaid)} subtitle={`${data.kpis.paid} payant${data.kpis.paid > 1 ? "s" : ""}`} icon={<CreditCard size={16} />} iconColor="bg-success-subtle text-success" />
+              <StatCard label="LTV / CAC" value="—" subtitle="Pas encore suivi (revenu et coûts à ajouter)" icon={<MailCheck size={16} />} iconColor="bg-background-muted text-foreground-muted" />
+            </div>
             <FunnelStrip steps={data.funnel} lost={data.lostInPeriod} />
           </div>
 
