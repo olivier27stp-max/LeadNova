@@ -181,6 +181,14 @@ model Prospect {
   lastObjection             String?
   callbackAt                DateTime?
   competitorCrm             String?   // CRM concurrent détecté sur le site (Jobber, Housecall Pro…)
+  // ── Âge de l'entreprise (src/lib/registration-finder.ts) ──
+  registrationYear          Int?      // année d'immatriculation (REQ) ou de fondation
+  registrationDate          DateTime? // date exacte quand la source la donne
+  registrationSource        String?   // registre | site | web | domaine (domaine = simple indice)
+  registrationEvidence      String?   // citation exacte vérifiée
+  registrationUrl           String?
+  registrationConfidence    String?   // high | medium | low
+  registrationCheckedAt     DateTime?
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
@@ -210,6 +218,8 @@ model Prospect {
   @@index([siteAnalyzedAt])
   @@index([callbackAt])
   @@index([competitorCrm])
+  @@index([registrationYear])
+  @@index([registrationCheckedAt])
   @@map("prospects")
 }
 

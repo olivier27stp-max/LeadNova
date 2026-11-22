@@ -37,6 +37,8 @@ src/lib/lead-scoring.ts — Score /100 profil Lume : courriel réel 20 (deviné 
 src/lib/form-detection.ts — Détection formulaire de contact + CRM concurrent (Jobber…) ; choix du message de campagne par segment
 src/lib/industry-groups.ts — Regroupe les catégories Google en grands métiers (filtre Segmentation de /prospects)
 src/lib/owner-finder.ts  — IA (Claude) qui trouve le propriétaire sur le site (accueil, À propos, équipe, contact) ; nom et extrait vérifiés mot pour mot. Modèle : OWNER_AI_MODEL (défaut claude-opus-5-5)
+src/lib/registration-finder.ts — IA (Claude + web_search/web_fetch) qui trouve l'année d'immatriculation (REQ > site > web), citation vérifiée mot pour mot dans la page lue ; sinon indice faible par date du nom de domaine (RDAP). Modèle : REGISTRATION_AI_MODEL. Route : /api/prospects/find-registration (lots de 6). Filtres /api/prospects : age=lt3|gte3|lt5|gte5|gte10|unknown|pending, yearFrom, yearTo, ageSure=1
+src/app/prospects/page.tsx — colonnes affichées/masquées choisies par l'utilisateur (localStorage « leadnova.prospects.hiddenColumns »)
 src/lib/conversion-score.ts — Chance de conversion /10 (profil + signaux site/avis + appels + étape de vente), calculée à la volée
 src/lib/engagement-score.ts — Engagement /10 (ouvertures, clics, visites du site, réponses, appels ; 🔥 = signal < 48 h)
 src/lib/reviews.ts       — Avis Google récents (Outscraper si OUTSCRAPER_API_KEY, sinon Places 5 avis)

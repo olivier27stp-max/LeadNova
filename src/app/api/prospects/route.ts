@@ -42,11 +42,15 @@ export async function GET(request: NextRequest) {
     const reviews = searchParams.get("reviews"); // ideal (20–300) | small (<20) | large (>300)
     const owner = searchParams.get("owner"); // found | not_found | pending
     const callback = searchParams.get("callback"); // due = rappel prévu aujourd'hui ou en retard
+    const age = searchParams.get("age"); // lt3 | gte3 | lt5 | gte5 | gte10 | unknown | pending (âge de l'entreprise)
+    const yearFrom = parseInt(searchParams.get("yearFrom") || "", 10); // immatriculée en ou après
+    const yearTo = parseInt(searchParams.get("yearTo") || "", 10); // immatriculée en ou avant
+    const sureOnly = searchParams.get("ageSure") === "1"; // exclut l'indice « nom de domaine »
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
     const sortBy = searchParams.get("sortBy") || "leadScore";
-    const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
+    const sortOrder: "asc" | "desc" = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
 
     // Build where clause (exclude archived, scope to workspace)
     const workspaceId = await getWorkspaceId();
@@ -68,6 +72,19 @@ export async function GET(request: NextRequest) {
     if (owner === "found") where.ownerName = { not: null };
     else if (owner === "not_found") { where.ownerName = null; where.ownerCheckedAt = { not: null }; }
     else if (owner === "pending") where.ownerCheckedAt = null;
+    // Âge de l'entreprise : âge = année courante − année d'immatriculation
+    const nowYear = new Date().getFullYear();
+    const yearRange: Record<string, number> = {};
+    const maxAge = { lt3: 3, lt5: 5 }[age ?? ""];
+    const minAge = { gte3: 3, gte5: 5, gte10: 10 }[age ?? ""];
+    if (maxAge) yearRange.gt = nowYear - maxAge;
+    if (minAge) yearRange.lte = nowYear - minAge;
+    if (!isNaN(yearFrom)) yearRange.gte = yearFrom;
+    if (!isNaN(yearTo)) yearRange.lte = Math.min(yearRange.lte ?? yearTo, yearTo);
+    if (Object.keys(yearRange).length) where.registrationYear = yearRange;
+    if (sureOnly && (maxAge || minAge || !isNaN(yearFrom) || !isNaN(yearTo))) where.registrationSource = { not: "domaine" };
+    if (age === "unknown") { where.registrationYear = null; where.registrationCheckedAt = { not: null }; }
+    else if (age === "pending") where.registrationCheckedAt = null;
     if (callback === "due") {
       const endOfToday = new Date();
       endOfToday.setHours(23, 59, 59, 999);
@@ -134,9 +151,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Build orderBy
-    const validSortFields = ["leadScore", "companyName", "createdAt", "status", "city"];
+    const validSortFields = ["leadScore", "companyName", "createdAt", "status", "city", "registrationYear"];
     const orderByField = validSortFields.includes(sortBy) ? sortBy : "leadScore";
-    const orderBy = { [orderByField]: sortOrder };
+    // Années inconnues toujours en bas
+    const orderBy = orderByField === "registrationYear"
+      ? { registrationYear: { sort: sortOrder, nulls: "last" as const } }
+      : { [orderByField]: sortOrder };
 
     // Sequential queries (connection_limit=1 on local Prisma Postgres)
     const total = await prisma.prospect.count({ where });
@@ -188,6 +208,13 @@ export async function GET(request: NextRequest) {
         ownerConfidence: true,
         ownerCheckedAt: true,
         siteAnalyzedAt: true,
+        registrationYear: true,
+        registrationDate: true,
+        registrationSource: true,
+        registrationEvidence: true,
+        registrationUrl: true,
+        registrationConfidence: true,
+        registrationCheckedAt: true,
         hiring: true,
         complaintCount: true,
         ownerRepliesReviews: true,

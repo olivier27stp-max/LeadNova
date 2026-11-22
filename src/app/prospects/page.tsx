@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, memo, useMemo, useTransition } from "react";
+import { useEffect, useState, useCallback, useRef, memo, useMemo, useTransition, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import { CityDropdown } from "@/components/ui/city-dropdown";
@@ -59,6 +59,13 @@ interface ProspectListItem {
   callbackAt?: string | null;
   salesStage?: string | null;
   lostReason?: string | null;
+  registrationYear?: number | null;
+  registrationDate?: string | null;
+  registrationSource?: string | null;
+  registrationEvidence?: string | null;
+  registrationUrl?: string | null;
+  registrationConfidence?: string | null;
+  registrationCheckedAt?: string | null;
   createdAt: string;
   campaignId: string | null;
   campaignNumber: number | null;
@@ -114,6 +121,67 @@ const CONTACT_TYPE_LABELS: Record<string, string> = {
 };
 
 const LOAD_ALL_LIMIT = 5000;
+const CURRENT_YEAR = new Date().getFullYear();
+
+// Colonnes de la liste : l'utilisateur choisit celles qu'il affiche (mémorisé dans ce navigateur).
+// Entreprise, numéro et case à cocher restent toujours visibles.
+const LIST_COLUMNS = [
+  { key: "city", label: "Ville", width: 120 },
+  { key: "email", label: "Courriel", width: 210 },
+  { key: "phone", label: "Téléphone", width: 140 },
+  { key: "campaign", label: "Campagne", width: 90 },
+  { key: "reviews", label: "Avis", width: 60 },
+  { key: "registration", label: "Immatriculation", width: 140 },
+  { key: "score", label: "Score", width: 80 },
+  { key: "conversion", label: "Chance", width: 90 },
+  { key: "engagement", label: "Engagement", width: 110 },
+  { key: "status", label: "Statut", width: 110 },
+  { key: "actions", label: "Actions", width: 110 },
+] as const;
+type ListColumn = (typeof LIST_COLUMNS)[number]["key"];
+const HIDDEN_COLUMNS_KEY = "leadnova.prospects.hiddenColumns";
+const HIDDEN_COLUMNS_EVENT = "leadnova:hidden-columns";
+
+function subscribeHiddenColumns(cb: () => void) {
+  window.addEventListener("storage", cb);
+  window.addEventListener(HIDDEN_COLUMNS_EVENT, cb);
+  return () => {
+    window.removeEventListener("storage", cb);
+    window.removeEventListener(HIDDEN_COLUMNS_EVENT, cb);
+  };
+}
+function readHiddenColumns() {
+  try { return localStorage.getItem(HIDDEN_COLUMNS_KEY) ?? ""; } catch { return ""; }
+}
+function writeHiddenColumns(keys: string[]) {
+  try { localStorage.setItem(HIDDEN_COLUMNS_KEY, keys.join(",")); } catch { /* navigation privée */ }
+  window.dispatchEvent(new Event(HIDDEN_COLUMNS_EVENT));
+}
+
+const REGISTRATION_SOURCE_LABELS: Record<string, string> = {
+  registre: "Registre des entreprises du Québec",
+  site: "Site de l'entreprise",
+  web: "Source web",
+  domaine: "Indice seulement : création du nom de domaine",
+};
+
+/** Année d'immatriculation + âge ; « indice » quand ce n'est que la date du nom de domaine. */
+function RegistrationCell({ p }: { p: ProspectListItem }) {
+  if (!p.registrationCheckedAt) return <span className="text-foreground-muted" title="Pas encore cherchée">—</span>;
+  if (!p.registrationYear) return <span className="text-xs text-foreground-muted" title="Aucune source fiable trouvée">Inconnue</span>;
+  const age = CURRENT_YEAR - p.registrationYear;
+  const hint = p.registrationSource === "domaine";
+  const title = `${REGISTRATION_SOURCE_LABELS[p.registrationSource ?? ""] ?? "Source"}${p.registrationEvidence ? ` — « ${p.registrationEvidence} »` : ""}`;
+  return (
+    <span className="flex items-center gap-1.5" title={title}>
+      <span className={cn("tabular-nums", hint ? "text-foreground-muted" : "text-foreground-secondary")}>{p.registrationYear}</span>
+      <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", age < 3 ? "bg-warning-subtle text-warning" : "bg-success-subtle text-success")}>
+        {age < 3 ? "< 3 ans" : `${age} ans`}
+      </span>
+      {hint && <span className="text-[10px] text-foreground-muted">indice</span>}
+    </span>
+  );
+}
 
 // ---------- Sub-components ----------
 const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
@@ -174,17 +242,15 @@ function FormBadge({ status, provider, crm }: { status?: string | null; provider
   return null;
 }
 
-function SkeletonRow() {
+function SkeletonRow({ columns }: { columns: number }) {
   return (
     <tr className="border-b border-border animate-pulse">
+      <td className="px-4 py-3" />
+      <td className="px-4 py-3" />
       <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-32" /><div className="h-3 bg-background-subtle rounded w-20 mt-1" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-20" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-36" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-24" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-10" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-8" /></td>
-      <td className="px-4 py-3"><div className="h-5 bg-background-muted rounded w-16" /></td>
-      <td className="px-4 py-3"><div className="h-6 bg-background-muted rounded w-14" /></td>
+      {Array.from({ length: columns }, (_, i) => (
+        <td key={i} className="px-4 py-3"><div className="h-4 bg-background-muted rounded w-3/4" /></td>
+      ))}
     </tr>
   );
 }
@@ -201,7 +267,9 @@ const ProspectRow = memo(function ProspectRow({
   onEmail,
   onDragStart,
   onCampaignChange,
+  hiddenColumns,
 }: {
+  hiddenColumns: string;
   prospect: ProspectListItem;
   rowIndex: number;
   actionLoading: string | null;
@@ -215,6 +283,7 @@ const ProspectRow = memo(function ProspectRow({
   onCampaignChange: (prospectId: string, campaignId: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const show = (k: ListColumn) => !`,${hiddenColumns},`.includes(`,${k},`);
   return (
     <tr
       data-row-idx={rowIndex - 1}
@@ -250,17 +319,17 @@ const ProspectRow = memo(function ProspectRow({
           <p className="text-xs text-foreground-muted truncate">{prospect.industry}</p>
         ) : null}
       </td>
-      <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.city || "—"}</td>
-      <td className="px-4 py-3 overflow-hidden">
+      {show("city") && <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.city || "—"}</td>}
+      {show("email") && <td className="px-4 py-3 overflow-hidden">
         {prospect.email ? (
           <span className="flex items-center gap-1">
             <span className={`truncate ${prospect.emailGuessed ? "text-warning" : "text-foreground-secondary"}`}>{prospect.email}</span>
             {prospect.emailGuessed && <span className="text-[10px] bg-warning-subtle text-warning px-1 rounded shrink-0">{t("common", "guessed")}</span>}
           </span>
         ) : "—"}
-      </td>
-      <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.phone || "—"}</td>
-      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+      </td>}
+      {show("phone") && <td className="px-4 py-3 text-foreground-secondary truncate overflow-hidden">{prospect.phone || "—"}</td>}
+      {show("campaign") && <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <select
           value={prospect.campaignId || ""}
           onChange={(e) => onCampaignChange(prospect.id, e.target.value || null)}
@@ -271,23 +340,26 @@ const ProspectRow = memo(function ProspectRow({
             <option key={c.id} value={c.id}>{c.number}</option>
           ))}
         </select>
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap text-foreground-secondary tabular-nums text-sm">
+      </td>}
+      {show("reviews") && <td className="px-4 py-3 whitespace-nowrap text-foreground-secondary tabular-nums text-sm">
         {prospect.reviewCount != null ? prospect.reviewCount : "—"}
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
+      </td>}
+      {show("registration") && <td className="px-4 py-3 whitespace-nowrap text-sm">
+        <RegistrationCell p={prospect} />
+      </td>}
+      {show("score") && <td className="px-4 py-3 whitespace-nowrap">
         <span className="font-mono font-medium text-foreground tabular-nums">{prospect.leadScore}</span>
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
+      </td>}
+      {show("conversion") && <td className="px-4 py-3 whitespace-nowrap">
         <ConversionPill conversion={prospect.conversion} />
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
+      </td>}
+      {show("engagement") && <td className="px-4 py-3 whitespace-nowrap">
         <EngagementPill engagement={prospect.engagement} />
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
+      </td>}
+      {show("status") && <td className="px-4 py-3 whitespace-nowrap">
         <StatusBadge status={prospect.status} />
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
+      </td>}
+      {show("actions") && <td className="px-4 py-3 whitespace-nowrap">
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
           {prospect.status === "NEW" && (
             <button
@@ -307,7 +379,7 @@ const ProspectRow = memo(function ProspectRow({
             </button>
           )}
         </div>
-      </td>
+      </td>}
     </tr>
   );
 });
@@ -341,6 +413,26 @@ export default function ProspectsPage() {
   const [ownerStats, setOwnerStats] = useState<{ found: number; notFound: number; remaining: number } | null>(null);
   const [ownerRun, setOwnerRun] = useState<{ processed: number; found: number; total: number } | null>(null);
   const ownerStopRef = useRef(false);
+  const [ageFilter, setAgeFilter] = useState(""); // lt3 | gte3 | lt5 | gte5 | gte10 | unknown | pending
+  const [yearFrom, setYearFrom] = useState("");
+  const [yearTo, setYearTo] = useState("");
+  const [ageSureOnly, setAgeSureOnly] = useState(false);
+  const [regStats, setRegStats] = useState<{ found: number; recent: number; older: number; unknown: number; remaining: number } | null>(null);
+  const [regRun, setRegRun] = useState<{ processed: number; found: number; total: number } | null>(null);
+  const regStopRef = useRef(false);
+  const hiddenColumns = useSyncExternalStore(subscribeHiddenColumns, readHiddenColumns, () => "");
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const visibleColumns = useMemo(
+    () => LIST_COLUMNS.filter((c) => !`,${hiddenColumns},`.includes(`,${c.key},`)),
+    [hiddenColumns]
+  );
+  const showCol = (k: ListColumn) => !`,${hiddenColumns},`.includes(`,${k},`);
+  function toggleColumn(key: ListColumn) {
+    const hidden = new Set(hiddenColumns.split(",").filter(Boolean));
+    if (hidden.has(key)) hidden.delete(key);
+    else hidden.add(key);
+    writeHiddenColumns([...hidden]);
+  }
   const [industryGroups, setIndustryGroups] = useState<{ key: string; label: string; count: number }[]>([]);
   const [formStats, setFormStats] = useState<{ hasForm: number; noForm: number; noWebsite: number; unreachable: number; competitorCrm: number; remaining: number } | null>(null);
   const [formDetectRunning, setFormDetectRunning] = useState(false);
@@ -451,7 +543,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, minChanceFilter, engagementFilter, callbackFilter]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, minChanceFilter, engagementFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -481,6 +573,10 @@ export default function ProspectsPage() {
     if (minScoreFilter) params.set("minScore", minScoreFilter);
     if (reviewsFilter) params.set("reviews", reviewsFilter);
     if (ownerFilter) params.set("owner", ownerFilter);
+    if (ageFilter) params.set("age", ageFilter);
+    if (/^\d{4}$/.test(yearFrom)) params.set("yearFrom", yearFrom);
+    if (/^\d{4}$/.test(yearTo)) params.set("yearTo", yearTo);
+    if (ageSureOnly) params.set("ageSure", "1");
     if (callbackFilter) params.set("callback", "due");
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
@@ -507,7 +603,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, callbackFilter, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -1477,7 +1573,7 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || minChanceFilter || engagementFilter || callbackFilter);
+  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || minChanceFilter || engagementFilter || callbackFilter || ageFilter || yearFrom || yearTo || ageSureOnly);
   const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || hasSegmentFilters || debouncedSearch || searchQuery;
 
   // Répartition A / B des résultats affichés (selon le formulaire de contact)
@@ -1502,6 +1598,49 @@ export default function ProspectsPage() {
     setMinChanceFilter("");
     setEngagementFilter("");
     setCallbackFilter(false);
+    setAgeFilter("");
+    setYearFrom("");
+    setYearTo("");
+    setAgeSureOnly(false);
+  }
+
+  // ─── Année d'immatriculation (IA) ───
+  const fetchRegStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/prospects/find-registration");
+      if (res.ok) setRegStats(await res.json());
+    } catch { /* silencieux */ }
+  }, []);
+  useEffect(() => { fetchRegStats(); }, [fetchRegStats]);
+
+  async function runRegistrationSearch(ids?: string[]) {
+    regStopRef.current = false;
+    const total = ids ? ids.length : regStats?.remaining ?? 0;
+    setRegRun({ processed: 0, found: 0, total });
+    let processed = 0;
+    let found = 0;
+    try {
+      for (let i = 0; i < 1000 && !regStopRef.current; i++) {
+        const res = await fetch("/api/prospects/find-registration", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ids ? { ids } : {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        processed += data.processed;
+        found += data.counts?.found ?? 0;
+        setRegRun({ processed, found, total });
+        if (data.remaining === 0 || data.processed === 0) break;
+        if (data.stalled) throw new Error("L'IA ne répond pas (vérifier ANTHROPIC_API_KEY et le crédit Anthropic)");
+      }
+      await fetchProspects();
+    } catch (error) {
+      alert(`Recherche de l'année interrompue : ${error instanceof Error ? error.message : "erreur"}`);
+    } finally {
+      setRegRun(null);
+      fetchRegStats();
+    }
   }
 
   // ─── Propriétaires (IA) ───
@@ -2374,6 +2513,41 @@ export default function ProspectsPage() {
           <option value="pending">Pas encore cherché</option>
         </select>
         <select
+          value={ageFilter}
+          onChange={(e) => setAgeFilter(e.target.value)}
+          className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", ageFilter && "border-primary text-primary")}
+          title="Âge de l'entreprise selon l'année d'immatriculation trouvée par l'IA"
+        >
+          <option value="">Âge : tous</option>
+          <option value="lt3">Moins de 3 ans{regStats ? ` (${regStats.recent})` : ""}</option>
+          <option value="gte3">3 ans et plus{regStats ? ` (${regStats.older})` : ""}</option>
+          <option value="lt5">Moins de 5 ans</option>
+          <option value="gte5">5 ans et plus</option>
+          <option value="gte10">10 ans et plus</option>
+          <option value="unknown">Année inconnue{regStats ? ` (${regStats.unknown})` : ""}</option>
+          <option value="pending">Pas encore cherchée</option>
+        </select>
+        <div className={cn("flex items-center gap-1 border border-border rounded-md px-2 py-1 text-sm", (yearFrom || yearTo) && "border-primary")} title="Année d'immatriculation entre…">
+          <span className="text-foreground-muted text-xs">Immat.</span>
+          <input
+            type="number" inputMode="numeric" min={1900} max={CURRENT_YEAR} placeholder="de"
+            value={yearFrom} onChange={(e) => setYearFrom(e.target.value.slice(0, 4))}
+            className="w-16 bg-transparent px-1 py-1 text-foreground outline-none"
+          />
+          <span className="text-foreground-muted">–</span>
+          <input
+            type="number" inputMode="numeric" min={1900} max={CURRENT_YEAR} placeholder="à"
+            value={yearTo} onChange={(e) => setYearTo(e.target.value.slice(0, 4))}
+            className="w-16 bg-transparent px-1 py-1 text-foreground outline-none"
+          />
+        </div>
+        {(ageFilter || yearFrom || yearTo) && ageFilter !== "unknown" && ageFilter !== "pending" && (
+          <label className="flex items-center gap-1.5 text-sm text-foreground-secondary" title="Exclut les années devinées seulement par la date du nom de domaine">
+            <input type="checkbox" checked={ageSureOnly} onChange={(e) => setAgeSureOnly(e.target.checked)} className="w-4 h-4 rounded border-border-strong" />
+            Sources sûres seulement
+          </label>
+        )}
+        <select
           value={minChanceFilter}
           onChange={(e) => setMinChanceFilter(e.target.value)}
           className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", minChanceFilter && "border-primary text-primary")}
@@ -2440,6 +2614,23 @@ export default function ProspectsPage() {
             title="L'IA lit le site (accueil, À propos, équipe, carrières, contact) et les avis Google : propriétaire, embauche, équipes, réservation en ligne, plaintes sur le suivi"
           >
             Analyser sites + avis (IA) ({ownerStats.remaining})
+          </button>
+        )}
+        {regRun ? (
+          <button
+            onClick={() => { regStopRef.current = true; }}
+            className="text-sm border border-warning/40 text-warning rounded-md px-3 py-2 hover:bg-warning-subtle"
+            title="Arrêter après le lot en cours"
+          >
+            Année… {regRun.processed}/{regRun.total} · {regRun.found} trouvées — Arrêter
+          </button>
+        ) : regStats && regStats.remaining > 0 && (
+          <button
+            onClick={() => runRegistrationSearch()}
+            className="text-sm border border-primary/30 text-primary rounded-md px-3 py-2 hover:bg-primary-subtle"
+            title="L'IA cherche l'année d'immatriculation (Registre des entreprises du Québec, site, web) avec citation vérifiée ; sinon, indice par la date du nom de domaine"
+          >
+            Chercher l&apos;année (IA) ({regStats.remaining})
           </button>
         )}
         {hasSegmentFilters && (
@@ -2519,6 +2710,14 @@ export default function ProspectsPage() {
             title="Cherche le propriétaire des prospects sélectionnés qui n'ont pas encore été analysés"
           >
             Trouver les propriétaires
+          </button>
+          <button
+            onClick={() => runRegistrationSearch(Array.from(selectedIds))}
+            disabled={!!regRun}
+            className="text-sm border border-border bg-card text-foreground px-3 py-1.5 rounded-md hover:bg-card-hover disabled:opacity-50"
+            title="Cherche l'année d'immatriculation des prospects sélectionnés pas encore cherchés"
+          >
+            Trouver l&apos;année
           </button>
           <button
             onClick={handleBulkDelete}
@@ -2606,10 +2805,49 @@ export default function ProspectsPage() {
         </div>
       )}
 
+      {/* Choix des colonnes */}
+      <div className="flex justify-end mb-2 relative">
+        <button
+          type="button"
+          onClick={() => setColumnsOpen((v) => !v)}
+          className="text-sm border border-border bg-card text-foreground-secondary px-3 py-1.5 rounded-md hover:bg-card-hover"
+          aria-expanded={columnsOpen}
+        >
+          Colonnes ({visibleColumns.length}/{LIST_COLUMNS.length})
+        </button>
+        {columnsOpen && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setColumnsOpen(false)} />
+            <div className="absolute right-0 top-full mt-1 z-40 w-56 bg-card border border-border rounded-md shadow-lg p-2">
+              <p className="text-xs text-foreground-muted px-2 pb-1">Colonnes affichées</p>
+              {LIST_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 px-2 py-1.5 text-sm text-foreground rounded hover:bg-background-subtle cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!`,${hiddenColumns},`.includes(`,${c.key},`)}
+                    onChange={() => toggleColumn(c.key)}
+                    className="w-4 h-4 rounded border-border-strong"
+                  />
+                  {c.label}
+                </label>
+              ))}
+              {hiddenColumns && (
+                <button onClick={() => writeHiddenColumns([])} className="w-full text-left text-xs text-primary px-2 pt-1 hover:underline">
+                  Tout afficher
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Table */}
       <div ref={(el) => { (tableRef as React.MutableRefObject<HTMLDivElement | null>).current = el; tableContainerRef.current = el; }} className="bg-card rounded-md border border-border shadow-sm overflow-x-auto">
-        <table className="w-full text-sm min-w-[900px]" style={{ tableLayout: "fixed" }}>
-          <colgroup><col style={{ width: 40 }} /><col style={{ width: 40 }} /><col /><col style={{ width: 120 }} /><col style={{ width: 210 }} /><col style={{ width: 150 }} /><col style={{ width: 90 }} /><col style={{ width: 60 }} /><col style={{ width: 100 }} /><col style={{ width: 110 }} /></colgroup>
+        <table className="w-full text-sm" style={{ tableLayout: "fixed", minWidth: 80 + 220 + visibleColumns.reduce((n, c) => n + c.width, 0) }}>
+          <colgroup>
+            <col style={{ width: 40 }} /><col style={{ width: 40 }} /><col style={{ minWidth: 220 }} />
+            {visibleColumns.map((c) => <col key={c.key} style={{ width: c.width }} />)}
+          </colgroup>
           <thead className="bg-background-subtle border-b border-border">
             <tr>
               <th className="px-4 py-3 text-xs text-foreground-muted">#</th>
@@ -2624,48 +2862,51 @@ export default function ProspectsPage() {
               <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("companyName")}>
                 {t("prospects", "company")} <SortIcon field="companyName" />
               </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">
+              {showCol("city") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">
                 <CityDropdown
                   value={cityFilter}
                   onChange={setCityFilter}
                   cities={availableCities}
                   placeholder={t("prospects", "city")}
                 />
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Email</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "phone")}</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Campagne</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "reviews")}</th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("leadScore")}>
+              </th>}
+              {showCol("email") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Email</th>}
+              {showCol("phone") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "phone")}</th>}
+              {showCol("campaign") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">Campagne</th>}
+              {showCol("reviews") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "reviews")}</th>}
+              {showCol("registration") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("registrationYear")} title="Année d'immatriculation (registre, site ou web) et âge de l'entreprise">
+                Immat. <SortIcon field="registrationYear" />
+              </th>}
+              {showCol("score") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("leadScore")}>
                 {t("prospects", "score")} <SortIcon field="leadScore" />
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("conversion")} title="Chance de conversion estimée sur 10 (métier, taille, besoin, joignabilité)">
+              </th>}
+              {showCol("conversion") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("conversion")} title="Chance de conversion estimée sur 10 (métier, taille, besoin, joignabilité)">
                 Chance <SortIcon field="conversion" />
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("engagement")} title="Engagement sur 10 : ouvertures, clics, visites du site, réponses, appels. 🔥 = à appeler maintenant">
+              </th>}
+              {showCol("engagement") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("engagement")} title="Engagement sur 10 : ouvertures, clics, visites du site, réponses, appels. 🔥 = à appeler maintenant">
                 Engagement <SortIcon field="engagement" />
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("status")}>
+              </th>}
+              {showCol("status") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted cursor-pointer select-none" onClick={() => handleSort("status")}>
                 {t("prospects", "status")} <SortIcon field="status" />
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "actions")}</th>
+              </th>}
+              {showCol("actions") && <th className="text-left px-4 py-3 text-xs font-medium uppercase tracking-wide text-foreground-muted">{t("prospects", "actions")}</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <>
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
+                <SkeletonRow columns={visibleColumns.length} />
               </>
             ) : displayProspects.length === 0 ? (
               <tr>
-                <td colSpan={13} className="text-center py-12 text-foreground-muted">
+                <td colSpan={3 + visibleColumns.length} className="text-center py-12 text-foreground-muted">
                   <div className="space-y-2">
                     <p className="text-base">{t("prospects", "noProspectFound")}</p>
                     {hasFilters ? (
@@ -2691,6 +2932,7 @@ export default function ProspectsPage() {
                   onEnrich={handleEnrichOne}
                   onEmail={handleEmailClick}
                   onCampaignChange={handleCampaignChange}
+                  hiddenColumns={hiddenColumns}
                 />
               ))
             )}
@@ -2736,6 +2978,25 @@ export default function ProspectsPage() {
                             « {selectedProspect.ownerEvidence} »
                             {selectedProspect.ownerSourceUrl && (
                               <> — <a href={selectedProspect.ownerSourceUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline not-italic">source</a></>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {selectedProspect.registrationYear && (
+                      <div className="mt-2 text-sm">
+                        <p className="text-foreground">
+                          Immatriculée en {selectedProspect.registrationYear}
+                          <span className="text-foreground-muted"> · {CURRENT_YEAR - selectedProspect.registrationYear} an(s)</span>
+                          <span className="text-xs text-foreground-muted"> — {REGISTRATION_SOURCE_LABELS[selectedProspect.registrationSource ?? ""] ?? "source"}
+                            {selectedProspect.registrationConfidence && selectedProspect.registrationSource !== "domaine" && ` (confiance ${selectedProspect.registrationConfidence === "high" ? "élevée" : "moyenne"})`}
+                          </span>
+                        </p>
+                        {selectedProspect.registrationEvidence && (
+                          <p className="text-xs text-foreground-muted italic mt-0.5">
+                            « {selectedProspect.registrationEvidence} »
+                            {selectedProspect.registrationUrl && (
+                              <> — <a href={selectedProspect.registrationUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline not-italic">source</a></>
                             )}
                           </p>
                         )}

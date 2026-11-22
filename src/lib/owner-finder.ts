@@ -38,7 +38,7 @@ export interface OwnerResult {
   reason?: string;
 }
 
-interface PageText {
+export interface PageText {
   url: string;
   text: string;
 }
