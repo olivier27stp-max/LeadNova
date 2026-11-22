@@ -45,7 +45,7 @@ src/lib/reply-classifier.ts — Ton des réponses (positive/neutre/négative/abs
 src/lib/call-options.ts  — Listes du journal d'appels (résultat, qui, outil, objection, étape, raison de perte)
 src/lib/sales-stages.ts  — Étapes du pipeline (réponse positive → setting call → closing call → inscrit → payant / perdu) ; clés DEMO_* = closing call, TRIAL = inscrit
 src/lib/sales-pipeline.ts — setSalesStage / advanceSalesStage : seule façon de changer Prospect.salesStage (historique daté dans activity_logs « sales_stage », metadata { from, to })
-src/app/funnel/page.tsx  — Page « Pipeline » : tableau glisser-déposer (@dnd-kit) + funnel de conversion par période (/api/pipeline)
+src/app/funnel/page.tsx  — Page « Pipeline » : tableau glisser-déposer (@dnd-kit), filtre par campagne (ou toutes), KPI (réponse, réponse positive, courriel → inscription, inscription → payant) + funnel par période (/api/pipeline)
 src/app/calls/page.tsx   — Page « Appels » : KPI, entonnoir, objections, calibrage de la Chance, rappels du jour, prospects chauds
 src/lib/activity.ts     — logActivity() helper
 src/lib/email-sender.ts — Nodemailer SMTP
