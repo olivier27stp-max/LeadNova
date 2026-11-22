@@ -3,8 +3,9 @@ import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 import {
-  CALL_OUTCOMES, CALL_WHO, CURRENT_TOOLS, OBJECTIONS, SALES_STAGES, LOST_REASONS, CONNECTED_OUTCOMES,
+  CALL_OUTCOMES, CALL_WHO, CURRENT_TOOLS, OBJECTIONS, LOST_REASONS, CONNECTED_OUTCOMES,
 } from "@/lib/call-options";
+import { advanceSalesStage, isSalesStage, setSalesStage } from "@/lib/sales-pipeline";
 
 function pick<T extends Record<string, string>>(options: T, value: unknown): keyof T | null {
   return typeof value === "string" && value in options ? (value as keyof T) : null;
@@ -12,7 +13,7 @@ function pick<T extends Record<string, string>>(options: T, value: unknown): key
 
 async function ownProspect(prospectId: unknown, workspaceId: string) {
   if (typeof prospectId !== "string") return null;
-  return prisma.prospect.findFirst({ where: { id: prospectId, workspaceId }, select: { id: true, companyName: true } });
+  return prisma.prospect.findFirst({ where: { id: prospectId, workspaceId }, select: { id: true, companyName: true, salesStage: true } });
 }
 
 // GET /api/prospects/calls?prospectId= — historique des appels
@@ -76,10 +77,21 @@ export async function POST(request: NextRequest) {
         ...(currentTool ? { currentTool } : {}),
         ...(employeeCount ? { employeeCount } : {}),
         ...(CONNECTED_OUTCOMES.has(outcome) ? { lastEngagedAt: now } : {}),
-        ...(outcome === "DEMO_BOOKED" ? { salesStage: "DEMO_BOOKED" } : {}),
         ...(outcome === "WRONG_NUMBER" ? { phone: null } : {}),
       },
     });
+
+    // Un appel qui fixe un setting/closing call fait avancer le pipeline (jamais reculer)
+    if (outcome === "SETTING_BOOKED" || outcome === "DEMO_BOOKED") {
+      await advanceSalesStage({
+        workspaceId: ctx.workspaceId,
+        prospectId: prospect.id,
+        companyName: prospect.companyName,
+        from: prospect.salesStage,
+        to: outcome,
+        userId: ctx.userId,
+      });
+    }
 
     await logActivity({
       action: "call_logged",
@@ -100,7 +112,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PATCH /api/prospects/calls — étape de vente (démo faite, essai, vendu, perdu)
+// PATCH /api/prospects/calls — étape du pipeline (aussi utilisé par le glisser-déposer de /funnel)
 export async function PATCH(request: NextRequest) {
   try {
     const ctx = await requireWorkspaceContext();
@@ -108,29 +120,19 @@ export async function PATCH(request: NextRequest) {
     const prospect = await ownProspect(body.prospectId, ctx.workspaceId);
     if (!prospect) return NextResponse.json({ error: "Prospect introuvable" }, { status: 404 });
 
-    const salesStage = body.salesStage === "" || body.salesStage === null ? null : pick(SALES_STAGES, body.salesStage);
-    if (body.salesStage && !salesStage) return NextResponse.json({ error: "Étape invalide" }, { status: 400 });
+    const salesStage = body.salesStage === "" || body.salesStage === null ? null : isSalesStage(body.salesStage) ? body.salesStage : undefined;
+    if (salesStage === undefined) return NextResponse.json({ error: "Étape invalide" }, { status: 400 });
     const lostReason = salesStage === "LOST" ? pick(LOST_REASONS, body.lostReason) : null;
 
-    const updated = await prisma.prospect.update({
-      where: { id: prospect.id },
-      data: {
-        salesStage,
-        lostReason,
-        ...(salesStage === "WON" ? { status: "QUALIFIED" } : {}),
-      },
-      select: { id: true, salesStage: true, lostReason: true, status: true },
-    });
-
-    await logActivity({
-      action: "sales_stage",
-      type: salesStage === "WON" ? "success" : "info",
-      title: `${prospect.companyName} : ${salesStage ? SALES_STAGES[salesStage] : "étape retirée"}`,
-      details: lostReason ? `Raison : ${LOST_REASONS[lostReason]}` : undefined,
-      userId: ctx.userId,
+    const updated = await setSalesStage({
       workspaceId: ctx.workspaceId,
-      relatedEntityType: "prospect",
-      relatedEntityId: prospect.id,
+      prospectId: prospect.id,
+      companyName: prospect.companyName,
+      from: prospect.salesStage,
+      to: salesStage,
+      lostReason,
+      lostReasonLabel: lostReason ? LOST_REASONS[lostReason] : null,
+      userId: ctx.userId,
     });
 
     return NextResponse.json(updated);

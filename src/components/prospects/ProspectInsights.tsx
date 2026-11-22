@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   CALL_OUTCOMES, CALL_WHO, CURRENT_TOOLS, OBJECTIONS, SALES_STAGES, LOST_REASONS,
 } from "@/lib/call-options";
+import { PIPELINE_STAGES } from "@/lib/sales-stages";
 
 export interface InsightsProspect {
   id: string;
@@ -119,6 +120,8 @@ export default function ProspectInsights({ prospect, onChanged }: { prospect: In
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [stage, setStage] = useState<string | null>(prospect.salesStage ?? null);
+  // L'étape peut changer côté serveur (appel « setting/closing call pris », réponse positive)
+  useEffect(() => { setStage(prospect.salesStage ?? null); }, [prospect.salesStage]);
   const [lostReason, setLostReason] = useState<string | null>(prospect.lostReason ?? null);
 
   const loadCalls = useCallback(async () => {
@@ -147,7 +150,6 @@ export default function ProspectInsights({ prospect, onChanged }: { prospect: In
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Erreur");
       setOutcome(null); setWho(null); setObjection(null); setCallback(""); setNotes("");
-      if (outcome === "DEMO_BOOKED") setStage("DEMO_BOOKED");
       await loadCalls();
       onChanged();
     } catch (e) {
@@ -266,9 +268,9 @@ export default function ProspectInsights({ prospect, onChanged }: { prospect: In
 
       {/* Étape de vente */}
       <div className="rounded-md border border-border p-3 space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Étape de vente</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-foreground-muted">Étape du pipeline</p>
         <div className="flex flex-wrap items-center gap-1.5">
-          {(["DEMO_BOOKED", "DEMO_DONE", "TRIAL", "WON"] as const).map((s, i) => (
+          {PIPELINE_STAGES.map(({ key: s }, i) => (
             <span key={s} className="flex items-center gap-1.5">
               {i > 0 && <span className="text-foreground-muted">→</span>}
               <button type="button" onClick={() => saveStage(stage === s ? null : s)}

@@ -1,596 +1,395 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useTranslation } from "@/components/LanguageProvider";
-import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
-  Plus,
-  Pencil,
-  Trash2,
-  X,
-  Check,
-  Mail,
-  Phone,
-  ArrowRight,
-  MapPin,
-  Inbox,
-  GripVertical,
-} from "lucide-react";
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  pointerWithin,
+  rectIntersection,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { CalendarClock, ChevronRight, Flame, MapPin, Phone, Plus, Search, X } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import { LOST_REASONS } from "@/lib/call-options";
+import { PIPELINE_STAGES, SALES_STAGES } from "@/lib/sales-stages";
 
 // ─── Types ──────────────────────────────────────────────
 
-interface ProspectCard {
+type Period = "7" | "30" | "90" | "all";
+
+interface Card {
   id: string;
   companyName: string;
-  email: string | null;
-  phone: string | null;
-  status: string;
-  leadScore: number;
+  ownerName: string | null;
   city: string | null;
-  industry: string | null;
+  phone: string | null;
+  email: string | null;
+  salesStage: string | null;
+  lostReason: string | null;
+  callbackAt: string | null;
+  lastCallAt: string | null;
+  daysInStage: number;
+  callbackDue: boolean;
+  engagement: { score: number; reasons: string[]; hot: boolean };
+  conversion: number;
 }
+interface Column { key: string; label: string; cards: Card[] }
+interface Step { key: string; label: string; count: number; rate: number | null }
+interface PipelineData { columns: Column[]; funnel: Step[]; lostInPeriod: number }
+interface SearchResult { id: string; companyName: string; ownerName: string | null; city: string | null; salesStage: string | null }
 
-interface FunnelProspectItem {
-  id: string;
-  prospectId: string;
-  sortOrder: number;
-  prospect: ProspectCard;
-}
-
-interface Stage {
-  id: string;
-  name: string;
-  slug: string;
-  sortOrder: number;
-  isDefault: boolean;
-  prospects: FunnelProspectItem[];
-}
-
-// ─── Stage slug → translation key ───────────────────────
-
-const STAGE_TRANSLATION_KEYS: Record<string, "newReplies" | "stageNotInterested" | "stageInterested" | "stageHotFollowUp1" | "stageHotFollowUp2" | "stageLost" | "stageClosed"> = {
-  "new-replies": "newReplies",
-  "not-interested": "stageNotInterested",
-  "interested": "stageInterested",
-  "hot-follow-up-1": "stageHotFollowUp1",
-  "hot-follow-up-2": "stageHotFollowUp2",
-  "lost": "stageLost",
-  "closed": "stageClosed",
+const COLUMN_TONE: Record<string, string> = {
+  POSITIVE_REPLY: "bg-primary",
+  SETTING_BOOKED: "bg-sky-500",
+  SETTING_DONE: "bg-sky-700",
+  DEMO_BOOKED: "bg-violet-500",
+  DEMO_DONE: "bg-violet-700",
+  TRIAL: "bg-warning",
+  WON: "bg-success",
+  LOST: "bg-danger",
 };
 
-// ─── Stage color accents ────────────────────────────────
+const pct = (v: number | null) => (v == null ? "—" : `${Math.round(v * 100)} %`);
 
-const STAGE_COLORS: Record<string, { bar: string; badge: string; dot: string; dropzone: string }> = {
-  "new-replies":      { bar: "bg-primary",                          badge: "bg-primary-subtle text-primary",                     dot: "bg-primary",                          dropzone: "border-primary/40 bg-primary-subtle/30" },
-  "not-interested":   { bar: "bg-foreground-muted",                 badge: "bg-background-muted text-foreground-muted",          dot: "bg-foreground-muted",                 dropzone: "border-foreground-muted/40 bg-background-muted/30" },
-  "interested":       { bar: "bg-success",                          badge: "bg-success-subtle text-success",                     dot: "bg-success",                          dropzone: "border-success/40 bg-success-subtle/30" },
-  "hot-follow-up-1":  { bar: "bg-warning",                          badge: "bg-warning-subtle text-warning",                     dot: "bg-warning",                          dropzone: "border-warning/40 bg-warning-subtle/30" },
-  "hot-follow-up-2":  { bar: "bg-orange-500 dark:bg-orange-400",    badge: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", dot: "bg-orange-500 dark:bg-orange-400", dropzone: "border-orange-400/40 bg-orange-50/30 dark:bg-orange-900/10" },
-  "lost":             { bar: "bg-danger",                           badge: "bg-danger-subtle text-danger",                       dot: "bg-danger",                           dropzone: "border-danger/40 bg-danger-subtle/30" },
-  "closed":           { bar: "bg-emerald-600 dark:bg-emerald-500",  badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", dot: "bg-emerald-600 dark:bg-emerald-500", dropzone: "border-emerald-500/40 bg-emerald-50/30 dark:bg-emerald-900/10" },
-};
-
-const DEFAULT_COLOR = { bar: "bg-primary-light", badge: "bg-primary-subtle text-primary", dot: "bg-primary-light", dropzone: "border-primary/40 bg-primary-subtle/30" };
-
-function getStageColor(slug: string) {
-  return STAGE_COLORS[slug] || DEFAULT_COLOR;
+function daysLabel(d: number) {
+  return d <= 0 ? "aujourd'hui" : d === 1 ? "1 jour" : `${d} jours`;
 }
 
-// ─── Move Menu ──────────────────────────────────────────
+// ─── Carte ──────────────────────────────────────────────
 
-function MoveMenu({
-  stages,
-  currentStageId,
-  prospectId,
-  getStageName,
-  onMove,
-}: {
-  stages: Stage[];
-  currentStageId: string;
-  prospectId: string;
-  getStageName: (s: Stage) => string;
-  onMove: (prospectId: string, stageId: string) => void;
-}) {
+function CardBody({ card, overlay }: { card: Card; overlay?: boolean }) {
+  return (
+    <div className={cn("rounded-md border border-border bg-card p-2.5 text-left shadow-sm", overlay && "shadow-xl ring-2 ring-primary/40 rotate-1")}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium text-foreground leading-tight">{card.companyName}</p>
+        {card.engagement.hot && <Flame className="size-3.5 shrink-0 text-warning" aria-label="Signal récent" />}
+      </div>
+      {card.ownerName && <p className="text-xs text-foreground-secondary mt-0.5">{card.ownerName}</p>}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-foreground-muted">
+        {card.city && <span className="flex items-center gap-0.5"><MapPin className="size-3" />{card.city}</span>}
+        {card.phone && <span className="flex items-center gap-0.5"><Phone className="size-3" />{card.phone}</span>}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-[11px]">
+        <span className="text-foreground-muted">depuis {daysLabel(card.daysInStage)}</span>
+        <span className="tabular-nums text-foreground-secondary" title="Chance de conversion · engagement">
+          {card.conversion}/10 · {card.engagement.score}/10
+        </span>
+      </div>
+      {card.salesStage === "LOST" && card.lostReason && (
+        <p className="mt-1 text-[11px] text-danger">{LOST_REASONS[card.lostReason as keyof typeof LOST_REASONS] ?? card.lostReason}</p>
+      )}
+      {card.callbackDue && card.callbackAt && card.salesStage !== "LOST" && (
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-warning">
+          <CalendarClock className="size-3" />Rappel {new Date(card.callbackAt!).toLocaleDateString("fr-CA", { day: "numeric", month: "short" })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DraggableCard({ card, onRemove }: { card: Card; onRemove: (c: Card) => void }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: card.id, data: { card } });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn("group relative touch-none select-none", isDragging && "opacity-30")}
+      {...listeners}
+      {...attributes}
+    >
+      <Link href={`/prospects?open=${card.id}`} draggable={false} className="block" title="Ouvrir la fiche">
+        <CardBody card={card} />
+      </Link>
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => onRemove(card)}
+        className="absolute right-1 top-1 hidden rounded p-0.5 text-foreground-muted hover:bg-background-subtle hover:text-danger group-hover:block"
+        title="Retirer du pipeline"
+      >
+        <X className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function StageColumn({ column, onRemove }: { column: Column; onRemove: (c: Card) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: column.key });
+  return (
+    <div className="flex w-52 shrink-0 flex-col rounded-lg border border-border bg-background-subtle">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <span className={cn("size-2 rounded-full", COLUMN_TONE[column.key])} />
+        <p className="text-sm font-semibold text-foreground">{column.label}</p>
+        <span className="ml-auto rounded-full bg-background-muted px-2 text-xs tabular-nums text-foreground-secondary">{column.cards.length}</span>
+      </div>
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "flex min-h-32 flex-1 flex-col gap-2 overflow-y-auto p-2 transition-colors",
+          isOver && "bg-primary-subtle/50 ring-2 ring-inset ring-primary/40 rounded-b-lg",
+        )}
+        style={{ maxHeight: "calc(100vh - 360px)" }}
+      >
+        {column.cards.map((c) => <DraggableCard key={c.id} card={c} onRemove={onRemove} />)}
+        {column.cards.length === 0 && <p className="py-6 text-center text-xs text-foreground-muted">Glisse un prospect ici</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Funnel ─────────────────────────────────────────────
+
+function FunnelStrip({ steps, lost }: { steps: Step[]; lost: number }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="flex items-stretch overflow-x-auto">
+        {steps.map((s, i) => (
+          <div key={s.key} className="flex shrink-0 items-center">
+            {i > 0 && (
+              <div className="flex shrink-0 flex-col items-center px-1 text-[10px] text-foreground-muted">
+                <span className="tabular-nums font-medium text-foreground-secondary">{pct(s.rate)}</span>
+                <ChevronRight className="size-3.5" />
+              </div>
+            )}
+            <div className="shrink-0 rounded-md bg-background-subtle px-2 py-1.5">
+              <p className="whitespace-nowrap text-[11px] text-foreground-muted leading-tight">{s.label}</p>
+              <p className="text-lg font-semibold tabular-nums text-foreground">{s.count}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-foreground-muted">
+        Compté par prospect : chaque étape inclut ceux qui sont allés plus loin. {lost > 0 && `${lost} perdu${lost > 1 ? "s" : ""} dans la période.`}
+      </p>
+    </div>
+  );
+}
+
+// ─── Ajout d'un prospect ────────────────────────────────
+
+function AddProspect({ onAdd }: { onAdd: (id: string, stage: string) => Promise<void> }) {
+  const [q, setQ] = useState("");
+  const [stage, setStage] = useState<string>("POSITIVE_REPLY");
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
-  const { t } = useTranslation();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function search(value: string) {
+    setQ(value);
+    setOpen(true);
+    if (timer.current) clearTimeout(timer.current);
+    if (value.trim().length < 2) { setResults([]); return; }
+    timer.current = setTimeout(async () => {
+      const res = await fetch(`/api/pipeline/search?q=${encodeURIComponent(value.trim())}`);
+      if (res.ok) setResults((await res.json()).results);
+    }, 250);
+  }
 
   return (
-    <div className="relative">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-        className="p-1 rounded-md text-foreground-muted hover:text-primary hover:bg-primary-subtle transition-colors"
-        title={t("funnel", "moveToStage")}
+    <div className="relative flex items-center gap-1.5">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-foreground-muted" />
+        <input
+          value={q}
+          onChange={(e) => search(e.target.value)}
+          onFocus={() => setOpen(true)}
+          placeholder="Ajouter un prospect…"
+          className="w-56 rounded-md border border-border bg-background py-1.5 pl-7 pr-2 text-sm text-foreground"
+        />
+      </div>
+      <select
+        value={stage}
+        onChange={(e) => setStage(e.target.value)}
+        className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+        aria-label="Étape d'arrivée"
       >
-        <ArrowRight className="size-3.5" />
-      </button>
-      {open && (
+        {PIPELINE_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+      </select>
+      {open && results.length > 0 && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-xl border border-border bg-card shadow-xl py-1.5">
-            <p className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-foreground-muted">
-              {t("funnel", "moveToStage")}
-            </p>
-            {stages
-              .filter((s) => s.id !== currentStageId)
-              .map((s) => {
-                const color = getStageColor(s.slug);
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      onMove(prospectId, s.id);
-                      setOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-background-subtle flex items-center gap-2.5 transition-colors"
-                  >
-                    <span className={cn("size-2 rounded-full shrink-0", color.dot)} />
-                    {getStageName(s)}
-                  </button>
-                );
-              })}
-          </div>
+          <ul className="absolute left-0 top-full z-50 mt-1 w-80 rounded-lg border border-border bg-card py-1 shadow-xl">
+            {results.map((r) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onClick={async () => { await onAdd(r.id, stage); setQ(""); setResults([]); setOpen(false); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-background-subtle"
+                >
+                  <Plus className="size-3.5 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-foreground">{r.companyName}</span>
+                    <span className="block truncate text-xs text-foreground-muted">
+                      {[r.ownerName, r.city].filter(Boolean).join(" · ")}
+                      {r.salesStage && ` — déjà : ${SALES_STAGES[r.salesStage as keyof typeof SALES_STAGES] ?? r.salesStage}`}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </>
       )}
     </div>
   );
 }
 
-// ─── Skeleton Column ────────────────────────────────────
+// ─── Page ───────────────────────────────────────────────
 
-function SkeletonColumn() {
-  return (
-    <div className="flex flex-col w-[260px] shrink-0">
-      <div className="h-1 bg-background-muted rounded-t-md animate-pulse" />
-      <div className="px-4 py-3.5 bg-background-subtle border-b border-border">
-        <div className="h-4 bg-background-muted rounded w-24 animate-pulse" />
-      </div>
-      <div className="p-2.5 space-y-2.5">
-        {[120, 100, 90].map((w, i) => (
-          <div key={i} className="rounded-lg border border-border p-3 animate-pulse">
-            <div className="h-4 bg-background-muted rounded mb-2" style={{ width: `${w}px` }} />
-            <div className="h-3 bg-background-muted/60 rounded w-16" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+// La colonne sous le pointeur ; sinon (clavier, bord de colonne) celle que la carte recouvre le plus
+const columnUnderPointer: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  return hits.length ? hits : rectIntersection(args);
+};
 
-// ─── Main Page ──────────────────────────────────────────
-
-export default function FunnelPage() {
-  const { t } = useTranslation();
-  const [stages, setStages] = useState<Stage[]>([]);
+export default function PipelinePage() {
+  const [period, setPeriod] = useState<Period>("30");
+  const [data, setData] = useState<PipelineData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editingStage, setEditingStage] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
+  const [activeCard, setActiveCard] = useState<Card | null>(null);
+  const [pendingLost, setPendingLost] = useState<Card | null>(null);
 
-  // ─── Drag & Drop state ──────────────────────────────
-  const [dragProspectId, setDragProspectId] = useState<string | null>(null);
-  const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
-  const dragSourceStageRef = useRef<string | null>(null);
-
-  const fetchStages = useCallback(async () => {
+  const load = useCallback(async (p: Period) => {
+    setLoading(true);
     try {
-      const res = await fetch("/api/funnel/stages");
-      if (res.ok) {
-        const data: Stage[] = await res.json();
-        setStages(data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch stages", err);
+      const res = await fetch(`/api/pipeline?period=${p}`);
+      if (res.ok) setData(await res.json());
     } finally {
       setLoading(false);
     }
   }, []);
+  useEffect(() => { load(period); }, [load, period]);
 
-  useEffect(() => {
-    fetchStages();
-  }, [fetchStages]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
 
-  // ─── Helpers ────────────────────────────────────────
+  const cardsById = useMemo(() => new Map((data?.columns ?? []).flatMap((c) => c.cards.map((card) => [card.id, card] as const))), [data]);
 
-  function getStageName(stage: Stage): string {
-    const key = STAGE_TRANSLATION_KEYS[stage.slug];
-    if (key) {
-      // If user renamed the stage, use the custom name
-      const defaultNames: Record<string, string> = {
-        "new-replies": "New Replies",
-        "not-interested": "Not Interested",
-        "interested": "Interested",
-        "hot-follow-up-1": "Hot Follow-up #1",
-        "hot-follow-up-2": "Hot Follow-up #2",
-        "lost": "Lost",
-        "closed": "Closed",
+  /** Déplace la carte tout de suite à l'écran, puis enregistre ; en cas d'échec, recharge. */
+  const saveStage = useCallback(async (prospectId: string, to: string | null, lostReason: string | null = null) => {
+    setData((d) => {
+      if (!d) return d;
+      const card = d.columns.flatMap((c) => c.cards).find((c) => c.id === prospectId);
+      const moved = card ? { ...card, salesStage: to, lostReason, daysInStage: 0 } : null;
+      return {
+        ...d,
+        columns: d.columns.map((c) => ({
+          ...c,
+          cards: [...(moved && c.key === to ? [moved] : []), ...c.cards.filter((x) => x.id !== prospectId)],
+        })),
       };
-      if (stage.name !== defaultNames[stage.slug]) return stage.name;
-      return t("funnel", key);
-    }
-    return stage.name;
-  }
-
-  const totalProspects = stages.reduce((sum, s) => sum + s.prospects.length, 0);
-
-  // ─── Handlers ───────────────────────────────────────
-
-  async function handleAddStage() {
-    const res = await fetch("/api/funnel/stages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: t("funnel", "newStage") }),
     });
-    if (res.ok) {
-      const newStage: Stage = await res.json();
-      setStages((prev) => [...prev, newStage]);
-    }
-  }
-
-  async function handleRenameStage(id: string, name: string) {
-    const res = await fetch("/api/funnel/stages", {
+    const res = await fetch("/api/prospects/calls", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, name }),
+      body: JSON.stringify({ prospectId, salesStage: to ?? "", lostReason }),
     });
-    if (res.ok) {
-      setStages((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, name } : s))
-      );
-    }
-    setEditingStage(null);
+    if (!res.ok) alert(`Étape non enregistrée : ${(await res.json().catch(() => ({}))).error || "erreur"}`);
+    load(period); // recalcule le funnel et les notes
+  }, [load, period]);
+
+  function onDragStart(e: DragStartEvent) {
+    setActiveCard(cardsById.get(String(e.active.id)) ?? null);
   }
 
-  async function handleDeleteStage(id: string) {
-    if (!confirm(t("funnel", "deleteConfirm"))) return;
-    const res = await fetch(`/api/funnel/stages?id=${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setStages((prev) => prev.filter((s) => s.id !== id));
-    }
-  }
-
-  async function handleMoveProspect(prospectId: string, targetStageId: string) {
-    setStages((prev) => {
-      const newStages = prev.map((s) => ({
-        ...s,
-        prospects: [...s.prospects],
-      }));
-      let movedItem: FunnelProspectItem | undefined;
-      for (const stage of newStages) {
-        const idx = stage.prospects.findIndex((p) => p.prospectId === prospectId);
-        if (idx >= 0) {
-          [movedItem] = stage.prospects.splice(idx, 1);
-          break;
-        }
-      }
-      if (movedItem) {
-        const target = newStages.find((s) => s.id === targetStageId);
-        if (target) target.prospects.push(movedItem);
-      }
-      return newStages;
-    });
-    await fetch("/api/funnel/prospects", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prospectId, stageId: targetStageId, sortOrder: 0 }),
-    });
-  }
-
-  async function handleRemoveProspect(prospectId: string) {
-    setStages((prev) =>
-      prev.map((s) => ({
-        ...s,
-        prospects: s.prospects.filter((p) => p.prospectId !== prospectId),
-      }))
-    );
-    await fetch(`/api/funnel/prospects?prospectId=${prospectId}`, { method: "DELETE" });
-  }
-
-  // ─── Drag & Drop handlers ──────────────────────────
-
-  function handleDragStart(e: React.DragEvent, prospectId: string, sourceStageId: string) {
-    setDragProspectId(prospectId);
-    dragSourceStageRef.current = sourceStageId;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", prospectId);
-    // Slight delay so the dragged element gets the opacity
-    requestAnimationFrame(() => {
-      document.querySelectorAll(`[data-prospect-id="${prospectId}"]`).forEach((el) => {
-        (el as HTMLElement).style.opacity = "0.4";
-      });
-    });
-  }
-
-  function handleDragEnd() {
-    if (dragProspectId) {
-      document.querySelectorAll(`[data-prospect-id="${dragProspectId}"]`).forEach((el) => {
-        (el as HTMLElement).style.opacity = "1";
-      });
-    }
-    setDragProspectId(null);
-    setDragOverStageId(null);
-    dragSourceStageRef.current = null;
-  }
-
-  function handleDragOver(e: React.DragEvent, stageId: string) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (dragOverStageId !== stageId) {
-      setDragOverStageId(stageId);
-    }
-  }
-
-  function handleDragLeave(e: React.DragEvent, stageId: string) {
-    // Only clear if actually leaving the column (not entering a child)
-    const relatedTarget = e.relatedTarget as HTMLElement | null;
-    const currentTarget = e.currentTarget as HTMLElement;
-    if (!relatedTarget || !currentTarget.contains(relatedTarget)) {
-      if (dragOverStageId === stageId) {
-        setDragOverStageId(null);
-      }
-    }
-  }
-
-  function handleDrop(e: React.DragEvent, targetStageId: string) {
-    e.preventDefault();
-    setDragOverStageId(null);
-
-    if (dragProspectId && dragSourceStageRef.current !== targetStageId) {
-      handleMoveProspect(dragProspectId, targetStageId);
-    }
-
-    // Reset opacity
-    if (dragProspectId) {
-      document.querySelectorAll(`[data-prospect-id="${dragProspectId}"]`).forEach((el) => {
-        (el as HTMLElement).style.opacity = "1";
-      });
-    }
-    setDragProspectId(null);
-    dragSourceStageRef.current = null;
-  }
-
-  // ─── Render ─────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <div className="max-w-[1440px] mx-auto px-6 py-6">
-        <PageHeader title={t("funnel", "title")} description={t("funnel", "description")} />
-        <div className="flex mt-4 border border-border rounded-md bg-card shadow-sm overflow-hidden">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className={cn(i > 1 && "border-l border-border")}>
-              <SkeletonColumn />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+  function onDragEnd(e: DragEndEvent) {
+    setActiveCard(null);
+    const card = cardsById.get(String(e.active.id));
+    const to = e.over ? String(e.over.id) : null;
+    if (!card || !to || card.salesStage === to) return;
+    if (to === "LOST") { setPendingLost(card); return; }
+    saveStage(card.id, to);
   }
 
   return (
-    <div className="max-w-[1440px] mx-auto px-6 py-6">
+    <div className="space-y-4">
       <PageHeader
-        title={t("funnel", "title")}
-        description={t("funnel", "description")}
+        title="Pipeline"
+        description="Cold email → setting call → closing call → inscription → payant. Glisse les prospects d'une étape à l'autre."
         actions={
-          <div className="flex items-center gap-3">
-            {totalProspects > 0 && (
-              <span className="text-sm text-foreground-muted tabular-nums">
-                {totalProspects} {totalProspects === 1 ? t("funnel", "prospect") : t("funnel", "prospects")}
-              </span>
-            )}
-            <Button variant="secondary" size="sm" onClick={handleAddStage}>
-              <Plus className="size-4" />
-              {t("funnel", "addStage")}
-            </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <AddProspect onAdd={(id, stage) => saveStage(id, stage)} />
+            <div className="flex rounded-md border border-border p-0.5">
+              {([["7", "7 j"], ["30", "30 j"], ["90", "90 j"], ["all", "Tout"]] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setPeriod(v)}
+                  className={cn("px-2.5 py-1.5 text-sm rounded", period === v ? "bg-primary text-white" : "text-foreground-secondary hover:bg-background-subtle")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
 
-      {/* Pipeline columns */}
-      <div className="mt-4 overflow-x-auto pb-2 -mb-2 scrollbar-thin">
-        <div className="flex min-w-max rounded-lg border border-border bg-card shadow-sm overflow-hidden">
-          {stages.map((stage, idx) => {
-            const color = getStageColor(stage.slug);
-            const isDropTarget = dragOverStageId === stage.id && dragSourceStageRef.current !== stage.id;
-
-            return (
-              <div
-                key={stage.id}
-                className={cn(
-                  "flex flex-col w-[260px] shrink-0 transition-colors duration-150",
-                  idx > 0 && "border-l border-border"
-                )}
-                onDragOver={(e) => handleDragOver(e, stage.id)}
-                onDragLeave={(e) => handleDragLeave(e, stage.id)}
-                onDrop={(e) => handleDrop(e, stage.id)}
-              >
-                {/* Color accent bar */}
-                <div className={cn("h-1 w-full", color.bar)} />
-
-                {/* ── Column header ── */}
-                <div className="px-4 py-3 bg-background-subtle border-b border-border">
-                  {editingStage === stage.id ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        autoFocus
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRenameStage(stage.id, editName);
-                          if (e.key === "Escape") setEditingStage(null);
-                        }}
-                        className="h-7 w-full rounded-md border border-border bg-card px-2 text-sm font-bold text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                      <button onClick={() => handleRenameStage(stage.id, editName)} className="p-1 text-success hover:bg-success-subtle rounded-md shrink-0 transition-colors">
-                        <Check className="size-3.5" />
-                      </button>
-                      <button onClick={() => setEditingStage(null)} className="p-1 text-foreground-muted hover:bg-background-muted rounded-md shrink-0 transition-colors">
-                        <X className="size-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between group/header">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-foreground text-[13px]">
-                          {getStageName(stage)}
-                        </span>
-                        <span className={cn(
-                          "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums leading-none",
-                          color.badge
-                        )}>
-                          {stage.prospects.length}
-                        </span>
-                      </div>
-                      {!stage.isDefault && (
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover/header:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => {
-                              setEditingStage(stage.id);
-                              setEditName(getStageName(stage));
-                            }}
-                            className="p-1 rounded-md text-foreground-muted hover:text-foreground hover:bg-background-muted transition-colors"
-                            title={t("funnel", "rename")}
-                          >
-                            <Pencil className="size-3" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteStage(stage.id)}
-                            className="p-1 rounded-md text-foreground-muted hover:text-danger hover:bg-danger-subtle transition-colors"
-                            title={t("funnel", "delete")}
-                          >
-                            <Trash2 className="size-3" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Cards / Drop zone ── */}
-                <div className={cn(
-                  "flex-1 p-2.5 flex flex-col gap-2 min-h-[300px] transition-colors duration-150",
-                  isDropTarget
-                    ? color.dropzone
-                    : "bg-background-subtle/30"
-                )}>
-                  {/* Drop indicator */}
-                  {isDropTarget && (
-                    <div className="rounded-lg border-2 border-dashed border-current opacity-30 h-16 flex items-center justify-center">
-                      <ArrowRight className="size-4" />
-                    </div>
-                  )}
-
-                  {stage.prospects.length === 0 && !isDropTarget ? (
-                    <div className="flex-1 flex flex-col items-center justify-center gap-2 py-8">
-                      <Inbox className="size-8 text-foreground-muted/20" />
-                      <p className="text-xs text-foreground-muted/40">{t("funnel", "emptyStage")}</p>
-                    </div>
-                  ) : (
-                    stage.prospects.map((item) => (
-                      <div
-                        key={item.prospectId}
-                        data-prospect-id={item.prospectId}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, item.prospectId, stage.id)}
-                        onDragEnd={handleDragEnd}
-                        className={cn(
-                          "group/card rounded-lg border border-border bg-card p-3 transition-all duration-150",
-                          "hover:shadow-md hover:border-border-strong",
-                          "cursor-grab active:cursor-grabbing",
-                          dragProspectId === item.prospectId && "ring-2 ring-primary/30"
-                        )}
-                      >
-                        {/* Card title + action icons */}
-                        <div className="flex items-start justify-between gap-1.5">
-                          <div className="flex items-start gap-1.5 flex-1 min-w-0">
-                            <GripVertical className="size-3.5 mt-0.5 shrink-0 text-foreground-muted/30 group-hover/card:text-foreground-muted transition-colors" />
-                            <p className="font-semibold text-foreground text-[13px] leading-snug line-clamp-2 flex-1">
-                              {item.prospect.companyName}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-0 shrink-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
-                            {item.prospect.phone && (
-                              <a
-                                href={`tel:${item.prospect.phone}`}
-                                className="p-1 rounded-md text-foreground-muted hover:text-primary hover:bg-primary-subtle transition-colors"
-                                title={item.prospect.phone}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Phone className="size-3.5" />
-                              </a>
-                            )}
-                            {item.prospect.email && (
-                              <a
-                                href={`mailto:${item.prospect.email}`}
-                                className="p-1 rounded-md text-foreground-muted hover:text-primary hover:bg-primary-subtle transition-colors"
-                                title={item.prospect.email}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Mail className="size-3.5" />
-                              </a>
-                            )}
-                            <MoveMenu
-                              stages={stages}
-                              currentStageId={stage.id}
-                              prospectId={item.prospectId}
-                              getStageName={getStageName}
-                              onMove={handleMoveProspect}
-                            />
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleRemoveProspect(item.prospectId); }}
-                              className="p-1 rounded-md text-foreground-muted hover:text-danger hover:bg-danger-subtle transition-colors"
-                              title={t("funnel", "remove")}
-                            >
-                              <X className="size-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Details */}
-                        <div className="mt-2 ml-5 flex flex-col gap-1">
-                          {item.prospect.leadScore > 0 && (
-                            <div className="flex items-center gap-1.5">
-                              <div className={cn(
-                                "h-1.5 rounded-full",
-                                item.prospect.leadScore >= 40 ? "bg-success w-8" :
-                                item.prospect.leadScore >= 20 ? "bg-warning w-5" :
-                                "bg-foreground-muted/30 w-3"
-                              )} />
-                              <span className="text-xs font-medium text-foreground-secondary tabular-nums">
-                                {item.prospect.leadScore} pts
-                              </span>
-                            </div>
-                          )}
-
-                          {item.prospect.city && (
-                            <span className="flex items-center gap-1 text-xs text-foreground-muted">
-                              <MapPin className="size-3 shrink-0" />
-                              {item.prospect.city}
-                            </span>
-                          )}
-
-                          {item.prospect.email && (
-                            <span className="flex items-center gap-1 text-xs text-foreground-muted truncate">
-                              <Mail className="size-3 shrink-0" />
-                              {item.prospect.email}
-                            </span>
-                          )}
-
-                          {item.prospect.industry && (
-                            <p className="text-[11px] text-foreground-muted/70 truncate mt-0.5">
-                              {item.prospect.industry}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            );
-          })}
+      {loading && !data ? (
+        <div className="space-y-4">
+          <Skeleton className="h-24" />
+          <div className="flex gap-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-96 w-52 shrink-0" />)}</div>
         </div>
-      </div>
+      ) : data && (
+        <>
+          <div className={cn(loading && "opacity-70")}>
+            <FunnelStrip steps={data.funnel} lost={data.lostInPeriod} />
+          </div>
+
+          <DndContext sensors={sensors} collisionDetection={columnUnderPointer} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActiveCard(null)}>
+            {/* Pleine largeur de l'écran : les 8 colonnes tiennent sur un grand écran */}
+            <div className="relative left-1/2 w-[calc(100vw-20px)] -translate-x-1/2 px-2 sm:px-4">
+            <div className="flex gap-2 overflow-x-auto pb-3">
+              {data.columns.map((col) => (
+                <StageColumn key={col.key} column={col} onRemove={(c) => {
+                  if (confirm(`Retirer ${c.companyName} du pipeline ?`)) saveStage(c.id, null);
+                }} />
+              ))}
+            </div>
+            </div>
+            <DragOverlay dropAnimation={null}>{activeCard && <CardBody card={activeCard} overlay />}</DragOverlay>
+          </DndContext>
+        </>
+      )}
+
+      {pendingLost && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPendingLost(null)}>
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-semibold text-foreground">Pourquoi {pendingLost.companyName} est perdu ?</p>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {(Object.entries(LOST_REASONS) as Array<[string, string]>).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { saveStage(pendingLost.id, "LOST", key); setPendingLost(null); }}
+                  className="rounded-full border border-border px-2.5 py-1 text-xs text-foreground-secondary hover:bg-background-subtle"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2 text-sm">
+              <button type="button" onClick={() => setPendingLost(null)} className="px-3 py-1.5 text-foreground-secondary hover:underline">Annuler</button>
+              <button type="button" onClick={() => { saveStage(pendingLost.id, "LOST"); setPendingLost(null); }} className="rounded-md bg-danger px-3 py-1.5 text-white">
+                Perdu sans raison
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

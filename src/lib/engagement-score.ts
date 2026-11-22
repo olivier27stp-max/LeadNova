@@ -5,7 +5,7 @@
  *  Clics        1 → 2,5 · 2+ → 3
  *  Visites site 1–2 → 1,2 · 3+ → 2
  *  Réponse      positive 3,5 · neutre 2,5 · négative 1,5 · absence 0,3 · a répondu (ton inconnu) 2
- *  Appels       démo prise 3 · rappeler 2 · conversation 1,5 · refus 1
+ *  Appels       setting/closing call pris 3 · rappeler 2 · conversation 1,5 · refus 1
  *  Fraîcheur    dernier signal > 30 jours ×0,6 · > 90 jours ×0,3
  *  Désabonnement → 0
  *
@@ -56,7 +56,8 @@ export function engagementScore(p: EngagementInput, now = new Date()): { score: 
   }
 
   const callPoints: Record<string, [number, string]> = {
-    DEMO_BOOKED: [3, "Démo prise au téléphone"],
+    SETTING_BOOKED: [3, "Setting call pris au téléphone"],
+    DEMO_BOOKED: [3, "Closing call pris au téléphone"],
     CALLBACK: [2, "Demande d'être rappelé"],
     CONNECTED: [1.5, "Conversation au téléphone"],
     REFUSED: [1, "A parlé au téléphone (refus)"],

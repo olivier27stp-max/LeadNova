@@ -68,7 +68,7 @@ export function isBuyingSeason(industry: string | null | undefined, now = new Da
 export function conversionChance(p: ConversionInput, now = new Date()): { score: number; reasons: string[] } {
   if (p.status === "NOT_INTERESTED") return { score: 0, reasons: ["A dit ne pas être intéressé"] };
   if (p.lastReplySentiment === "unsubscribe") return { score: 0, reasons: ["A demandé d'arrêter les courriels"] };
-  if (p.salesStage === "WON") return { score: 10, reasons: ["Vendu"] };
+  if (p.salesStage === "WON") return { score: 10, reasons: ["Payant"] };
   if (p.salesStage === "LOST") return { score: 0, reasons: [`Perdu${p.lostReason ? ` (${p.lostReason.toLowerCase()})` : ""}`] };
 
   const reasons: string[] = [];
@@ -133,9 +133,11 @@ export function conversionChance(p: ConversionInput, now = new Date()): { score:
 
   // ── Étape de vente ──
   const floor: Record<string, [number, string]> = {
-    DEMO_BOOKED: [7, "Démo prise"],
-    DEMO_DONE: [8, "Démo faite"],
-    TRIAL: [9, "Essai gratuit en cours"],
+    SETTING_BOOKED: [6, "Setting call prévu"],
+    SETTING_DONE: [7, "Setting call fait"],
+    DEMO_BOOKED: [7, "Closing call prévu"],
+    DEMO_DONE: [8, "Closing call fait"],
+    TRIAL: [9, "Inscrit"],
   };
   if (p.salesStage && floor[p.salesStage]) {
     score = Math.max(score, floor[p.salesStage][0]);

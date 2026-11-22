@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db";
+import { advanceSalesStage } from "@/lib/sales-pipeline";
 
 /**
  * Classe une réponse de prospect : positive | neutral | negative | out_of_office | unsubscribe.
@@ -94,6 +95,17 @@ export async function recordReplyClassification(
       where: { id: prospectId },
       data: { lastEngagedAt: now, ...(result ? { lastReplySentiment: result.sentiment } : {}) },
     });
+    // Réponse positive → entre dans le pipeline de vente (colonne « Réponse positive »)
+    if (result?.sentiment === "positive") {
+      const p = await prisma.prospect.findUnique({
+        where: { id: prospectId },
+        select: { companyName: true, salesStage: true, workspaceId: true },
+      });
+      const ws = p?.workspaceId ?? workspaceId;
+      if (p && ws) {
+        await advanceSalesStage({ workspaceId: ws, prospectId, companyName: p.companyName, from: p.salesStage, to: "POSITIVE_REPLY" });
+      }
+    }
     if (result?.sentiment === "unsubscribe" && workspaceId) {
       const p = await prisma.prospect.findUnique({ where: { id: prospectId }, select: { email: true } });
       if (p?.email) {
