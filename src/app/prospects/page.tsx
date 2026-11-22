@@ -507,6 +507,7 @@ export default function ProspectsPage() {
   const [showDiscoverConfirm, setShowDiscoverConfirm] = useState(false);
   const [targetingKeywords, setTargetingKeywords] = useState<string[]>([]);
   const [targetingQueries, setTargetingQueries] = useState<string[]>([]);
+  const [targetingAge, setTargetingAge] = useState("");
 
   // Campaign assignment on discover
   const [discoverCampaignId, setDiscoverCampaignId] = useState("");
@@ -696,6 +697,7 @@ export default function ProspectsPage() {
         if (data?.targeting?.cities) setTargetingCities(data.targeting.cities);
         if (data?.targeting?.keywords) setTargetingKeywords(data.targeting.keywords);
         if (data?.targeting?.searchQueries) setTargetingQueries(data.targeting.searchQueries);
+        setTargetingAge(typeof data?.targeting?.companyAge === "string" ? data.targeting.companyAge : "");
       })
       .catch(() => {});
     fetch("/api/cities?list=provinces")
@@ -870,6 +872,10 @@ export default function ProspectsPage() {
       fetchProspects();
       // Auto-clear progress after 5 seconds
       setTimeout(() => setDiscoverProgress(null), 5000);
+      // Ciblage par âge : l'IA (mode économique) date les nouveaux prospects, puis ajoute à la campagne ceux qui correspondent
+      if (data.companyAge && data.batchId) {
+        void runRegistrationSearch(undefined, { batchId: data.batchId, campaignId: discoverCampaignId || undefined, total: data.new || 0 });
+      }
     } catch (error) {
       stopProgressPolling();
       setDiscoverProgress(null);
@@ -1613,9 +1619,11 @@ export default function ProspectsPage() {
   }, []);
   useEffect(() => { fetchRegStats(); }, [fetchRegStats]);
 
-  async function runRegistrationSearch(ids?: string[]) {
+  async function runRegistrationSearch(ids?: string[], discovery?: { batchId: string; campaignId?: string; total: number }) {
     regStopRef.current = false;
-    const total = ids ? ids.length : regStats?.remaining ?? 0;
+    const total = discovery ? discovery.total : ids ? ids.length : regStats?.remaining ?? 0;
+    let added: number | null = null;
+    let matched: number | null = null;
     setRegRun({ processed: 0, found: 0, total });
     let processed = 0;
     let found = 0;
@@ -1624,17 +1632,21 @@ export default function ProspectsPage() {
         const res = await fetch("/api/prospects/find-registration", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(ids ? { ids } : {}),
+          body: JSON.stringify(discovery ? { batchId: discovery.batchId, campaignId: discovery.campaignId } : ids ? { ids } : {}),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
         processed += data.processed;
         found += data.counts?.found ?? 0;
+        if (data.addedToCampaign != null) { added = data.addedToCampaign; matched = data.matched; }
         setRegRun({ processed, found, total });
         if (data.remaining === 0 || data.processed === 0) break;
         if (data.stalled) throw new Error("L'IA ne répond pas (vérifier ANTHROPIC_API_KEY et le crédit Anthropic)");
       }
       await fetchProspects();
+      if (discovery?.campaignId && added != null) {
+        alert(`Ciblage par âge : ${matched} prospect(s) de la découverte ont l'âge voulu ; ${added} ajouté(s) à la campagne. Les autres restent dans Prospects (filtre « Âge »).`);
+      }
     } catch (error) {
       alert(`Recherche de l'année interrompue : ${error instanceof Error ? error.message : "erreur"}`);
     } finally {
@@ -2052,6 +2064,19 @@ export default function ProspectsPage() {
                   <p className="text-xs text-foreground-muted">{t("prospects", "noCustomQueries")}</p>
                 )}
               </div>
+
+              {/* Âge de l'entreprise */}
+              {targetingAge && (
+                <div>
+                  <p className="text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">Âge de l&apos;entreprise</p>
+                  <span className="px-2 py-0.5 bg-warning-subtle text-warning border border-warning/20 rounded text-xs">
+                    {({ lt3: "Moins de 3 ans", gte3: "3 ans et plus", lt5: "Moins de 5 ans", gte5: "5 ans et plus", gte10: "10 ans et plus" } as Record<string, string>)[targetingAge] ?? targetingAge}
+                  </span>
+                  <p className="text-[11px] text-foreground-muted mt-1">
+                    Après la découverte, l&apos;IA cherche l&apos;année des nouveaux prospects ; seuls ceux qui correspondent sont ajoutés à la campagne. Modifiable dans Paramètres → Ciblage.
+                  </p>
+                </div>
+              )}
 
               {/* Add to campaign */}
               <div>

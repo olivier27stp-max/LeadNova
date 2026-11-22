@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
 
         // Add to campaign if specified
         let addedToCampaign = 0;
-        if (campaignId && totalNew > 0) {
+        if (campaignId && totalNew > 0 && !targeting.companyAge) {
           addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
         }
 
@@ -228,6 +228,8 @@ export async function POST(request: NextRequest) {
           rounds,
           cancelled: wasCancelled,
           addedToCampaign,
+          batchId: totalNew > 0 ? batchId : null,
+          companyAge: targeting.companyAge ?? null,
           diagnostics: {
             queriesAttempted: totalQueriesAttempted,
             queriesWithResults: totalQueriesWithResults,
@@ -288,7 +290,7 @@ export async function POST(request: NextRequest) {
 
       // Add to campaign if specified
       let addedToCampaign = 0;
-      if (campaignId && result.new > 0) {
+      if (campaignId && result.new > 0 && !targeting.companyAge) {
         addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
       }
 
@@ -297,6 +299,8 @@ export async function POST(request: NextRequest) {
         ...result,
         target: maxToFind,
         addedToCampaign,
+        batchId: result.new > 0 ? batchId : null,
+        companyAge: targeting.companyAge ?? null,
         warning,
       });
     } catch (error) {

@@ -159,6 +159,7 @@ interface Settings {
     region: string;
     minReviews?: number;
     maxReviews?: number;
+    companyAge?: string;
   };
   subscription: {
     plan: "starter" | "growth" | "pro";
@@ -4589,6 +4590,36 @@ export default function SettingsPage() {
                   }
                   return null;
                 })()}
+              </div>
+
+              {/* Âge de l'entreprise (année d'immatriculation) */}
+              <div className="pt-4 border-t border-border">
+                <p className="text-sm font-medium text-foreground-secondary mb-1">
+                  Âge de l&apos;entreprise (année d&apos;immatriculation)
+                </p>
+                <p className="text-xs text-muted mb-3">
+                  Après chaque découverte, l&apos;IA (mode économique) cherche l&apos;année d&apos;immatriculation des nouveaux prospects.
+                  Si une campagne est choisie, seuls ceux qui correspondent, d&apos;après une source sûre, y sont ajoutés.
+                  Les autres restent dans Prospects avec leur âge (filtre « Âge » de la Segmentation).
+                </p>
+                <select
+                  value={settings.targeting.companyAge ?? ""}
+                  onChange={(e) => {
+                    setSettings({
+                      ...settings,
+                      targeting: { ...settings.targeting, companyAge: e.target.value },
+                    });
+                    setHasUnsaved(true);
+                  }}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+                >
+                  <option value="">Tous les âges (pas de recherche automatique)</option>
+                  <option value="lt3">Moins de 3 ans</option>
+                  <option value="gte3">3 ans et plus</option>
+                  <option value="lt5">Moins de 5 ans</option>
+                  <option value="gte5">5 ans et plus</option>
+                  <option value="gte10">10 ans et plus</option>
+                </select>
               </div>
             </SectionCard>
           </motion.div>
