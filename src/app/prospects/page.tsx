@@ -778,15 +778,26 @@ export default function ProspectsPage() {
 
   // Progress polling
   const progressIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const liveNewCountRef = useRef(0);
+  const lastListRefreshRef = useRef(0);
 
   function startProgressPolling() {
     stopProgressPolling();
+    liveNewCountRef.current = 0;
+    lastListRefreshRef.current = 0;
     progressIntervalRef.current = setInterval(async () => {
       try {
         const res = await fetch("/api/prospects/discover");
         if (!res.ok) return;
         const data = await res.json();
         if (data.status === "running") {
+          // Nouveaux prospects enregistrés : rafraîchir la liste (au plus toutes les 5 s)
+          const n = data.newCount || 0;
+          if (n > liveNewCountRef.current && Date.now() - lastListRefreshRef.current > 5000) {
+            liveNewCountRef.current = n;
+            lastListRefreshRef.current = Date.now();
+            fetchProspects();
+          }
           setDiscoverProgress({
             status: data.status,
             target: data.target || 0,
@@ -828,6 +839,18 @@ export default function ProspectsPage() {
       progressIntervalRef.current = undefined;
     }
   }
+
+  // Page rechargée pendant une découverte : reprendre l'affichage de la progression
+  useEffect(() => {
+    fetch("/api/prospects/discover")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.status === "running") startProgressPolling();
+      })
+      .catch(() => {});
+    return () => stopProgressPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleStopDiscover() {
     try {
