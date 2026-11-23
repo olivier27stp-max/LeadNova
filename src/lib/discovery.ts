@@ -45,7 +45,11 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
     if (!targeting) return empty;
     return {
       keywords: splitCommaList(targeting.keywords),
-      blockedKeywords: splitCommaList(targeting.blockedKeywords).map((k) => k.toLowerCase()),
+      // « remplacement de vitres / thermos » → deux expressions bloquées
+      blockedKeywords: splitCommaList(targeting.blockedKeywords)
+        .flatMap((k) => k.split("/"))
+        .map((k) => k.trim().toLowerCase())
+        .filter((k, i, arr) => k !== "" && arr.indexOf(k) === i),
       cities: splitCommaList(targeting.cities),
       searchQueries: Array.isArray(targeting.searchQueries) ? (targeting.searchQueries as string[]).filter(Boolean) : [],
       region: typeof targeting.region === "string" ? (targeting.region as string) : "CA",
@@ -58,10 +62,23 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
   }
 }
 
-function matchesBlockedKeyword(text: string, blockedKeywords: string[]): boolean {
+/** Minuscules sans accents : « Fenêtres » et « fenetres » se comparent pareil. */
+function foldText(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+/** Mot ou expression entière (« auto » trouve « Lave-Auto » mais pas « Autonome »). */
+export function containsWholePhrase(text: string, phrase: string): boolean {
+  const p = foldText(phrase).trim();
+  if (!p) return false;
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u").test(foldText(text));
+}
+
+/** Mots bloqués de l'utilisateur : nom + catégorie principale seulement, mot ou expression entière. */
+export function matchesBlockedKeyword(text: string, blockedKeywords: string[]): boolean {
   if (blockedKeywords.length === 0) return false;
-  const lower = text.toLowerCase();
-  return blockedKeywords.some((bk) => lower.includes(bk));
+  return blockedKeywords.some((bk) => containsWholePhrase(text, bk));
 }
 
 // ─── Relevance filtering ─────────────────────────────────
@@ -69,10 +86,12 @@ function matchesBlockedKeyword(text: string, blockedKeywords: string[]): boolean
 // even though it shares a keyword (e.g. "vitres" → window cleaning vs auto glass)
 
 // Map of search terms → unrelated industry indicators in company name/address
-const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[] }> = [
+// Comparaison par mot entier (sans accents) sur le nom + la catégorie principale seulement.
+// `unless` : si le nom ou la catégorie contient un de ces mots, la règle ne s'applique pas.
+const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[]; unless?: string[] }> = [
   // Window cleaning ≠ auto glass / tinting / detailing
-  { keywords: ["lavage de vitres", "nettoyage de vitres", "vitres résidentielles", "vitres commerciales", "window cleaning", "window washing"],
-    exclude: ["auto", "automobile", "pare-brise", "windshield", "carrosserie", "d'autos", "d'auto", "car wash", "teint", "tint", "esthétique", "esthetique", "detailing", "pellicule", "film", "wrapping", "wrap"] },
+  { keywords: ["lavage de vitres", "nettoyage de vitres", "lavage de fenêtres", "nettoyage de fenêtres", "laveur de vitres", "vitres résidentielles", "vitres commerciales", "window cleaning", "window washing"],
+    exclude: ["auto", "autos", "automobile", "pare-brise", "windshield", "carrosserie", "car wash", "teinte", "teintage", "teinture", "vitres teintées", "tint", "tinting", "esthétique", "detailing", "pellicule", "film", "wrapping", "wrap"] },
   // Pressure washing ≠ car wash
   { keywords: ["lavage à pression", "lavage pression"],
     exclude: ["auto", "automobile", "car wash", "lave-auto"] },
@@ -91,26 +110,30 @@ const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[] }> = [
   // Roofing ≠ solar panels
   { keywords: ["toiture", "couvreur"],
     exclude: ["solaire", "solar", "panneau"] },
-  // Window washing ≠ window installation
-  { keywords: ["lavage de vitres", "nettoyage de vitres"],
-    exclude: ["installation", "remplacement", "fenêtre", "porte et fenêtre", "vitrerie"] },
+  // Window washing ≠ window installation (un laveur de vitres / fenêtres n'est jamais exclu par cette règle)
+  { keywords: ["lavage de vitres", "nettoyage de vitres", "lavage de fenêtres", "nettoyage de fenêtres", "laveur de vitres"],
+    exclude: ["installation", "remplacement", "portes et fenêtres", "porte et fenêtre", "vitrerie", "vitrier"],
+    unless: ["lavage", "nettoyage", "laveur", "laveurs", "window cleaning", "window cleaner", "window washing"] },
 ];
 
 /** Check if a result is irrelevant based on the search keyword vs company name/category/website mismatch */
-function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string, website?: string): boolean {
+export function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string, website?: string, mainCategory?: string): boolean {
   const nameLower = companyName.toLowerCase();
   const kwLower = searchKeyword.toLowerCase();
   const catLower = (googleCategory || "").toLowerCase();
   // Include website URL in checks — domain often reveals the real business type
   // e.g. "teintetatiop-esthetiqueauto.fr" contains "esthetique" and "auto"
   const siteLower = (website || "").toLowerCase().replace(/https?:\/\//, "").replace(/www\./, "");
-  const textToCheck = `${nameLower} ${catLower} ${siteLower}`;
 
-  // Rule-based exclusions
+  // Rule-based exclusions : nom + catégorie principale seulement (pas les sous-catégories ni le domaine),
+  // par mot entier — « Lavage de Fenêtres Martin » n'est plus exclu à cause de « fenêtre »
+  const ruleText = `${companyName} ${mainCategory || ""}`;
+  const kwFolded = foldText(searchKeyword);
   for (const rule of INDUSTRY_EXCLUSIONS) {
-    const keywordMatches = rule.keywords.some((k) => kwLower.includes(k));
+    const keywordMatches = rule.keywords.some((k) => kwFolded.includes(foldText(k)));
     if (!keywordMatches) continue;
-    if (rule.exclude.some((ex) => textToCheck.includes(ex))) {
+    if (rule.unless?.some((u) => containsWholePhrase(ruleText, u))) continue;
+    if (rule.exclude.some((ex) => containsWholePhrase(ruleText, ex))) {
       return true;
     }
   }
@@ -206,6 +229,7 @@ interface SearchResult {
   source: string;
   reviewCount?: number;
   googleCategory?: string; // Google Maps business category (e.g. "Siding contractor")
+  mainCategory?: string; // catégorie principale seulement (sans les sous-catégories)
   _searchQuery?: string; // internal: the query that found this result
 }
 
@@ -286,23 +310,29 @@ function getCityCoords(city: string): { lat: number; lng: number } | null {
 const SEARCH_RADIUS_METERS = 30000; // 30km — covers surrounding towns
 const MAX_PLACES_PAGES = 3; // 3 × 20 = 60 résultats max par requête (limite de Google)
 
+/** Ajoute « , Québec » (région CA) sauf si la requête nomme déjà Québec / QC — sinon « Saint-Georges » ou « Alma » peut tomber hors province. */
+function withProvince(query: string, region: string): string {
+  if (region !== "CA" || /\b(qu[ée]bec|qc)\b/i.test(query)) return query;
+  return `${query}, Québec`;
+}
+
 async function searchPlaces(query: string, city: string, region = "CA"): Promise<SearchResult[]> {
   const outscrapeKey = process.env.OUTSCRAPER_API_KEY;
   const placesKey = process.env.GOOGLE_PLACES_API_KEY;
   const lang = region === "CA" ? "fr" : "en";
 
-  // Try Outscraper first, fall back to Google Places if no results or error
+  // Outscraper d'abord. 0 résultat = 0 résultat. En cas d'erreur, Google Places seulement si sa clé existe ;
+  // sinon on relance la vraie erreur d'Outscraper (403/429 = crédits épuisés → la recherche s'arrête).
   if (outscrapeKey) {
     try {
-      const results = await searchViaOutscraper(query, city, outscrapeKey, region, lang);
-      if (results.length > 0) return results;
-      console.warn(`[discovery] Outscraper returned 0 results for "${query}", falling back to Google Places`);
+      return await searchViaOutscraper(query, city, outscrapeKey, region, lang);
     } catch (err) {
+      if (!placesKey) throw err;
       console.error(`[discovery] Outscraper error, falling back to Google Places:`, err);
     }
   }
   if (placesKey) {
-    return searchViaGooglePlaces(query, city, placesKey, lang);
+    return searchViaGooglePlaces(query, city, placesKey, lang, region);
   }
   throw new Error("OUTSCRAPER_API_KEY or GOOGLE_PLACES_API_KEY not configured");
 }
@@ -332,8 +362,7 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string, 
   // Avoid duplicating city if query already contains it
   const cityLower = city.toLowerCase();
   const queryHasCity = query.toLowerCase().includes(cityLower);
-  const provinceSuffix = region === "CA" ? ", QC" : "";
-  const searchQuery = queryHasCity ? query : `${query}, ${city}${provinceSuffix}`;
+  const searchQuery = queryHasCity ? withProvince(query, region) : withProvince(`${query}, ${city}`, region);
   const params = new URLSearchParams({
     query: searchQuery,
     limit: "40",
@@ -377,15 +406,16 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string, 
         source: "outscraper",
         reviewCount: r.reviews,
         googleCategory: [r.type, r.category, r.subtypes].filter(Boolean).join(", ") || undefined,
+        mainCategory: r.type || r.category || undefined,
       };
     });
 }
 
 // ─── Google Places fallback ─────────────────
 
-async function searchViaGooglePlaces(query: string, city: string, apiKey: string, lang = "fr"): Promise<SearchResult[]> {
+async function searchViaGooglePlaces(query: string, city: string, apiKey: string, lang = "fr", region = "CA"): Promise<SearchResult[]> {
   const requestBody: Record<string, unknown> = {
-    textQuery: query,
+    textQuery: withProvince(query, region),
     languageCode: lang,
     maxResultCount: 20,
   };
@@ -516,9 +546,11 @@ export async function discoverProspects(
   const allResults: SearchResult[] = [];
   const errors: string[] = [];
   let queriesWithResults = 0;
+  let queriesRun = 0;
 
   for (const query of effectiveQueries) {
-    if (isCancelRequested()) break;
+    if (isCancelRequested(workspaceId)) break;
+    queriesRun++;
     try {
       const results = await searchPlaces(query, city, settings.region);
       if (results.length > 0) {
@@ -527,7 +559,8 @@ export async function discoverProspects(
       allResults.push(
         ...results.map((r) => ({
           ...r,
-          city: normalizedCity,
+          // Garder la ville réelle donnée par Outscraper (ex. une ville voisine) au lieu de la ville cherchée
+          city: r.city ? normalizeCityName(r.city) : normalizedCity,
           industry: industry || r.industry,
           _searchQuery: query,
         }))
@@ -538,11 +571,13 @@ export async function discoverProspects(
       const message = error instanceof Error ? error.message : "Unknown error";
       errors.push(`${query}: ${message}`);
       console.error(`Discovery error for query "${query}":`, error);
-      if (message.includes("403") || message.includes("429")) {
+      if (message.includes("402") || message.includes("403") || message.includes("429")) {
         break;
       }
     }
   }
+
+  const queryErrorCount = errors.length; // les erreurs d'insertion ajoutées plus bas ne sont pas des requêtes échouées
 
   // Deduplicate by company name (case-insensitive)
   const seen = new Set<string>();
@@ -568,13 +603,13 @@ export async function discoverProspects(
   let totalFilteredOut = 0;
 
   // Filter out irrelevant results (wrong industry despite matching keyword)
-  updateDiscoveryProgress({ filterPhase: "Filtrage par industrie..." });
+  updateDiscoveryProgress(workspaceId, { filterPhase: "Filtrage par industrie..." });
   const afterRelevance = afterExisting.filter((r) => {
     if (!r._searchQuery) return true;
-    const irrelevant = isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website);
+    const irrelevant = isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website, r.mainCategory);
     if (irrelevant) {
       totalFilteredOut++;
-      updateDiscoveryProgress({ filteredOut: totalFilteredOut });
+      updateDiscoveryProgress(workspaceId, { filteredOut: totalFilteredOut });
     }
     return !irrelevant;
   });
@@ -641,7 +676,7 @@ export async function discoverProspects(
 
     // Category is completely unrelated to the search query
     totalFilteredOut++;
-    updateDiscoveryProgress({ filteredOut: totalFilteredOut, filterPhase: "Filtrage par catégorie Google..." });
+    updateDiscoveryProgress(workspaceId, { filteredOut: totalFilteredOut, filterPhase: "Filtrage par catégorie Google..." });
     console.log(`[discovery] Category filter: "${r.companyName}" excluded — category "${r.googleCategory}" doesn't match query "${r._searchQuery}"`);
     return false;
   });
@@ -649,10 +684,15 @@ export async function discoverProspects(
   // Filter out prospects matching blocked keywords
   const afterBlocked = blockedKeywords.length > 0
     ? afterCategoryFilter.filter((r) => {
-        const textToCheck = [r.companyName, r.industry, r.website, r.address].filter(Boolean).join(" ");
-        return !matchesBlockedKeyword(textToCheck, blockedKeywords);
+        const textToCheck = [r.companyName, r.mainCategory].filter(Boolean).join(" ");
+        const blocked = matchesBlockedKeyword(textToCheck, blockedKeywords);
+        if (blocked) {
+          totalFilteredOut++;
+          updateDiscoveryProgress(workspaceId, { filteredOut: totalFilteredOut });
+        }
+        return !blocked;
       })
-    : afterRelevance;
+    : afterCategoryFilter;
 
   // Filter by review count (from targeting settings)
   const { minReviews, maxReviews } = settings;
@@ -675,13 +715,13 @@ export async function discoverProspects(
   const withWebsite = filtered.filter((r) => r.website && r._searchQuery);
   const withoutWebsite = filtered.filter((r) => !r.website || !r._searchQuery);
 
-  updateDiscoveryProgress({ filterPhase: "Vérification des sites web..." });
+  updateDiscoveryProgress(workspaceId, { filterPhase: "Vérification des sites web..." });
   let afterAIRelevance = [...withoutWebsite];
-  if (withWebsite.length > 0 && !isCancelRequested()) {
+  if (withWebsite.length > 0 && !isCancelRequested(workspaceId)) {
     const RELEVANCE_BATCH_SIZE = 10;
     for (let i = 0; i < withWebsite.length; i += RELEVANCE_BATCH_SIZE) {
-      if (isCancelRequested()) break;
-      updateDiscoveryProgress({ filterPhase: `Vérification des sites web... (${i + 1}/${withWebsite.length})` });
+      if (isCancelRequested(workspaceId)) break;
+      updateDiscoveryProgress(workspaceId, { filterPhase: `Vérification des sites web... (${i + 1}/${withWebsite.length})` });
       const batch = withWebsite.slice(i, i + RELEVANCE_BATCH_SIZE);
       try {
         const results = await checkRelevanceBatch(
@@ -698,7 +738,7 @@ export async function discoverProspects(
             afterAIRelevance.push(batch[j]);
           } else {
             totalFilteredOut++;
-            updateDiscoveryProgress({ filteredOut: totalFilteredOut });
+            updateDiscoveryProgress(workspaceId, { filteredOut: totalFilteredOut });
             console.log(`[discovery] AI filtered: "${batch[j].companyName}" — ${results[j]?.reason}`);
           }
         }
@@ -713,7 +753,7 @@ export async function discoverProspects(
   }
 
   // ─── Company name validation (Layer 1 local + Layer 2 AI) ───
-  updateDiscoveryProgress({ filterPhase: "Validation des noms..." });
+  updateDiscoveryProgress(workspaceId, { filterPhase: "Validation des noms..." });
   const AI_SKIP_REVIEW_THRESHOLD = 25; // Skip AI validation if prospect has 25+ Google reviews
 
   // First pass: local rules to reject obvious garbage and clean names
@@ -788,12 +828,12 @@ export async function discoverProspects(
   }
   console.log(`[discovery] AI validation: ${needsAIValidation.length} called, ${aiTokensSaved} skipped (cache/reviews/confidence)`);
 
-  updateDiscoveryProgress({ filterPhase: "Sauvegarde des prospects..." });
+  updateDiscoveryProgress(workspaceId, { filterPhase: "Sauvegarde des prospects..." });
   let newCount = 0;
   let processedCount = 0; // total processed (new + existing) — used to enforce target limit
 
   for (const { result, local } of afterLocalFilter) {
-    if (processedCount >= maxNew || isCancelRequested()) break;
+    if (processedCount >= maxNew || isCancelRequested(workspaceId)) break;
 
     // Skip entries marked invalid by AI
     if (!local.isValid && !local.needsReview) continue;
@@ -830,10 +870,11 @@ export async function discoverProspects(
         error.code === "P2002"
       ) {
         // Prospect already exists — update its batchId so it gets added to campaign
+        // (seulement s'il appartient à cet espace et n'est pas archivé : la contrainte unique est globale)
         if (batchId) {
           try {
             await prisma.prospect.updateMany({
-              where: { companyName: finalName, city: result.city },
+              where: { companyName: finalName, city: result.city, workspaceId: workspaceId ?? null, archivedAt: null },
               data: { importBatchId: batchId },
             });
           } catch {
@@ -843,7 +884,10 @@ export async function discoverProspects(
         processedCount++;
         continue;
       }
-      throw error;
+      // Une erreur sur un prospect ne doit pas annuler toute la recherche
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      console.error(`[discovery] Insert failed for "${finalName}" (${result.city}):`, error);
+      errors.push(`${finalName}: ${message}`);
     }
   }
 
@@ -857,9 +901,9 @@ export async function discoverProspects(
     new: newCount,
     skippedExisting,
     diagnostics: {
-      queriesAttempted: queries.length,
+      queriesAttempted: queriesRun,
       queriesWithResults,
-      queriesFailed: errors.length,
+      queriesFailed: queryErrorCount,
       errors,
     },
   };

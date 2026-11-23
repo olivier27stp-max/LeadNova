@@ -6,12 +6,15 @@ import { getWorkspaceContext } from "@/lib/workspace";
 import { prisma } from "@/lib/db";
 
 export async function GET() {
-  const progress = getDiscoveryProgress();
+  // Progression de l'espace de travail actif seulement
+  const ctx = await getWorkspaceContext();
+  const progress = getDiscoveryProgress(ctx?.workspaceId ?? null);
   return NextResponse.json(progress || { status: "idle" });
 }
 
 export async function DELETE() {
-  requestCancelDiscovery();
+  const ctx = await getWorkspaceContext();
+  requestCancelDiscovery(ctx?.workspaceId ?? null);
   return NextResponse.json({ cancelled: true });
 }
 
@@ -29,7 +32,7 @@ export async function POST(request: NextRequest) {
       if (!campaignId) return 0;
       try {
         const prospects = await prisma.prospect.findMany({
-          where: { importBatchId: batchId },
+          where: { importBatchId: batchId, workspaceId: workspaceId ?? null, archivedAt: null },
           select: { id: true },
         });
         if (prospects.length === 0) return 0;
@@ -113,9 +116,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Une seule découverte à la fois par espace de travail (vérifié juste avant de démarrer, sans await entre les deux)
+    if (getDiscoveryProgress(workspaceId)?.status === "running") {
+      return NextResponse.json(
+        { error: "Une découverte est déjà en cours pour cet espace de travail. Attendez qu'elle se termine ou arrêtez-la." },
+        { status: 409 }
+      );
+    }
+
     // Initialize progress tracking
     const totalCities = city === "all" ? settingsCities.length : 1;
-    setDiscoveryProgress({
+    setDiscoveryProgress(workspaceId, {
       status: "running",
       target: maxToFind,
       found: 0,
@@ -141,18 +152,19 @@ export async function POST(request: NextRequest) {
         let totalQueriesFailed = 0;
         const allErrors: string[] = [];
         let rounds = 0;
-        const maxRounds = 20;
+        // Avec Outscraper, un 2e tour relance exactement les mêmes requêtes (coût en double, mêmes résultats)
+        const maxRounds = process.env.OUTSCRAPER_API_KEY ? 1 : 20;
 
         while (totalNew < maxToFind && rounds < maxRounds) {
-          if (isCancelRequested()) break;
+          if (isCancelRequested(workspaceId)) break;
           rounds++;
           const newBeforeRound = totalNew;
-          updateDiscoveryProgress({ round: rounds });
+          updateDiscoveryProgress(workspaceId, { round: rounds });
 
           for (const targetCity of settingsCities) {
-            if (totalNew >= maxToFind || isCancelRequested()) break;
+            if (totalNew >= maxToFind || isCancelRequested(workspaceId)) break;
 
-            updateDiscoveryProgress({ currentCity: targetCity });
+            updateDiscoveryProgress(workspaceId, { currentCity: targetCity });
 
             const batchMax = maxToFind - totalNew;
             const result = await discoverProspects(targetCity, undefined, batchMax, batchId, workspaceId);
@@ -164,14 +176,14 @@ export async function POST(request: NextRequest) {
             totalQueriesFailed += result.diagnostics.queriesFailed;
             allErrors.push(...result.diagnostics.errors);
 
-            updateDiscoveryProgress({ found: totalFound, newCount: totalNew, completedCities: (getDiscoveryProgress()?.completedCities || 0) + 1 });
+            updateDiscoveryProgress(workspaceId, { found: totalFound, newCount: totalNew, completedCities: (getDiscoveryProgress(workspaceId)?.completedCities || 0) + 1 });
           }
 
           // If this round found nothing new, stop looping
           if (totalNew === newBeforeRound) break;
         }
 
-        const wasCancelled = isCancelRequested();
+        const wasCancelled = isCancelRequested(workspaceId);
 
         const warning =
           totalFound === 0
@@ -180,20 +192,21 @@ export async function POST(request: NextRequest) {
               : "Google Search returned no results. The Custom Search engine may be restricted or empty."
             : undefined;
 
-        setDiscoveryProgress({
+        setDiscoveryProgress(workspaceId, {
           status: wasCancelled ? "cancelled" : "done",
           target: maxToFind,
           found: totalFound,
           newCount: totalNew,
           currentCity: "",
           round: rounds,
-          startedAt: getDiscoveryProgress()?.startedAt || Date.now(),
+          startedAt: getDiscoveryProgress(workspaceId)?.startedAt || Date.now(),
           totalCities,
-          completedCities: getDiscoveryProgress()?.completedCities || totalCities,
+          completedCities: getDiscoveryProgress(workspaceId)?.completedCities || totalCities,
         });
 
         // Log activity
         await logActivity({
+          workspaceId: workspaceId ?? undefined,
           action: wasCancelled ? "discovery_started" : "discovery_completed",
           type: wasCancelled ? "warning" : (totalNew > 0 ? "success" : "info"),
           title: wasCancelled ? "Découverte arrêtée" : "Découverte terminée",
@@ -241,24 +254,24 @@ export async function POST(request: NextRequest) {
       }
 
       if (!city) {
-        setDiscoveryProgress(null);
+        setDiscoveryProgress(workspaceId, null);
         return NextResponse.json(
           { error: "City is required" },
           { status: 400 }
         );
       }
 
-      updateDiscoveryProgress({ currentCity: city });
+      updateDiscoveryProgress(workspaceId, { currentCity: city });
       const result = await discoverProspects(city, industry, maxToFind, batchId, workspaceId);
 
-      setDiscoveryProgress({
+      setDiscoveryProgress(workspaceId, {
         status: "done",
         target: maxToFind,
         found: result.found,
         newCount: result.new,
         currentCity: "",
         round: 1,
-        startedAt: getDiscoveryProgress()?.startedAt || Date.now(),
+        startedAt: getDiscoveryProgress(workspaceId)?.startedAt || Date.now(),
         totalCities: 1,
         completedCities: 1,
       });
@@ -272,6 +285,7 @@ export async function POST(request: NextRequest) {
 
       // Log activity
       await logActivity({
+        workspaceId: workspaceId ?? undefined,
         action: "discovery_completed",
         type: result.new > 0 ? "success" : "info",
         title: "Découverte terminée",
@@ -304,19 +318,20 @@ export async function POST(request: NextRequest) {
         warning,
       });
     } catch (error) {
-      setDiscoveryProgress({
+      setDiscoveryProgress(workspaceId, {
         status: "error",
         target: maxToFind,
-        found: getDiscoveryProgress()?.found || 0,
-        newCount: getDiscoveryProgress()?.newCount || 0,
+        found: getDiscoveryProgress(workspaceId)?.found || 0,
+        newCount: getDiscoveryProgress(workspaceId)?.newCount || 0,
         currentCity: "",
-        round: getDiscoveryProgress()?.round || 1,
-        startedAt: getDiscoveryProgress()?.startedAt || Date.now(),
-        totalCities: getDiscoveryProgress()?.totalCities || 1,
-        completedCities: getDiscoveryProgress()?.completedCities || 0,
+        round: getDiscoveryProgress(workspaceId)?.round || 1,
+        startedAt: getDiscoveryProgress(workspaceId)?.startedAt || Date.now(),
+        totalCities: getDiscoveryProgress(workspaceId)?.totalCities || 1,
+        completedCities: getDiscoveryProgress(workspaceId)?.completedCities || 0,
         error: error instanceof Error ? error.message : "Discovery failed",
       });
       await logActivity({
+        workspaceId: workspaceId ?? undefined,
         action: "discovery_error",
         type: "error",
         title: "Erreur de découverte",
