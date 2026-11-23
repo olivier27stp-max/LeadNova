@@ -137,7 +137,9 @@ async function researchEco(companyName: string, city: string | null, phone: stri
   for (let i = 0; i <= MAX_CONTINUATIONS; i++) {
     const response = await getClient().messages.create({
       model: MODEL,
-      max_tokens: 4000,
+      // Haiku 5.5 réfléchit par défaut : assez de marge pour la réflexion + la réponse, effort bas = moins de jetons
+      max_tokens: 16000,
+      output_config: { effort: "low" },
       system: ECO_SYSTEM,
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2, user_location: { type: "approximate", country: "CA", region: "Quebec" } }],
       messages,

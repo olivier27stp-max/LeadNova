@@ -872,6 +872,18 @@ export default function ProspectsPage() {
       fetchProspects();
       // Auto-clear progress after 5 seconds
       setTimeout(() => setDiscoverProgress(null), 5000);
+      // 0 nouveau prospect : dire pourquoi au lieu d'un « terminé » muet
+      if (!data.cancelled && (data.new || 0) === 0) {
+        const diag = data.diagnostics as { queriesAttempted?: number; queriesFailed?: number; errors?: string[] } | undefined;
+        const found = data.total || data.found || 0;
+        alert(
+          found > 0
+            ? `Aucun nouveau prospect : les ${found} résultat(s) trouvés sont déjà dans ta liste ou ont été exclus par le Ciblage (mots bloqués, nombre d'avis).`
+            : diag?.queriesFailed
+              ? `Aucun résultat : ${diag.queriesFailed}/${diag.queriesAttempted ?? "?"} recherche(s) ont échoué.\n${diag.errors?.[0] ?? ""}`
+              : `Aucun résultat sur Google Maps (${diag?.queriesAttempted ?? 0} recherche(s)). Vérifie dans Paramètres → Ciblage que chaque ville et chaque mot-clé est une entrée séparée.`
+        );
+      }
       // Ciblage par âge : l'IA (mode économique) date les nouveaux prospects, puis ajoute à la campagne ceux qui correspondent
       if (data.companyAge && data.batchId) {
         void runRegistrationSearch(undefined, { batchId: data.batchId, campaignId: discoverCampaignId || undefined, total: data.new || 0 });
