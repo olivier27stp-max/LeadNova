@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { splitCommaList } from "@/lib/discovery";
 import { prisma } from "@/lib/db";
 import { calculateLeadScore } from "@/lib/lead-scoring";
 import { DAILY_DISCOVERY_LIMIT } from "@/lib/config";
@@ -451,8 +452,8 @@ export async function POST(request: NextRequest) {
       });
       const settingsData = (settingsRow?.data as Record<string, unknown>) || {};
       const targeting = (settingsData.targeting as Record<string, unknown>) || {};
-      const keywords: string[] = Array.isArray(targeting.keywords) ? (targeting.keywords as string[]).filter(Boolean) : [];
-      const blockedKeywords: string[] = Array.isArray(targeting.blockedKeywords) ? (targeting.blockedKeywords as string[]).filter(Boolean) : [];
+      const keywords: string[] = splitCommaList(targeting.keywords);
+      const blockedKeywords: string[] = splitCommaList(targeting.blockedKeywords);
 
       if (keywords.length === 0) {
         return NextResponse.json({ error: "Aucun mot-clé configuré dans Ciblage" }, { status: 400 });
