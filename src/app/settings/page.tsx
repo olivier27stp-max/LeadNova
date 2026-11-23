@@ -396,6 +396,30 @@ function StatusIndicator({ status, labels }: { status: string; labels?: { connec
 
 // ─── Main Page ───────────────────────────────────────────
 
+/** Une entrée collée « Montréal, Québec, Laval » devient trois puces (même règle que loadTargetingSettings). */
+function splitTargetingLists<T extends { targeting?: { keywords?: string[]; blockedKeywords?: string[]; cities?: string[] } }>(s: T): T {
+  if (!s?.targeting) return s;
+  const split = (arr?: string[]) => {
+    const out: string[] = [];
+    for (const v of arr ?? []) {
+      for (const part of String(v).split(/[,;\n]/)) {
+        const t = part.trim();
+        if (t && !out.some((o) => o.toLowerCase() === t.toLowerCase())) out.push(t);
+      }
+    }
+    return out;
+  };
+  return {
+    ...s,
+    targeting: {
+      ...s.targeting,
+      keywords: split(s.targeting.keywords),
+      blockedKeywords: split(s.targeting.blockedKeywords),
+      cities: split(s.targeting.cities),
+    },
+  };
+}
+
 export default function SettingsPage() {
   const { setLocale: setAppLocale } = useLanguage();
   const { t, locale } = useTranslation();
@@ -637,7 +661,7 @@ export default function SettingsPage() {
         return r.json();
       })
       .then((d) => {
-        if (!d.error) setSettings(d);
+        if (!d.error) setSettings(splitTargetingLists(d));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -653,7 +677,7 @@ export default function SettingsPage() {
       // Clean URL
       window.history.replaceState({}, "", "/settings");
       // Reload settings to get the new Gmail state
-      fetch("/api/settings").then((r) => r.json()).then((d) => { if (!d.error) setSettings(d); });
+      fetch("/api/settings").then((r) => r.json()).then((d) => { if (!d.error) setSettings(splitTargetingLists(d)); });
     } else if (gmailStatus === "error") {
       showToast(locale === "en" ? "Gmail connection failed" : "Connexion Gmail échouée", "error");
       setActiveSection("email");
@@ -827,11 +851,11 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [section]: data }),
+        body: JSON.stringify({ [section]: section === "targeting" ? splitTargetingLists({ targeting: data as Settings["targeting"] }).targeting : data }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Save failed");
-      setSettings(json as Settings);
+      setSettings(splitTargetingLists(json as Settings));
       setHasUnsaved(false);
       showToast(t("settings", "settingsSaved"), "success");
     } catch (err) {

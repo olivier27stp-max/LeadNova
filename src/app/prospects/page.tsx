@@ -694,8 +694,8 @@ export default function ProspectsPage() {
     fetch("/api/settings")
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data?.targeting?.cities) setTargetingCities(data.targeting.cities);
-        if (data?.targeting?.keywords) setTargetingKeywords(data.targeting.keywords);
+        if (data?.targeting?.cities) setTargetingCities(((v: string[]) => v.flatMap((x) => String(x).split(/[,;\n]/)).map((x) => x.trim()).filter(Boolean))(data.targeting.cities));
+        if (data?.targeting?.keywords) setTargetingKeywords(((v: string[]) => v.flatMap((x) => String(x).split(/[,;\n]/)).map((x) => x.trim()).filter(Boolean))(data.targeting.keywords));
         if (data?.targeting?.searchQueries) setTargetingQueries(data.targeting.searchQueries);
         setTargetingAge(typeof data?.targeting?.companyAge === "string" ? data.targeting.companyAge : "");
       })

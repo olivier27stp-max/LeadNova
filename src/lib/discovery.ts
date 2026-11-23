@@ -20,6 +20,20 @@ interface TargetingSettings {
 
 export const COMPANY_AGE_VALUES = ["lt3", "gte3", "lt5", "gte5", "gte10"] as const;
 
+/** Une entrée collée « Montréal, Québec, Laval » devient trois entrées (sinon Google cherche une seule ville géante). */
+export function splitCommaList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const out: string[] = [];
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    for (const part of v.split(/[,;\n]/)) {
+      const t = part.trim();
+      if (t && !out.some((o) => o.toLowerCase() === t.toLowerCase())) out.push(t);
+    }
+  }
+  return out;
+}
+
 export async function loadTargetingSettings(workspaceId?: string | null): Promise<TargetingSettings> {
   const empty: TargetingSettings = { keywords: [], blockedKeywords: [], cities: [], searchQueries: [], region: "CA" };
   try {
@@ -30,9 +44,9 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
     const targeting = data.targeting as Record<string, unknown> | undefined;
     if (!targeting) return empty;
     return {
-      keywords: Array.isArray(targeting.keywords) ? (targeting.keywords as string[]).filter(Boolean) : [],
-      blockedKeywords: Array.isArray(targeting.blockedKeywords) ? (targeting.blockedKeywords as string[]).map((k) => (k as string).toLowerCase().trim()).filter(Boolean) : [],
-      cities: Array.isArray(targeting.cities) ? (targeting.cities as string[]).filter(Boolean) : [],
+      keywords: splitCommaList(targeting.keywords),
+      blockedKeywords: splitCommaList(targeting.blockedKeywords).map((k) => k.toLowerCase()),
+      cities: splitCommaList(targeting.cities),
       searchQueries: Array.isArray(targeting.searchQueries) ? (targeting.searchQueries as string[]).filter(Boolean) : [],
       region: typeof targeting.region === "string" ? (targeting.region as string) : "CA",
       minReviews: typeof targeting.minReviews === "number" ? targeting.minReviews : undefined,
