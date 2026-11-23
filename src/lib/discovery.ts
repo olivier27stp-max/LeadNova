@@ -16,6 +16,8 @@ interface TargetingSettings {
   maxReviews?: number;
   /** Âge voulu de l'entreprise (année d'immatriculation) : lt3 | gte3 | lt5 | gte5 | gte10 ; vide = tous */
   companyAge?: string;
+  /** Recherches Google Maps par ville (défaut 20) */
+  maxQueriesPerCity?: number;
 }
 
 export const COMPANY_AGE_VALUES = ["lt3", "gte3", "lt5", "gte5", "gte10"] as const;
@@ -56,10 +58,63 @@ export async function loadTargetingSettings(workspaceId?: string | null): Promis
       minReviews: typeof targeting.minReviews === "number" ? targeting.minReviews : undefined,
       maxReviews: typeof targeting.maxReviews === "number" ? targeting.maxReviews : undefined,
       companyAge: (COMPANY_AGE_VALUES as readonly string[]).includes(targeting.companyAge as string) ? (targeting.companyAge as string) : undefined,
+      maxQueriesPerCity: clampQueriesPerCity(targeting.maxQueriesPerCity),
     };
   } catch {
     return empty;
   }
+}
+
+/** Nombre de recherches Google Maps par ville (Paramètres → Ciblage). Défaut 20, entre 1 et 50. */
+export const DEFAULT_QUERIES_PER_CITY = 20;
+function clampQueriesPerCity(value: unknown): number {
+  const n = typeof value === "number" ? value : parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_QUERIES_PER_CITY;
+  return Math.min(50, Math.max(1, Math.round(n)));
+}
+
+/** Une recherche déjà faite depuis moins de REPEAT_DAYS jours n'est pas relancée (mêmes résultats, payés deux fois). */
+export const QUERY_REPEAT_DAYS = 30;
+function queryKey(query: string): string {
+  return foldText(query).replace(/\s+/g, " ").trim();
+}
+
+/** Recherches faites récemment dans CET espace (mémoire dans app_settings.data.discoveryQueryLog). */
+async function loadRecentQueries(workspaceId?: string | null): Promise<Set<string>> {
+  const recent = new Set<string>();
+  try {
+    const row = await prisma.appSettings.findFirst({ where: { workspaceId: workspaceId ?? null }, select: { data: true } });
+    const log = ((row?.data as Record<string, unknown> | null)?.discoveryQueryLog ?? {}) as Record<string, string>;
+    const cutoff = Date.now() - QUERY_REPEAT_DAYS * 86400000;
+    for (const [key, at] of Object.entries(log)) {
+      if (new Date(at).getTime() >= cutoff) recent.add(key);
+    }
+  } catch { /* sans mémoire : on cherche tout */ }
+  return recent;
+}
+
+/** Ajoute des recherches à la mémoire (écriture atomique en SQL, sans écraser les autres réglages). */
+async function rememberQueries(workspaceId: string | null | undefined, queries: string[]) {
+  if (queries.length === 0) return;
+  const now = new Date().toISOString();
+  const entries: Record<string, string> = {};
+  for (const q of queries) entries[queryKey(q)] = now;
+  try {
+    await prisma.$executeRaw`
+      UPDATE "app_settings"
+      SET "data" = jsonb_set(COALESCE("data", '{}'::jsonb), '{discoveryQueryLog}',
+                   COALESCE("data"->'discoveryQueryLog', '{}'::jsonb) || ${JSON.stringify(entries)}::jsonb)
+      WHERE "workspaceId" IS NOT DISTINCT FROM ${workspaceId ?? null}::text`;
+  } catch (error) {
+    console.error("[discovery] mémoire des recherches non enregistrée:", error);
+  }
+}
+
+/** Oublie les recherches faites (bouton « Refaire toutes les recherches »). */
+export async function clearQueryLog(workspaceId: string | null | undefined) {
+  await prisma.$executeRaw`
+    UPDATE "app_settings" SET "data" = COALESCE("data", '{}'::jsonb) - 'discoveryQueryLog'
+    WHERE "workspaceId" IS NOT DISTINCT FROM ${workspaceId ?? null}::text`;
 }
 
 /** Minuscules sans accents : « Fenêtres » et « fenetres » se comparent pareil. */
@@ -237,6 +292,8 @@ interface DiscoveryDiagnostics {
   queriesAttempted: number;
   queriesWithResults: number;
   queriesFailed: number;
+  /** Recherches sautées parce que déjà faites il y a moins de 30 jours */
+  queriesSkipped?: number;
   errors: string[];
 }
 
@@ -533,11 +590,20 @@ export async function discoverProspects(
     }
   }
 
-  // For Outscraper: limit to max 5 queries to keep it fast (each takes ~10-20s)
-  const effectiveQueries = isOutscraper ? queries.slice(0, 5) : queries;
+  if (queries.length === 0) {
+    return { found: 0, new: 0, skippedExisting: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, queriesSkipped: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
+  }
+
+  // Ne pas tourner en rond : une recherche faite depuis moins de 30 jours redonne les mêmes
+  // entreprises (déjà dans la liste) et coûte quand même. On la saute.
+  const recentQueries = await loadRecentQueries(workspaceId);
+  const freshQueries = queries.filter((q) => !recentQueries.has(queryKey(q)));
+  const queriesSkipped = queries.length - freshQueries.length;
+  // Limite par ville (Paramètres → Ciblage → recherches par ville)
+  const effectiveQueries = freshQueries.slice(0, settings.maxQueriesPerCity ?? DEFAULT_QUERIES_PER_CITY);
 
   if (effectiveQueries.length === 0) {
-    return { found: 0, new: 0, skippedExisting: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, errors: ["Aucun mot-clé ou requête configuré dans Ciblage"] } };
+    return { found: 0, new: 0, skippedExisting: 0, diagnostics: { queriesAttempted: 0, queriesWithResults: 0, queriesFailed: 0, queriesSkipped, errors: [] } };
   }
 
   const blockedKeywords = settings.blockedKeywords;
@@ -568,34 +634,44 @@ export async function discoverProspects(
   let queriesWithResults = 0;
   let queriesRun = 0;
 
-  for (const query of effectiveQueries) {
-    if (isCancelRequested(workspaceId)) break;
-    queriesRun++;
-    try {
-      const results = await searchPlaces(query, city, settings.region);
-      if (results.length > 0) {
-        queriesWithResults++;
+  // Plusieurs recherches en même temps (appels HTTP seulement, aucune requête DB ici)
+  const CONCURRENCY = isOutscraper ? 4 : 1;
+  const succeededQueries: string[] = [];
+  let stopAll = false;
+  let nextIndex = 0;
+  let done = 0;
+  const worker = async () => {
+    while (!stopAll && nextIndex < effectiveQueries.length) {
+      if (isCancelRequested(workspaceId)) { stopAll = true; break; }
+      if (isOutscraper && allResults.length >= maxNew * 2) { stopAll = true; break; }
+      const query = effectiveQueries[nextIndex++];
+      queriesRun++;
+      try {
+        const results = await searchPlaces(query, city, settings.region);
+        succeededQueries.push(query);
+        if (results.length > 0) queriesWithResults++;
+        allResults.push(
+          ...results.map((r) => ({
+            ...r,
+            // Garder la ville réelle donnée par Outscraper (ex. une ville voisine) au lieu de la ville cherchée
+            city: r.city ? normalizeCityName(r.city) : normalizedCity,
+            industry: industry || r.industry,
+            _searchQuery: query,
+          }))
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        errors.push(`${query}: ${message}`);
+        console.error(`Discovery error for query "${query}":`, error);
+        if (message.includes("402") || message.includes("403") || message.includes("429")) stopAll = true;
       }
-      allResults.push(
-        ...results.map((r) => ({
-          ...r,
-          // Garder la ville réelle donnée par Outscraper (ex. une ville voisine) au lieu de la ville cherchée
-          city: r.city ? normalizeCityName(r.city) : normalizedCity,
-          industry: industry || r.industry,
-          _searchQuery: query,
-        }))
-      );
-      // For Outscraper: stop early if we have enough results
-      if (isOutscraper && allResults.length >= (maxNew * 2)) break;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      errors.push(`${query}: ${message}`);
-      console.error(`Discovery error for query "${query}":`, error);
-      if (message.includes("402") || message.includes("403") || message.includes("429")) {
-        break;
-      }
+      done++;
+      updateDiscoveryProgress(workspaceId, { filterPhase: `Recherches Google Maps... (${done}/${effectiveQueries.length})` });
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, effectiveQueries.length) }, () => worker()));
+  // Seules les recherches réussies vont dans la mémoire (une erreur sera retentée la prochaine fois)
+  await rememberQueries(workspaceId, succeededQueries);
 
   const queryErrorCount = errors.length; // les erreurs d'insertion ajoutées plus bas ne sont pas des requêtes échouées
 
@@ -942,6 +1018,7 @@ export async function discoverProspects(
       queriesAttempted: queriesRun,
       queriesWithResults,
       queriesFailed: queryErrorCount,
+      queriesSkipped,
       errors,
     },
   };

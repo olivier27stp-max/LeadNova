@@ -160,6 +160,7 @@ interface Settings {
     minReviews?: number;
     maxReviews?: number;
     companyAge?: string;
+    maxQueriesPerCity?: number;
   };
   subscription: {
     plan: "starter" | "growth" | "pro";
@@ -4404,6 +4405,44 @@ export default function SettingsPage() {
                       </span>
                     ))
                   )}
+                </div>
+              </div>
+
+              <div className="border-t border-border my-2" />
+
+              {/* Recherches par ville + mémoire des recherches faites */}
+              <div>
+                <p className="text-sm font-medium text-foreground-secondary mb-1">
+                  Recherches Google Maps par ville
+                </p>
+                <p className="text-xs text-muted mb-3">
+                  Nombre maximum de recherches (un mot-clé = une recherche) lancées dans chaque ville. Plus il y en a, plus la découverte trouve d&apos;entreprises, mais plus elle coûte (Outscraper) et dure longtemps. Une recherche déjà faite il y a moins de 30 jours est sautée automatiquement : elle redonnerait les mêmes entreprises.
+                </p>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    className="w-28"
+                    value={settings.targeting.maxQueriesPerCity ?? 20}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      const val = Number.isFinite(raw) ? Math.min(50, Math.max(1, raw)) : 20;
+                      setSettings({ ...settings, targeting: { ...settings.targeting, maxQueriesPerCity: val } });
+                      setHasUnsaved(true);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!confirm("Refaire toutes les recherches à la prochaine découverte ? Les entreprises déjà dans ta liste seront quand même sautées, mais Outscraper facture chaque résultat.")) return;
+                      const res = await fetch("/api/prospects/discover?memory=1", { method: "DELETE" });
+                      alert(res.ok ? "C'est fait : la prochaine découverte refera toutes les recherches." : "Impossible d'effacer la mémoire des recherches.");
+                    }}
+                    className="border border-border bg-card text-foreground-secondary px-3 py-1.5 rounded-md text-sm hover:bg-card-hover"
+                  >
+                    Refaire toutes les recherches
+                  </button>
                 </div>
               </div>
 

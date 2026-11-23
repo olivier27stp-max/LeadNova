@@ -928,10 +928,12 @@ export default function ProspectsPage() {
       setTimeout(() => setDiscoverProgress(null), 5000);
       // 0 nouveau prospect : dire pourquoi au lieu d'un « terminé » muet
       if (!data.cancelled && (data.new || 0) === 0) {
-        const diag = data.diagnostics as { queriesAttempted?: number; queriesFailed?: number; errors?: string[] } | undefined;
+        const diag = data.diagnostics as { queriesAttempted?: number; queriesFailed?: number; queriesSkipped?: number; errors?: string[] } | undefined;
         const found = data.total || data.found || 0;
         alert(
-          found > 0
+          found === 0 && !diag?.queriesAttempted && diag?.queriesSkipped
+            ? `Aucune nouvelle recherche à faire : les ${diag.queriesSkipped} recherches de ton Ciblage ont déjà été faites il y a moins de 30 jours. Ajoute des villes ou des mots-clés, ou clique « Refaire toutes les recherches » dans Paramètres → Ciblage.`
+            : found > 0
             ? `Aucun nouveau prospect : les ${found} résultat(s) trouvés sont déjà dans ta liste ou ont été exclus par le Ciblage (mots bloqués, nombre d'avis).`
             : diag?.queriesFailed
               ? `Aucun résultat : ${diag.queriesFailed}/${diag.queriesAttempted ?? "?"} recherche(s) ont échoué.\n${diag.errors?.[0] ?? ""}`

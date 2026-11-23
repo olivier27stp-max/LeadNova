@@ -1,5 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
-import { discoverProspects, discoverAllCities, loadTargetingSettings } from "@/lib/discovery";
+import { discoverProspects, loadTargetingSettings, clearQueryLog } from "@/lib/discovery";
 import { getDiscoveryProgress, setDiscoveryProgress, updateDiscoveryProgress, requestCancelDiscovery, isCancelRequested } from "@/lib/discovery-progress";
 import { logActivity, generateBatchId } from "@/lib/activity";
 import { getWorkspaceContext } from "@/lib/workspace";
@@ -12,8 +12,21 @@ export async function GET() {
   return NextResponse.json(progress || { status: "idle" });
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   const ctx = await getWorkspaceContext();
+  // ?memory=1 : oublier les recherches déjà faites (la prochaine découverte les refait toutes)
+  if (request.nextUrl.searchParams.get("memory") === "1") {
+    if (!ctx) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    await clearQueryLog(ctx.workspaceId);
+    await logActivity({
+      workspaceId: ctx.workspaceId,
+      action: "settings_updated",
+      type: "info",
+      title: "Mémoire des recherches effacée",
+      details: "La prochaine découverte refera toutes les recherches Google Maps",
+    });
+    return NextResponse.json({ cleared: true });
+  }
   requestCancelDiscovery(ctx?.workspaceId ?? null);
   return NextResponse.json({ cancelled: true });
 }
@@ -158,6 +171,7 @@ export async function POST(request: NextRequest) {
         let totalQueriesAttempted = 0;
         let totalQueriesWithResults = 0;
         let totalQueriesFailed = 0;
+        let totalQueriesSkipped = 0;
         const allErrors: string[] = [];
         let rounds = 0;
         // Avec Outscraper, un 2e tour relance exactement les mêmes requêtes (coût en double, mêmes résultats)
@@ -182,6 +196,7 @@ export async function POST(request: NextRequest) {
             totalQueriesAttempted += result.diagnostics.queriesAttempted;
             totalQueriesWithResults += result.diagnostics.queriesWithResults;
             totalQueriesFailed += result.diagnostics.queriesFailed;
+            totalQueriesSkipped += result.diagnostics.queriesSkipped ?? 0;
             allErrors.push(...result.diagnostics.errors);
 
             updateDiscoveryProgress(workspaceId, { found: totalFound, newCount: totalNew, completedCities: (getDiscoveryProgress(workspaceId)?.completedCities || 0) + 1 });
@@ -227,6 +242,7 @@ export async function POST(request: NextRequest) {
             // Pour diagnostiquer une découverte vide : recherches lancées / en échec + premières erreurs
             queries_attempted: totalQueriesAttempted,
             queries_failed: totalQueriesFailed,
+            queries_skipped: totalQueriesSkipped,
             errors: allErrors.slice(0, 5),
             city: "all",
             rounds,
@@ -260,6 +276,7 @@ export async function POST(request: NextRequest) {
             queriesAttempted: totalQueriesAttempted,
             queriesWithResults: totalQueriesWithResults,
             queriesFailed: totalQueriesFailed,
+            queriesSkipped: totalQueriesSkipped,
             errors: allErrors,
           },
           warning: wasCancelled ? undefined : warning,
@@ -302,6 +319,7 @@ export async function POST(request: NextRequest) {
           city,
           queries_attempted: result.diagnostics.queriesAttempted,
           queries_failed: result.diagnostics.queriesFailed,
+          queries_skipped: result.diagnostics.queriesSkipped ?? 0,
           errors: result.diagnostics.errors.slice(0, 5),
           industry: industry || undefined,
         },
