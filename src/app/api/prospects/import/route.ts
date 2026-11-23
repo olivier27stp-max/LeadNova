@@ -87,13 +87,16 @@ function cleanProspectData(p: Record<string, string | null>) {
 
 async function checkDuplicate(
   raw: Record<string, string | null>,
-  dedupMode: string
+  dedupMode: string,
+  workspaceId: string | null
 ): Promise<boolean> {
+  // Doublon = déjà dans CET espace de travail (pas dans celui d'un autre compte)
+  const ws = { workspaceId };
   switch (dedupMode) {
     case "gmaps_url":
       if (raw.googleMapsUrl) {
         const existing = await prisma.prospect.findFirst({
-          where: { googleMapsUrl: raw.googleMapsUrl },
+          where: { ...ws, googleMapsUrl: raw.googleMapsUrl },
           select: { id: true },
         });
         if (existing) return true;
@@ -101,7 +104,7 @@ async function checkDuplicate(
       // Fallback to companyName + city
       if (raw.companyName && raw.city) {
         const existing = await prisma.prospect.findFirst({
-          where: { companyName: raw.companyName, city: raw.city },
+          where: { ...ws, companyName: raw.companyName, city: raw.city },
           select: { id: true },
         });
         return !!existing;
@@ -111,7 +114,7 @@ async function checkDuplicate(
     case "website":
       if (raw.website) {
         const existing = await prisma.prospect.findFirst({
-          where: { website: raw.website },
+          where: { ...ws, website: raw.website },
           select: { id: true },
         });
         return !!existing;
@@ -123,7 +126,7 @@ async function checkDuplicate(
         const digits = raw.phone.replace(/\D/g, "").slice(-10);
         if (digits.length >= 10) {
           const existing = await prisma.prospect.findFirst({
-            where: { phone: { contains: digits } },
+            where: { ...ws, phone: { contains: digits } },
             select: { id: true },
           });
           return !!existing;
@@ -135,6 +138,7 @@ async function checkDuplicate(
       if (raw.companyName) {
         const existing = await prisma.prospect.findFirst({
           where: {
+            ...ws,
             companyName: raw.companyName,
             ...(raw.city ? { city: raw.city } : {}),
           },
@@ -289,7 +293,7 @@ export async function POST(request: NextRequest) {
 
         // Deduplication check
         if (dedupMode && dedupMode !== "none") {
-          const isDup = await checkDuplicate(raw, dedupMode);
+          const isDup = await checkDuplicate(raw, dedupMode, workspaceId);
           if (isDup) {
             skipped++;
             continue;
