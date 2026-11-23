@@ -108,16 +108,11 @@ async function main() {
   console.log("Seeding database...");
 
   for (const prospect of sampleProspects) {
-    await prisma.prospect.upsert({
-      where: {
-        companyName_city: {
-          companyName: prospect.companyName,
-          city: prospect.city,
-        },
-      },
-      update: {},
-      create: prospect,
+    const exists = await prisma.prospect.findFirst({
+      where: { workspaceId: null, companyName: prospect.companyName, city: prospect.city },
+      select: { id: true },
     });
+    if (!exists) await prisma.prospect.create({ data: prospect });
   }
 
   // Create a sample campaign
