@@ -483,6 +483,22 @@ async function searchViaGooglePlaces(query: string, city: string, apiKey: string
     });
 }
 
+// Clé « site web » pour repérer une même entreprise : domaine sans www, en minuscules.
+// null pour les sites partagés (réseaux sociaux, annuaires) qui ne désignent pas une entreprise.
+const SHARED_HOSTS = /(^|\.)(facebook|fb|instagram|linkedin|twitter|x|tiktok|youtube|google|goo|linktr|yelp|pagesjaunes|yellowpages|411habitation|411|canpages|houzz|homestars|kijiji|wixsite|wordpress|blogspot|square|godaddysites|business\.site|sites\.google)\.[a-z.]+$/i;
+export function websiteKey(url?: string | null): string | null {
+  if (!url) return null;
+  let host: string;
+  try {
+    host = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  host = host.replace(/^www\./, "");
+  if (!host.includes(".") || SHARED_HOSTS.test(host)) return null;
+  return host;
+}
+
 export async function discoverProspects(
   city: string,
   industry?: string,
@@ -527,12 +543,16 @@ export async function discoverProspects(
   const blockedKeywords = settings.blockedKeywords;
 
   // ─── Pre-load existing prospects to skip duplicates (saves API tokens + AI calls) ───
-  const existingWhere: Record<string, unknown> = { archivedAt: null };
-  if (workspaceId) existingWhere.workspaceId = workspaceId;
+  // Seulement CET espace de travail (aucun lien entre les comptes)
+  const existingWhere: Record<string, unknown> = { archivedAt: null, workspaceId: workspaceId ?? null };
   const existingProspects = await prisma.prospect.findMany({
     where: existingWhere,
-    select: { companyName: true, city: true, phone: true },
+    select: { companyName: true, city: true, phone: true, website: true },
   });
+  // Même site web = même entreprise (ex. une succursale inscrite dans une autre ville)
+  const existingSites = new Set(
+    existingProspects.map((p) => websiteKey(p.website)).filter((k): k is string => !!k)
+  );
   const existingNames = new Set(
     existingProspects.map((p) => `${p.companyName.toLowerCase().trim()}|${(p.city || "").toLowerCase().trim()}`)
   );
@@ -596,6 +616,21 @@ export async function discoverProspects(
       const phoneKey = r.phone.replace(/\D/g, "");
       if (phoneKey.length >= 7 && existingPhones.has(phoneKey)) return false;
     }
+    const site = websiteKey(r.website);
+    if (site && existingSites.has(site)) return false;
+    return true;
+  });
+
+  // Doublons à l'intérieur de ce lot : même téléphone ou même site web → garder le premier
+  const seenPhonesBatch = new Set<string>();
+  const seenSitesBatch = new Set<string>();
+  const afterExistingDeduped = afterExisting.filter((r) => {
+    const phoneKey = (r.phone || "").replace(/\D/g, "");
+    const site = websiteKey(r.website);
+    if (phoneKey.length >= 7 && seenPhonesBatch.has(phoneKey)) return false;
+    if (site && seenSitesBatch.has(site)) return false;
+    if (phoneKey.length >= 7) seenPhonesBatch.add(phoneKey);
+    if (site) seenSitesBatch.add(site);
     return true;
   });
 
@@ -604,7 +639,7 @@ export async function discoverProspects(
 
   // Filter out irrelevant results (wrong industry despite matching keyword)
   updateDiscoveryProgress(workspaceId, { filterPhase: "Filtrage par industrie..." });
-  const afterRelevance = afterExisting.filter((r) => {
+  const afterRelevance = afterExistingDeduped.filter((r) => {
     if (!r._searchQuery) return true;
     const irrelevant = isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website, r.mainCategory);
     if (irrelevant) {
@@ -894,7 +929,7 @@ export async function discoverProspects(
     }
   }
 
-  const skippedExisting = unique.length - afterExisting.length;
+  const skippedExisting = unique.length - afterExistingDeduped.length;
   if (skippedExisting > 0) {
     console.log(`[discovery] Skipped ${skippedExisting} already-existing prospects (saved API tokens)`);
   }
