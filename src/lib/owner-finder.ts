@@ -15,7 +15,10 @@ import { fetchRecentReviews, reviewStats, type ReviewsResult } from "@/lib/revie
  *    dans le texte récupéré, sinon le résultat est rejeté.
  */
 
-const OWNER_MODEL = process.env.OWNER_AI_MODEL || "claude-opus-5-5";
+// Extraction de texte simple : Haiku suffit (≈ 40× moins cher qu'Opus).
+// Deuxième avis Sonnet seulement quand Haiku trouve un nom douteux (OWNER_FALLBACK_MODEL=none pour désactiver).
+const OWNER_MODEL = process.env.OWNER_FINDER_MODEL || "claude-haiku-5-5";
+const FALLBACK_MODEL = process.env.OWNER_FALLBACK_MODEL === "none" ? null : (process.env.OWNER_FALLBACK_MODEL || "claude-sonnet-5-5");
 const MAX_PAGES = 8;
 const MAX_CHARS_PER_PAGE = 12_000;
 const MAX_TOTAL_CHARS = 40_000;
@@ -304,7 +307,7 @@ function reviewsCorpus(reviews: ReviewsResult | null): string {
     .join("\n");
 }
 
-async function askClaude(companyName: string, pages: PageText[], reviews: ReviewsResult | null): Promise<OwnerAiAnswer | null> {
+async function askClaude(model: string, companyName: string, pages: PageText[], reviews: ReviewsResult | null): Promise<OwnerAiAnswer | null> {
   const siteCorpus = pages.length > 0
     ? pages.map((p) => `<page url="${p.url}">\n${p.text}\n</page>`).join("\n\n")
     : "(aucun site web lisible)";
@@ -312,7 +315,7 @@ async function askClaude(companyName: string, pages: PageText[], reviews: Review
   const corpus = `${siteCorpus}\n\n<avis_google>\n${avis || "(aucun avis disponible)"}\n</avis_google>`;
 
   const response = await getClient().messages.create({
-    model: OWNER_MODEL,
+    model,
     max_tokens: 8000,
     system: SYSTEM_PROMPT,
     output_config: {
@@ -442,12 +445,29 @@ export async function analyzeOwner(companyName: string, website: string | null, 
     return { status: hasSite ? "unreachable" : "no_website", fields: { ...EMPTY_OWNER, ...signals } };
   }
 
-  let answer: OwnerAiAnswer | null;
+  let first: OwnerAnalysis & { doubtful?: boolean };
   try {
-    answer = await askClaude(companyName, pages, reviews);
+    first = interpretAnswer(await askClaude(OWNER_MODEL, companyName, pages, reviews), companyName, pages, reviews, { ...signals });
   } catch (err) {
-    return { status: "error", reason: err instanceof Error ? err.message : "erreur IA", fields: null };
+    first = { status: "error", reason: err instanceof Error ? err.message : "erreur IA", fields: null };
   }
+  // Deuxième avis seulement si Haiku a échoué ou trouvé un nom douteux (pas quand il n'y a simplement aucun nom)
+  if (!FALLBACK_MODEL || first.status === "found" || (first.status === "not_found" && !first.doubtful)) return first;
+  try {
+    const second = interpretAnswer(await askClaude(FALLBACK_MODEL, companyName, pages, reviews), companyName, pages, reviews, { ...signals });
+    return second.status === "error" ? first : second;
+  } catch {
+    return first;
+  }
+}
+
+function interpretAnswer(
+  answer: OwnerAiAnswer | null,
+  companyName: string,
+  pages: PageText[],
+  reviews: ReviewsResult | null,
+  signals: Partial<SiteSignalFields>,
+): OwnerAnalysis & { doubtful?: boolean } {
   if (!answer) return { status: "error", reason: "réponse IA invalide", fields: null };
 
   const siteText = pages.map((p) => p.text).join("\n");
@@ -467,14 +487,15 @@ export async function analyzeOwner(companyName: string, website: string | null, 
   });
 
   if (!answer.found || !answer.fullName.trim() || answer.confidence === "low") {
-    return { status: "not_found", reason: answer.reason, fields: { ...EMPTY_OWNER, ...signals } };
+    const doubtful = answer.found && !!answer.fullName.trim();
+    return { status: "not_found", reason: answer.reason, doubtful, fields: { ...EMPTY_OWNER, ...signals } };
   }
 
   // Le nom peut venir du site ou d'une réponse du propriétaire signée dans les avis
   const sources: PageText[] = [...pages, { url: "avis Google", text: reviewText }];
   const rejection = verifyAgainstText(answer, sources, companyName);
   if (rejection) {
-    return { status: "not_found", reason: `rejeté : ${rejection}`, fields: { ...EMPTY_OWNER, ...signals } };
+    return { status: "not_found", reason: `rejeté : ${rejection}`, doubtful: true, fields: { ...EMPTY_OWNER, ...signals } };
   }
 
   const fullName = titleCaseName(answer.fullName.trim());
