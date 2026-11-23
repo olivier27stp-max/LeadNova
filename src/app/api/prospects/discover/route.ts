@@ -116,6 +116,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (city !== "all" && !city) {
+      return NextResponse.json({ error: "City is required" }, { status: 400 });
+    }
+
     // Une seule découverte à la fois par espace de travail (vérifié juste avant de démarrer, sans await entre les deux)
     if (getDiscoveryProgress(workspaceId)?.status === "running") {
       return NextResponse.json(
@@ -142,6 +146,10 @@ export async function POST(request: NextRequest) {
 
     const batchId = generateBatchId();
 
+    // La recherche tourne en arrière-plan : une découverte « toutes les villes » dure plusieurs
+    // minutes et Railway coupe les requêtes HTTP trop longues (« upstream error »).
+    // La page suit la progression par GET et lit le résultat final dans progress.result.
+    const runJob = async (): Promise<Record<string, unknown>> => {
     try {
       if (city === "all") {
         // Loop through cities multiple rounds until target is reached
@@ -192,8 +200,9 @@ export async function POST(request: NextRequest) {
               : "Google Search returned no results. The Custom Search engine may be restricted or empty."
             : undefined;
 
+        // Le statut final (done/cancelled) est posé avec le résultat, une fois tout enregistré
         setDiscoveryProgress(workspaceId, {
-          status: wasCancelled ? "cancelled" : "done",
+          status: "running",
           target: maxToFind,
           found: totalFound,
           newCount: totalNew,
@@ -234,7 +243,7 @@ export async function POST(request: NextRequest) {
           addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
         }
 
-        return NextResponse.json({
+        return {
           message: wasCancelled
             ? `Recherche arrêtée (${totalNew} nouveaux trouvés avant l'arrêt)`
             : `Discovery complete for all cities (${rounds} round${rounds > 1 ? "s" : ""})`,
@@ -254,22 +263,14 @@ export async function POST(request: NextRequest) {
             errors: allErrors,
           },
           warning: wasCancelled ? undefined : warning,
-        });
-      }
-
-      if (!city) {
-        setDiscoveryProgress(workspaceId, null);
-        return NextResponse.json(
-          { error: "City is required" },
-          { status: 400 }
-        );
+        };
       }
 
       updateDiscoveryProgress(workspaceId, { currentCity: city });
       const result = await discoverProspects(city, industry, maxToFind, batchId, workspaceId);
 
       setDiscoveryProgress(workspaceId, {
-        status: "done",
+        status: "running",
         target: maxToFind,
         found: result.found,
         newCount: result.new,
@@ -315,7 +316,7 @@ export async function POST(request: NextRequest) {
         addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
       }
 
-      return NextResponse.json({
+      return {
         message: `Discovery complete for ${city}`,
         ...result,
         target: maxToFind,
@@ -323,7 +324,7 @@ export async function POST(request: NextRequest) {
         batchId: result.new > 0 ? batchId : null,
         companyAge: targeting.companyAge ?? null,
         warning,
-      });
+      };
     } catch (error) {
       setDiscoveryProgress(workspaceId, {
         status: "error",
@@ -346,6 +347,20 @@ export async function POST(request: NextRequest) {
       });
       throw error;
     }
+    };
+
+    void runJob()
+      .then((result) => {
+        const p = getDiscoveryProgress(workspaceId);
+        if (!p) return;
+        setDiscoveryProgress(workspaceId, { ...p, status: result.cancelled ? "cancelled" : "done", currentCity: "", result });
+      })
+      .catch((error) => {
+        // Le statut « error » est déjà posé dans runJob ; on garde la trace dans les logs du serveur
+        console.error("[discover] échec de la découverte en arrière-plan:", error);
+      });
+
+    return NextResponse.json({ started: true, target: maxToFind, totalCities }, { status: 202 });
   } catch (error) {
     return NextResponse.json(
       {

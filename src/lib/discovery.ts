@@ -1,7 +1,7 @@
 import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
-import { isCancelRequested, updateDiscoveryProgress } from "./discovery-progress";
+import { getDiscoveryProgress, isCancelRequested, updateDiscoveryProgress } from "./discovery-progress";
 import { validateCompanyNames, localCleanCompanyName } from "./company-name-validation";
 import { checkRelevanceBatch } from "./relevance-check";
 
@@ -864,6 +864,9 @@ export async function discoverProspects(
       });
       newCount++;
       processedCount++;
+      // Compteur en temps réel : +1 dès qu'un prospect est enregistré (pas seulement à la fin de la ville)
+      const live = getDiscoveryProgress(workspaceId);
+      if (live?.status === "running") updateDiscoveryProgress(workspaceId, { newCount: live.newCount + 1 });
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
