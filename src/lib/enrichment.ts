@@ -1156,12 +1156,44 @@ export function isValidWebsiteCandidate(url: string | null | undefined): boolean
   }
 }
 
+/** Domaine (sans www.) d'une URL de site, ou null. */
+export function websiteDomain(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(normalizeBaseUrl(url)).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Le courriel appartient-il au domaine du site (ou à un sous-domaine) ? */
+export function emailMatchesDomain(email: string, domain: string | null | undefined): boolean {
+  if (!domain) return false;
+  const d = domain.toLowerCase().replace(/^www\./, "");
+  const e = (email.split("@")[1] || "").toLowerCase().replace(/^www\./, "");
+  if (!e || !d) return false;
+  return e === d || e.endsWith(`.${d}`) || d.endsWith(`.${e}`);
+}
+
+/** Courriel déjà connu et réel (non deviné) : à ne jamais remplacer par une devinette. */
+export function existingRealEmail(p: { email: string | null; emailGuessed: boolean }): string | null {
+  return p.email && !p.emailGuessed ? p.email.toLowerCase().trim() : null;
+}
+
+function assertBeforeDeadline(deadline?: number) {
+  if (deadline && Date.now() > deadline) {
+    throw new Error("Enrichissement interrompu : délai dépassé, écriture annulée");
+  }
+}
+
 async function findFallbackProspectData(prospect: {
   id: string;
   companyName: string;
   city: string | null;
   phone: string | null;
   address: string | null;
+  email: string | null;
+  emailGuessed: boolean;
 }) {
   const updateData: Record<string, unknown> = {};
 
@@ -1184,7 +1216,16 @@ async function findFallbackProspectData(prospect: {
   }
   if (!updateData.phone && !prospect.phone && webResult.phone) updateData.phone = webResult.phone;
   if (!updateData.city && !prospect.city && webResult.city) updateData.city = normalizeCity(webResult.city);
-  if (webResult.email) updateData.email = webResult.email;
+  // Courriel d'un extrait Serper : seulement s'il est sur le domaine du site trouvé (sinon annuaire / autre
+  // entreprise) et sans écraser un courriel réel déjà connu.
+  if (
+    webResult.email &&
+    !existingRealEmail(prospect) &&
+    emailMatchesDomain(webResult.email, websiteDomain(updateData.website as string | undefined))
+  ) {
+    updateData.email = webResult.email;
+    updateData.emailGuessed = false;
+  }
   if (!updateData.address && !prospect.address && webResult.address) updateData.address = webResult.address;
 
   return updateData;
@@ -1193,7 +1234,7 @@ async function findFallbackProspectData(prospect: {
 // ═══════════════════════════════════════════════════════════
 // MAIN ENRICHMENT FUNCTION
 // ═══════════════════════════════════════════════════════════
-async function enrichProspectCore(prospectId: string): Promise<{
+async function enrichProspectCore(prospectId: string, deadline?: number): Promise<{
   email?: string;
   secondaryEmail?: string;
   contactPageUrl?: string;
@@ -1202,6 +1243,12 @@ async function enrichProspectCore(prospectId: string): Promise<{
   city?: string;
   noData?: boolean;
 }> {
+  // Après le délai (enrichWithTimeout), on n'écrit plus rien : le lot est déjà passé au suivant.
+  const guardedUpdate = async (data: Record<string, unknown>) => {
+    assertBeforeDeadline(deadline);
+    return safeUpdateProspect(prospectId, data);
+  };
+
   const prospect = await prisma.prospect.findUnique({
     where: { id: prospectId },
   });
@@ -1215,7 +1262,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
 
   if (prospect.website && !isValidWebsiteCandidate(prospect.website)) {
     console.warn(`[enrich] Invalid website cleared for ${prospect.companyName}: "${prospect.website}"`);
-    await safeUpdateProspect(prospectId, { website: null });
+    await guardedUpdate({ website: null });
     prospect.website = null;
   }
 
@@ -1224,7 +1271,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
     const updateData = await findFallbackProspectData(prospect);
 
     if (Object.keys(updateData).length > 0) {
-      const updated = await safeUpdateProspect(prospectId, updateData);
+      const updated = await guardedUpdate(updateData);
       if (updateData.website) {
         // Re-fetch the prospect with the updated website and continue to scraping
         const refreshed = await prisma.prospect.findUnique({ where: { id: prospectId } });
@@ -1234,7 +1281,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
       } else {
         // No website found, but we have data from Maps/Web
         const score = calculateLeadScore(updated!);
-        await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
+        await guardedUpdate({ leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
         return {
           phone: (updateData.phone as string) || undefined,
           city: (updateData.city as string) || undefined,
@@ -1255,12 +1302,12 @@ async function enrichProspectCore(prospectId: string): Promise<{
     const hostname = new URL(baseUrl).hostname.replace(/^www\./, "");
     if (!isValidWebsiteCandidate(baseUrl)) {
       // Clear the invalid website and try Maps + Web search as fallback
-      await safeUpdateProspect(prospectId, { website: null });
+      await guardedUpdate({ website: null });
       prospect.website = null;
       const fallbackData = await findFallbackProspectData(prospect);
 
       if (Object.keys(fallbackData).length > 0) {
-        const updated = await safeUpdateProspect(prospectId, fallbackData);
+        const updated = await guardedUpdate(fallbackData);
         if (fallbackData.website) {
           const refreshed = await prisma.prospect.findUnique({ where: { id: prospectId } });
           if (refreshed?.website) {
@@ -1268,7 +1315,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
             companyDomain = new URL(normalizeBaseUrl(refreshed.website)).hostname.replace(/^www\./, "");
           } else {
             const score = calculateLeadScore(updated!);
-            await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
+            await guardedUpdate({ leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
             return {
               phone: (fallbackData.phone as string) || undefined,
               city: (fallbackData.city as string) || undefined,
@@ -1277,7 +1324,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
           }
         } else {
           const score = calculateLeadScore(updated!);
-          await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
+          await guardedUpdate({ leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
           return {
             phone: (fallbackData.phone as string) || undefined,
             city: (fallbackData.city as string) || undefined,
@@ -1292,14 +1339,14 @@ async function enrichProspectCore(prospectId: string): Promise<{
     }
   } catch (err) {
     console.warn(`[enrich] Invalid URL for ${prospect.companyName}: ${prospect.website}`, err);
-    await safeUpdateProspect(prospectId, { website: null });
+    await guardedUpdate({ website: null });
     prospect.website = null;
     const fallbackData = await findFallbackProspectData(prospect);
     if (Object.keys(fallbackData).length === 0) {
       return { noData: true };
     }
 
-    const updated = await safeUpdateProspect(prospectId, fallbackData);
+    const updated = await guardedUpdate(fallbackData);
     if (fallbackData.website) {
       const refreshed = await prisma.prospect.findUnique({ where: { id: prospectId } });
       if (refreshed?.website && isValidWebsiteCandidate(refreshed.website)) {
@@ -1307,7 +1354,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
         companyDomain = new URL(normalizeBaseUrl(refreshed.website)).hostname.replace(/^www\./, "");
       } else {
         const score = calculateLeadScore(updated!);
-        await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
+        await guardedUpdate({ leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
         return {
           phone: (fallbackData.phone as string) || undefined,
           city: (fallbackData.city as string) || undefined,
@@ -1316,7 +1363,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
       }
     } else {
       const score = calculateLeadScore(updated!);
-      await safeUpdateProspect(prospectId, { leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
+      await guardedUpdate({ leadScore: score, status: "ENRICHED", enrichedAt: new Date() });
       return {
         phone: (fallbackData.phone as string) || undefined,
         city: (fallbackData.city as string) || undefined,
@@ -1341,6 +1388,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
   async function processPage(url: string): Promise<boolean> {
     if (visitedUrls.has(url)) return false;
     if (pagesScanned >= MAX_PAGES_PER_PROSPECT) return false;
+    if (deadline && Date.now() > deadline) return false;
     visitedUrls.add(url);
     pagesScanned++;
 
@@ -1397,8 +1445,8 @@ async function enrichProspectCore(prospectId: string): Promise<{
   if (!hasEverything()) {
     // 2a: Contact links found on homepage
     for (const url of discoveredContactUrls) {
-      await processPage(url);
-      if (!contactPageUrl) contactPageUrl = url;
+      const ok = await processPage(url);
+      if (ok && !contactPageUrl) contactPageUrl = url;
       if (hasEverything()) break;
     }
   }
@@ -1463,15 +1511,15 @@ async function enrichProspectCore(prospectId: string): Promise<{
     const webResult = await searchWebForCompany(prospect.companyName, prospect.city || undefined);
     if (webResult.phone && !foundPhone) foundPhone = webResult.phone;
     if (webResult.city && !foundCity) foundCity = normalizeCity(webResult.city);
-    if (webResult.email) allEmails.push(webResult.email);
+    if (webResult.email && emailMatchesDomain(webResult.email, companyDomain)) allEmails.push(webResult.email);
   }
 
   // ── Step 4: Check sitemap for more pages ──────────────
   if (!hasEverything()) {
     const sitemapUrls = await findContactPagesFromSitemap(baseUrl);
     for (const url of sitemapUrls.slice(0, 5)) {
-      await processPage(url);
-      if (!contactPageUrl && allEmails.length > 0) contactPageUrl = url;
+      const ok = await processPage(url);
+      if (ok && !contactPageUrl && allEmails.length > 0) contactPageUrl = url;
       if (hasEverything()) break;
     }
   }
@@ -1518,9 +1566,13 @@ async function enrichProspectCore(prospectId: string): Promise<{
       const webResult = await searchWebForCompany(prospect.companyName, prospect.city || foundCity || undefined);
       if (!foundCity && webResult.city) foundCity = normalizeCity(webResult.city);
       if (!foundPhone && webResult.phone) foundPhone = webResult.phone;
-      if (allEmails.length === 0 && webResult.email) allEmails.push(webResult.email);
+      if (allEmails.length === 0 && webResult.email && emailMatchesDomain(webResult.email, companyDomain)) allEmails.push(webResult.email);
     }
   }
+
+  // Le courriel réel déjà connu reste candidat : on ne le remplace jamais par une devinette.
+  const knownRealEmail = existingRealEmail(prospect);
+  if (knownRealEmail) allEmails.push(knownRealEmail);
 
   // ── Step 8: Guess emails as last resort ───────────────
   // Only guess if NO real emails were found (mailto or otherwise)
@@ -1562,7 +1614,8 @@ async function enrichProspectCore(prospectId: string): Promise<{
   };
 
   // Determine if we actually found useful data
-  const foundSomething = !!(enrichedData.email || enrichedData.phone || enrichedData.city || enrichedData.linkedinUrl || enrichedData.contactPageUrl);
+  // Un courriel deviné seul ne compte pas comme une trouvaille.
+  const foundSomething = !!((enrichedData.email && !enrichedData.emailGuessed) || enrichedData.phone || enrichedData.city || enrichedData.linkedinUrl || enrichedData.contactPageUrl);
   const status = foundSomething ? "ENRICHED" : prospect.status;
 
   // ── Enrichment summary log ─────────────────────────────
@@ -1572,7 +1625,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
 
   // Update prospect (safe: handles unique constraint conflicts)
   const formFields = formDetector.toProspectFields();
-  const updatedProspect = await safeUpdateProspect(prospectId, {
+  const updatedProspect = await guardedUpdate({
     ...enrichedData,
     ...(formFields || {}),
     status,
@@ -1582,7 +1635,7 @@ async function enrichProspectCore(prospectId: string): Promise<{
   // Recalculate lead score
   if (updatedProspect) {
     const score = calculateLeadScore(updatedProspect);
-    await safeUpdateProspect(prospectId, { leadScore: score });
+    await guardedUpdate({ leadScore: score });
   }
 
   return {
@@ -1595,10 +1648,14 @@ async function enrichProspectCore(prospectId: string): Promise<{
  * Enrichit un prospect puis complète la segmentation par formulaire :
  * un prospect qui n'a toujours pas de site après l'enrichissement est classé NO_WEBSITE.
  */
-export async function enrichProspect(prospectId: string): Promise<Awaited<ReturnType<typeof enrichProspectCore>>> {
-  const result = await enrichProspectCore(prospectId);
+export async function enrichProspect(prospectId: string, deadline?: number): Promise<Awaited<ReturnType<typeof enrichProspectCore>>> {
+  // Trace de la tentative : un prospect NEW sans résultat garde son statut, mais enrichedAt marque
+  // l'essai pour que le lot automatique ne le reprenne pas en boucle (voir ENRICH_RETRY_DAYS).
+  await prisma.prospect.updateMany({ where: { id: prospectId, status: "NEW" }, data: { enrichedAt: new Date() } });
+  const result = await enrichProspectCore(prospectId, deadline);
   const after = await prisma.prospect.findUnique({ where: { id: prospectId } });
   if (after && !after.website && after.contactFormStatus !== "NO_WEBSITE") {
+    assertBeforeDeadline(deadline);
     const updated = await safeUpdateProspect(prospectId, {
       contactFormStatus: "NO_WEBSITE",
       contactFormProvider: null,
@@ -1675,13 +1732,24 @@ export async function detectProspectForms(prospectId: string): Promise<{ status:
 const PROSPECT_TIMEOUT_MS = 90_000;
 
 async function enrichWithTimeout(prospectId: string): Promise<Awaited<ReturnType<typeof enrichProspect>>> {
-  return Promise.race([
-    enrichProspect(prospectId),
-    new Promise<Awaited<ReturnType<typeof enrichProspect>>>((_, reject) =>
-      setTimeout(() => reject(new Error("Enrichment timeout (90s)")), PROSPECT_TIMEOUT_MS)
-    ),
-  ]);
+  // Le délai est aussi passé à enrichProspect : passé ce délai, il n'écrit plus en base
+  // (sinon des écritures tardives tourneraient en parallèle du prospect suivant).
+  const deadline = Date.now() + PROSPECT_TIMEOUT_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      enrichProspect(prospectId, deadline),
+      new Promise<Awaited<ReturnType<typeof enrichProspect>>>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Enrichment timeout (90s)")), PROSPECT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
+
+/** Un prospect NEW déjà tenté sans résultat n'est repris par le lot qu'après ce délai. */
+const ENRICH_RETRY_DAYS = 7;
 
 // ═══════════════════════════════════════════════════════════
 // ENRICH BY IDS (selected prospects, re-enriches already enriched)
@@ -1695,7 +1763,7 @@ export async function enrichByIds(
   console.log("[enrichByIds] Received", ids.length, "IDs, first 3:", ids.slice(0, 3));
 
   const prospects = await prisma.prospect.findMany({
-    where: { id: { in: ids }, archivedAt: null },
+    where: { id: { in: ids }, archivedAt: null, workspaceId },
   });
 
   console.log("[enrichByIds] Found", prospects.length, "prospects out of", ids.length, "IDs");
@@ -1718,7 +1786,7 @@ export async function enrichByIds(
     updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
     try {
       const result = await enrichWithTimeout(prospect.id);
-      const foundSomething = !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
+      const foundSomething = !result.noData && !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
       if (foundSomething) {
         enriched++;
       } else if (result.noData) {
@@ -1831,7 +1899,7 @@ export async function deepEnrichByIds(
   const { setEnrichProgress, updateEnrichProgress, isCancelEnrichRequested } = await import("./enrich-progress");
 
   const prospects = await prisma.prospect.findMany({
-    where: { id: { in: ids }, archivedAt: null },
+    where: { id: { in: ids }, archivedAt: null, workspaceId },
     select: { id: true, companyName: true, city: true, website: true },
   });
 
@@ -1877,10 +1945,13 @@ export async function deepEnrichByIds(
         const directoryEmails = await deepSearchEmailInDirectories(prospect.companyName, prospect.city, domain);
         if (directoryEmails.length > 0) {
           console.log(`[deepEnrich] ${prospect.companyName} — directory found: ${directoryEmails.join(", ")}`);
-          // Pre-seed best email so enrichProspect can compare/confirm it
+          // Pre-seed best email so enrichProspect can compare/confirm it.
+          // Un courriel d'annuaire hors du domaine du site est marqué deviné : il peut être celui
+          // de l'annuaire ou d'une autre entreprise, et l'enrichissement pourra le remplacer.
+          const seeded = directoryEmails.find((e) => emailMatchesDomain(e, domain)) ?? directoryEmails[0];
           await prisma.prospect.update({
             where: { id: prospect.id },
-            data: { email: directoryEmails[0] },
+            data: { email: seeded, emailGuessed: !emailMatchesDomain(seeded, domain) },
           });
           await yieldForDb();
         }
@@ -1892,7 +1963,7 @@ export async function deepEnrichByIds(
 
         try {
           const result = await enrichWithTimeout(prospect.id);
-          const foundSomething = !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
+          const foundSomething = !result.noData && !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
           if (foundSomething) enriched++;
           else if (result.noData) noData++;
           else failed++;
@@ -1965,7 +2036,15 @@ export async function enrichBatch(
   const { setEnrichProgress, updateEnrichProgress, isCancelEnrichRequested } = await import("./enrich-progress");
 
   const prospects = await prisma.prospect.findMany({
-    where: { status: "NEW", archivedAt: null },
+    where: {
+      status: "NEW",
+      archivedAt: null,
+      workspaceId,
+      OR: [
+        { enrichedAt: null },
+        { enrichedAt: { lt: new Date(Date.now() - ENRICH_RETRY_DAYS * 86_400_000) } },
+      ],
+    },
     take: limit,
     orderBy: { dateDiscovered: "desc" },
   });
@@ -1988,7 +2067,7 @@ export async function enrichBatch(
     updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
     try {
       const result = await enrichWithTimeout(prospect.id);
-      const foundSomething = !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
+      const foundSomething = !result.noData && !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
       if (foundSomething) {
         enriched++;
       } else if (result.noData) {

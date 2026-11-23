@@ -175,6 +175,8 @@ export async function GET(request: NextRequest) {
     const enrichedToday = await prisma.prospect.count({
       where: {
         archivedAt: null,
+        // enrichedAt marque aussi une tentative sans résultat (statut resté NEW)
+        status: { not: "NEW" },
         enrichedAt: {
           gte: getStartOfToday(),
         },
