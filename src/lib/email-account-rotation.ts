@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { quebecDateString } from "@/lib/quebec-time";
 
 /**
  * Multi-sender rotation system.
@@ -7,7 +8,8 @@ import { prisma } from "@/lib/db";
  * Returns null if no accounts available (falls back to single-sender).
  */
 
-const TODAY_FORMAT = () => new Date().toISOString().split("T")[0];
+// Journée = heure du Québec (le serveur tourne en UTC)
+const TODAY_FORMAT = () => quebecDateString();
 
 /** Get the next available account with remaining daily capacity (round-robin by lastUsedAt).
  *  Supports both ACTIVE and WARMING accounts. WARMING accounts use progressive limits. */

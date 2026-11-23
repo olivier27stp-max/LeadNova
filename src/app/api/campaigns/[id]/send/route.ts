@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contactGreetingName } from "@/lib/owner-name";
 import { prisma } from "@/lib/db";
-import { sendEmail, canSendEmail } from "@/lib/email-sender";
+import { sendEmail, canSendEmail, isUnverifiedGuess } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 import { pickCampaignMessage, formProviderLabel } from "@/lib/form-detection";
@@ -58,7 +58,7 @@ export async function POST(
       contacts: {
         include: {
           prospect: {
-            select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true },
+            select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true, emailGuessed: true, emailStatus: true },
           },
         },
       },
@@ -102,8 +102,10 @@ export async function POST(
   }
 
   const prospects = campaign.contacts.map((c) => c.prospect);
-  const withEmail = prospects.filter((p) => p.email);
-  const skippedNoEmail = prospects.length - withEmail.length;
+  const skippedNoEmail = prospects.filter((p) => !p.email).length;
+  // Courriels devinés non vérifiés (emailStatus ≠ « valid ») : ignorés
+  const skippedGuessed = prospects.filter((p) => p.email && isUnverifiedGuess(p)).length;
+  const withEmail = prospects.filter((p) => p.email && !isUnverifiedGuess(p));
 
   // Skip prospects already emailed in this campaign or unsubscribed
   const alreadySentIds = new Set<string>();
@@ -183,12 +185,13 @@ export async function POST(
     action: "campaign_sent",
     type: sent > 0 ? "success" : "error",
     title: `Campagne "${campaign.name}" envoyée`,
-    details: `${sent} envoyé(s), ${failed} échoué(s), ${skippedNoEmail} sans email`,
+    details: `${sent} envoyé(s), ${failed} échoué(s), ${skippedNoEmail} sans email`
+      + (skippedGuessed > 0 ? `, ${skippedGuessed} courriel(s) deviné(s) non vérifié(s) ignoré(s)` : ""),
     relatedEntityType: "campaign",
     relatedEntityId: id,
   });
 
-  return NextResponse.json({ sent, failed, skippedNoEmail, skippedAlreadySent, errors });
+  return NextResponse.json({ sent, failed, skippedNoEmail, skippedAlreadySent, skippedGuessed, errors });
   } catch (error) {
     return handleWorkspaceError(error);
   }

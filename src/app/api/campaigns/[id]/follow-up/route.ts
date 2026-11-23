@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contactGreetingName } from "@/lib/owner-name";
 import { prisma } from "@/lib/db";
-import { sendEmail, canSendEmail, getRandomDelay } from "@/lib/email-sender";
+import { sendEmail, canSendEmail, getRandomDelay, isUnverifiedGuess } from "@/lib/email-sender";
 import { logActivity } from "@/lib/activity";
 import { requireWorkspaceContext, handleWorkspaceError } from "@/lib/workspace";
 import { formProviderLabel } from "@/lib/form-detection";
@@ -265,6 +265,8 @@ export async function POST(
             contactFormProvider: true,
             ownerFirstName: true,
             ownerConfidence: true,
+            emailGuessed: true,
+            emailStatus: true,
           },
         },
       },
@@ -296,12 +298,19 @@ export async function POST(
     let sent = 0;
     let skipped = 0;
     let failed = 0;
+    let skippedGuessed = 0;
     const errors: string[] = [];
 
     for (const cc of campaignContacts) {
       const prospect = cc.prospect;
       if (!prospect.email) {
         skipped++;
+        continue;
+      }
+      // Courriel deviné non vérifié : pas de relance
+      if (isUnverifiedGuess(prospect)) {
+        skipped++;
+        skippedGuessed++;
         continue;
       }
 
@@ -352,10 +361,10 @@ export async function POST(
       type: sent > 0 ? "success" : "info",
       title: `Relances envoyées — ${campaign.name}`,
       details: `${sent} envoyé${sent !== 1 ? "s" : ""}, ${skipped} ignoré${skipped !== 1 ? "s" : ""}, ${failed} échoué${failed !== 1 ? "s" : ""}`,
-      metadata: { campaignId: id, sent, skipped, failed },
+      metadata: { campaignId: id, sent, skipped, failed, skippedGuessed },
     });
 
-    return NextResponse.json({ sent, skipped, failed, errors });
+    return NextResponse.json({ sent, skipped, failed, skippedGuessed, errors });
   } catch (error) {
     return handleWorkspaceError(error);
   }

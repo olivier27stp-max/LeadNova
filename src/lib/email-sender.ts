@@ -8,6 +8,7 @@ import { DAILY_EMAIL_LIMIT, EMAIL_DELAY_MIN_SECONDS, EMAIL_DELAY_MAX_SECONDS } f
 import { wrapInEmailTemplate, getTextFooter, getLogoAttachment, type CompanyInfo } from "./email-template";
 import { decrypt } from "./crypto";
 import { sendViaGmailApi } from "./gmail";
+import { startOfQuebecDay } from "./quebec-time";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -302,15 +303,26 @@ async function sendViaSmtp(
 // ─── Helpers ─────────────────────────────────────────────
 
 async function getTodaySentCount(): Promise<number> {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
+  // Journée = heure du Québec (le serveur tourne en UTC).
+  // Les échecs d'envoi ne laissent plus de ligne ; un vrai rebond a bien été envoyé et compte.
   return prisma.emailActivity.count({
     where: {
-      sentAt: { gte: startOfDay },
-      bounce: false,
+      sentAt: { gte: startOfQuebecDay() },
     },
   });
+}
+
+/** Courriel deviné (pattern) et pas vérifié « valid » : on ne l'envoie pas en campagne. */
+export function isUnverifiedGuess(p: { emailGuessed?: boolean | null; emailStatus?: string | null }): boolean {
+  return p.emailGuessed === true && p.emailStatus !== "valid";
+}
+
+/** Rejet définitif du destinataire par le serveur SMTP (5xx à RCPT TO) = vrai rebond. */
+function isHardRecipientRejection(error: unknown): boolean {
+  const e = error as { code?: string; responseCode?: number; command?: string } | null;
+  if (!e) return false;
+  if (e.code === "EENVELOPE") return true;
+  return typeof e.responseCode === "number" && e.responseCode >= 550 && e.responseCode <= 553 && /RCPT/i.test(e.command || "");
 }
 
 async function isBlacklisted(email: string, workspaceId?: string | null): Promise<boolean> {
@@ -535,25 +547,47 @@ export async function sendEmail(
 
     return { success: true };
   } catch (error) {
-    await prisma.emailActivity.update({
-      where: { id: activity.id },
-      data: { bounce: true },
-    });
+    const errorMessage = error instanceof Error ? error.message : "Send failed";
+    const hardBounce = isHardRecipientRejection(error);
 
-    // Increment bounce count on multi-sender account; auto-pause if too many bounces
-    if (multiSenderAccount) {
-      const updated = await prisma.emailAccount.update({
-        where: { id: multiSenderAccount.id },
-        data: {
-          bounceCount: { increment: 1 },
-          lastError: error instanceof Error ? error.message : "Send failed",
-        },
+    if (hardBounce) {
+      // Adresse refusée définitivement par le serveur : vrai rebond
+      await prisma.emailActivity.update({
+        where: { id: activity.id },
+        data: { bounce: true },
       });
-      // Auto-pause account if bounce rate is too high (>10 bounces)
-      if (updated.bounceCount >= 10 && updated.status !== "PAUSED") {
+    } else {
+      // Erreur d'envoi passagère (mot de passe SMTP, délai, 421…) : aucun courriel n'est parti.
+      // On retire la ligne pour que le prospect ne soit ni bloqué comme « rebond »
+      // ni compté comme « déjà envoyé » ; il sera réessayé au prochain envoi.
+      await prisma.emailActivity.delete({ where: { id: activity.id } });
+      console.error(`[email-sender] Échec d'envoi (pas un rebond) → ${prospect.email}: ${errorMessage}`);
+    }
+
+    if (multiSenderAccount) {
+      if (hardBounce) {
+        // Rebonds réels : pause automatique du compte après 10
+        const updated = await prisma.emailAccount.update({
+          where: { id: multiSenderAccount.id },
+          data: {
+            bounceCount: { increment: 1 },
+            lastError: errorMessage,
+          },
+        });
+        if (updated.bounceCount >= 10 && updated.status !== "PAUSED") {
+          await prisma.emailAccount.update({
+            where: { id: multiSenderAccount.id },
+            data: { status: "PAUSED", lastError: "Auto-paused: trop de bounces" },
+          });
+        }
+      } else {
+        // Identifiants SMTP refusés : chaque envoi échouerait, on met le compte en pause tout de suite
+        const authFailed = (error as { code?: string } | null)?.code === "EAUTH";
         await prisma.emailAccount.update({
           where: { id: multiSenderAccount.id },
-          data: { status: "PAUSED", lastError: "Auto-paused: trop de bounces" },
+          data: authFailed
+            ? { status: "PAUSED", lastError: `Auto-paused: authentification SMTP refusée — ${errorMessage}` }
+            : { lastError: errorMessage },
         });
       }
     }

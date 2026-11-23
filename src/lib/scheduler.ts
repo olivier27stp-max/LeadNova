@@ -3,6 +3,10 @@ import { processScheduledEmails } from "./process-scheduled-emails";
 import { processAutoFollowUps } from "./process-scheduled-emails";
 import { pollImapForUpdates } from "./imap-poller";
 import { prisma } from "./db";
+import { QUEBEC_TZ } from "./quebec-time";
+
+// Toutes les tâches suivent l'heure du Québec (le serveur Railway tourne en UTC)
+const CRON_OPTIONS = { timezone: QUEBEC_TZ };
 
 const globalForCron = globalThis as unknown as { _cronStarted?: boolean };
 
@@ -20,7 +24,7 @@ export function startScheduler() {
     } catch (err) {
       console.error("[scheduler] Erreur emails planifiés:", err);
     }
-  });
+  }, CRON_OPTIONS);
 
   // Auto follow-ups — every 2 hours at :30
   cron.schedule("30 */2 * * *", async () => {
@@ -35,7 +39,7 @@ export function startScheduler() {
     } catch (err) {
       console.error("[scheduler] Erreur relances auto:", err);
     }
-  });
+  }, CRON_OPTIONS);
 
   // IMAP polling for replies & bounces — every 5 minutes
   cron.schedule("*/5 * * * *", async () => {
@@ -64,7 +68,7 @@ export function startScheduler() {
     } catch (err) {
       console.error("[scheduler] Erreur IMAP polling:", err);
     }
-  });
+  }, CRON_OPTIONS);
 
   console.log("[scheduler] Démarré — emails (1min) + relances (2h) + IMAP (5min)");
 }

@@ -1,8 +1,17 @@
 import { prisma } from "./db";
 import { contactGreetingName } from "@/lib/owner-name";
-import { sendEmail, canSendEmail } from "./email-sender";
+import { sendEmail, canSendEmail, isUnverifiedGuess } from "./email-sender";
 import { logActivity } from "./activity";
 import { pickCampaignMessage, formProviderLabel } from "./form-detection";
+import { isQuebecWeekend } from "./quebec-time";
+
+/** Limite journalière atteinte : on reporte au lendemain, même heure (au lieu de marquer SENT/FAILED). */
+function nextDaySameTime(scheduledFor: Date): Date {
+  const next = new Date(scheduledFor);
+  const now = Date.now();
+  while (next.getTime() <= now) next.setTime(next.getTime() + 24 * 60 * 60 * 1000);
+  return next;
+}
 
 interface CompanySettings {
   name?: string;
@@ -141,9 +150,11 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         // Load prospects from snapshot IDs
         const allProspects = await prisma.prospect.findMany({
           where: { id: { in: prospectIds } },
-          select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true },
+          select: { id: true, companyName: true, email: true, city: true, contactFormStatus: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true, emailGuessed: true, emailStatus: true },
         });
-        const withEmail = allProspects.filter((p) => p.email);
+        // Courriels devinés non vérifiés : ignorés
+        const skippedGuessed = allProspects.filter((p) => p.email && isUnverifiedGuess(p)).length;
+        const withEmail = allProspects.filter((p) => p.email && !isUnverifiedGuess(p));
 
         // Skip prospects already emailed in this campaign (prevents duplicates across batches)
         const alreadySentIds = new Set<string>();
@@ -158,10 +169,21 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
 
         let sent = 0;
         let failed = 0;
+        let stoppedByLimit = false;
 
         for (const prospect of prospects) {
           const { allowed } = await canSendEmail();
-          if (!allowed) break;
+          if (!allowed) {
+            stoppedByLimit = true;
+            break;
+          }
+
+          // Re-vérifie juste avant l'envoi : une autre exécution a pu l'envoyer entre-temps
+          const alreadySent = await prisma.emailActivity.findFirst({
+            where: { prospectId: prospect.id, campaignId: campaign.id },
+            select: { id: true },
+          });
+          if (alreadySent) continue;
 
           const message = pickCampaignMessage(
             { emailSubject: campaign.emailSubject, emailBody: campaign.emailBody, emailSubjectNoForm: campaign.emailSubjectNoForm, emailBodyNoForm: campaign.emailBodyNoForm },
@@ -173,15 +195,38 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
           if (result.success) sent++;
           else failed++;
 
+          // Battement de cœur : garde updatedAt récent pour que la reprise « PROCESSING > 10 min »
+          // ne relance pas cette ligne pendant un long envoi (300 contacts ≈ 20 min)
+          await prisma.scheduledEmail.update({
+            where: { id: scheduled.id },
+            data: { updatedAt: new Date() },
+          });
+
           if (prospects.indexOf(prospect) < prospects.length - 1) {
             await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000));
           }
         }
 
-        await prisma.scheduledEmail.update({
-          where: { id: scheduled.id },
-          data: { status: "SENT", sentAt: new Date(), sentCount: sent, failedCount: failed },
-        });
+        const totalSent = (scheduled.sentCount || 0) + sent;
+        const totalFailed = (scheduled.failedCount || 0) + failed;
+        if (stoppedByLimit) {
+          // Limite journalière atteinte : les contacts restants partiront demain
+          await prisma.scheduledEmail.update({
+            where: { id: scheduled.id },
+            data: {
+              status: "PENDING",
+              scheduledFor: nextDaySameTime(scheduled.scheduledFor),
+              sentCount: totalSent,
+              failedCount: totalFailed,
+              error: "Limite journalière atteinte — suite reportée au lendemain",
+            },
+          });
+        } else {
+          await prisma.scheduledEmail.update({
+            where: { id: scheduled.id },
+            data: { status: "SENT", sentAt: new Date(), sentCount: totalSent, failedCount: totalFailed, error: null },
+          });
+        }
 
         // Update campaign lastSentAt so follow-ups can be scheduled correctly
         if (sent > 0) {
@@ -195,7 +240,9 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
           action: "campaign_sent",
           type: sent > 0 ? "success" : "error",
           title: `Campagne "${campaign.name}" envoyée (planifié)`,
-          details: `${sent} envoyé(s), ${failed} échoué(s)`,
+          details: `${sent} envoyé(s), ${failed} échoué(s)`
+            + (skippedGuessed > 0 ? `, ${skippedGuessed} courriel(s) deviné(s) non vérifié(s) ignoré(s)` : "")
+            + (stoppedByLimit ? " — limite journalière atteinte, suite demain" : ""),
           relatedEntityType: "campaign",
           relatedEntityId: campaign.id,
         });
@@ -204,9 +251,14 @@ export async function processScheduledEmails(): Promise<{ processed: number; err
         // Individual prospect send
         const { allowed } = await canSendEmail();
         if (!allowed) {
+          // Limite journalière atteinte : reporté au lendemain plutôt qu'abandonné
           await prisma.scheduledEmail.update({
             where: { id: scheduled.id },
-            data: { status: "FAILED", error: "Limite journalière atteinte" },
+            data: {
+              status: "PENDING",
+              scheduledFor: nextDaySameTime(scheduled.scheduledFor),
+              error: "Limite journalière atteinte — reporté au lendemain",
+            },
           });
           continue;
         }
@@ -296,8 +348,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
     const shouldSkipWeekends = automation.skipWeekends !== false;
 
     // If skipWeekends is enabled and today is a weekend, skip this campaign entirely
-    const todayDay = new Date().getDay();
-    if (shouldSkipWeekends && (todayDay === 0 || todayDay === 6)) continue;
+    if (shouldSkipWeekends && isQuebecWeekend()) continue;
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - followUpDelayDays);
@@ -307,18 +358,23 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       where: { campaignId: campaign.id },
       include: {
         prospect: {
-          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true },
+          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true, emailGuessed: true, emailStatus: true },
         },
       },
     });
 
     let sent = 0;
     let failed = 0;
+    let skippedGuessed = 0;
 
     for (const cc of campaignContacts) {
       const prospect = cc.prospect;
       if (!prospect.email) continue;
       if (prospect.status === "BOUNCED") continue;
+      if (isUnverifiedGuess(prospect)) {
+        skippedGuessed++;
+        continue;
+      }
 
       const { allowed } = await canSendEmail();
       if (!allowed) {
@@ -327,7 +383,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       }
 
       const emails = await prisma.emailActivity.findMany({
-        where: { prospectId: prospect.id, bounce: false },
+        where: { prospectId: prospect.id, campaignId: campaign.id, bounce: false },
         orderBy: { sentAt: "desc" },
         select: { sentAt: true, replyReceived: true, unsubscribed: true },
       });
@@ -374,7 +430,8 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
         action: "followup_sent",
         type: sent > 0 ? "success" : "error",
         title: `Relances auto — ${campaign.name}`,
-        details: `${sent} envoyé(s), ${failed} échoué(s)`,
+        details: `${sent} envoyé(s), ${failed} échoué(s)`
+          + (skippedGuessed > 0 ? `, ${skippedGuessed} courriel(s) deviné(s) non vérifié(s) ignoré(s)` : ""),
         relatedEntityType: "campaign",
         relatedEntityId: campaign.id,
       });
