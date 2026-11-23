@@ -215,6 +215,10 @@ export async function POST(request: NextRequest) {
           metadata: {
             prospects_created: totalNew,
             total_found: totalFound,
+            // Pour diagnostiquer une découverte vide : recherches lancées / en échec + premières erreurs
+            queries_attempted: totalQueriesAttempted,
+            queries_failed: totalQueriesFailed,
+            errors: allErrors.slice(0, 5),
             city: "all",
             rounds,
             cancelled: wasCancelled,
@@ -295,6 +299,9 @@ export async function POST(request: NextRequest) {
           prospects_created: result.new,
           total_found: result.found,
           city,
+          queries_attempted: result.diagnostics.queriesAttempted,
+          queries_failed: result.diagnostics.queriesFailed,
+          errors: result.diagnostics.errors.slice(0, 5),
           industry: industry || undefined,
         },
       });
