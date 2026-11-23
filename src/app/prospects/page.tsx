@@ -862,11 +862,36 @@ export default function ProspectsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ city: city || "all", targetCount, campaignId: discoverCampaignId || undefined }),
       });
-      const data = await res.json();
-      stopProgressPolling();
+      // Réponse pas toujours en JSON (ex. « upstream error » du proxy) : ne pas planter sur le parse
+      const startText = await res.text();
+      let startData: { error?: string } = {};
+      try { startData = JSON.parse(startText); } catch { /* texte brut */ }
       if (!res.ok) {
-        throw new Error(data.error || "Discovery failed");
+        stopProgressPolling();
+        throw new Error(startData.error || `Erreur du serveur (${res.status}) : ${startText.slice(0, 120)}`);
       }
+      // La recherche tourne en arrière-plan sur le serveur : attendre sa fin et lire le résultat
+      let data: {
+        total?: number; found?: number; new?: number; filteredOut?: number; rounds?: number; cancelled?: boolean;
+        batchId?: string | null; companyAge?: string | null; diagnostics?: unknown;
+      } = {};
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 2000));
+        let p: { status?: string; error?: string; result?: Record<string, unknown> };
+        try {
+          const pr = await fetch("/api/prospects/discover");
+          if (!pr.ok) continue;
+          p = await pr.json();
+        } catch {
+          continue; // coupure réseau passagère : on réessaie
+        }
+        if (p.status === "running") continue;
+        if (p.status === "error") throw new Error(p.error || t("prospects", "errorDiscovery"));
+        if (p.status === "idle") throw new Error("La découverte s'est interrompue (serveur redémarré ?). Les prospects déjà trouvés sont dans ta liste.");
+        data = p.result || { cancelled: p.status === "cancelled" };
+        break;
+      }
+      stopProgressPolling();
       const finalStatus = data.cancelled ? "cancelled" : "done";
       setDiscoverProgress({ status: finalStatus, target: targetCount, found: data.total || data.found || 0, newCount: data.new || 0, filteredOut: data.filteredOut || 0, currentCity: "", round: data.rounds || 1, startedAt: discoverProgress?.startedAt || Date.now(), totalCities: discoverProgress?.totalCities || 1, completedCities: discoverProgress?.totalCities || 1 });
       fetchProspects();

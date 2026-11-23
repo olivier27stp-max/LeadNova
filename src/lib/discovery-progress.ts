@@ -13,6 +13,8 @@ export interface DiscoveryProgress {
   totalCities: number;
   completedCities: number;
   error?: string;
+  // Résultat final (même forme que l'ancienne réponse du POST), lu par la page à la fin
+  result?: Record<string, unknown>;
 }
 
 interface DiscoveryState {
