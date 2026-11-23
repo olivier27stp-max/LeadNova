@@ -826,6 +826,12 @@ export default function ProspectsPage() {
             completedCities: data.completedCities || 0,
           });
           stopProgressPolling();
+        } else if (data.status === "idle") {
+          // Le serveur ne connaît plus la recherche (redémarrage, mise en ligne) : ne pas laisser un compteur gelé
+          stopProgressPolling();
+          setDiscoverProgress(null);
+          setActionLoading(null);
+          fetchProspects();
         }
       } catch {
         // ignore polling errors
