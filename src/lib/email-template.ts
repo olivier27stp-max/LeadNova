@@ -32,6 +32,17 @@ function escapeHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Nom légal : ajoute « Inc. » sauf si le nom porte déjà une forme juridique. */
+function legalCompanyName(name: string): string {
+  return /\b(inc|ltée|ltee|ltd|llc|corp|enr|s\.?e\.?n\.?c)\.?$/i.test(name.trim()) ? name : `${name} Inc.`;
+}
+
+/** Adresse postale (LCAP) + pays, seulement avec les champs remplis. */
+function postalAddressLine(info: CompanyInfo): string {
+  const cityLine = [info.city, [info.province, info.postalCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  return [info.address, cityLine, info.country || "Canada"].filter(Boolean).join(", ");
+}
+
 /**
  * Wraps a plain-text email body in a professional HTML template.
  *
@@ -117,7 +128,7 @@ export function wrapInEmailTemplate(
   // ── Full signature block (contact card) ──
   const fullSigLines: string[] = [];
   if (contactName) fullSigLines.push(`<strong style="color:#111827;font-size:13px;">${escapeHtml(contactName)}</strong>`);
-  if (companyName) fullSigLines.push(`<span style="color:#6b7280;font-size:13px;">${escapeHtml(companyName)} Inc.</span>`);
+  if (companyName) fullSigLines.push(`<span style="color:#6b7280;font-size:13px;">${escapeHtml(legalCompanyName(companyName))}</span>`);
 
   // Phone · Website on same line
   const contactParts: string[] = [];
@@ -125,9 +136,8 @@ export function wrapInEmailTemplate(
   if (website) contactParts.push(`<a href="${escapeHtml(track(websiteHref))}" style="color:#2563eb;text-decoration:none;font-size:12px;">${escapeHtml(websiteDisplay)}</a>`);
   if (contactParts.length > 0) fullSigLines.push(contactParts.join(` <span style="color:#d1d5db;"> &middot; </span> `));
 
-  // Country
-  const country = info.country || "Canada";
-  fullSigLines.push(`<span style="color:#9ca3af;font-size:12px;">${escapeHtml(country)}</span>`);
+  // Adresse postale + pays (LCAP)
+  fullSigLines.push(`<span style="color:#9ca3af;font-size:12px;">${escapeHtml(postalAddressLine(info))}</span>`);
 
   const fullSigHtml = fullSigLines.length > 0
     ? `
@@ -280,8 +290,6 @@ export function getTextFooter(companyInfo?: CompanyInfo, unsubscribeUrl?: string
   const companyName = info.name || "";
   const phone = info.phone || "";
   const website = info.website?.replace(/^https?:\/\//, "") || "";
-  const country = info.country || "Canada";
-
   const unsub = unsubscribeUrl
     ? `Se désabonner: ${unsubscribeUrl}`
     : "";
@@ -298,12 +306,12 @@ export function getTextFooter(companyInfo?: CompanyInfo, unsubscribeUrl?: string
   const fullLines: string[] = [];
   fullLines.push("---");
   if (contactName) fullLines.push(contactName);
-  if (companyName) fullLines.push(`${companyName} Inc.`);
+  if (companyName) fullLines.push(legalCompanyName(companyName));
   const contactParts: string[] = [];
   if (phone) contactParts.push(phone);
   if (website) contactParts.push(website);
   if (contactParts.length > 0) fullLines.push(contactParts.join(" · "));
-  fullLines.push(country);
+  fullLines.push(postalAddressLine(info));
 
   const sig = `\n\n${shortLines.join("\n")}\n\n${fullLines.join("\n")}`;
   return unsub ? `${sig}\n\n${unsub}` : sig;

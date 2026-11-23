@@ -237,6 +237,7 @@ export default function CampaignDetailPage() {
     sent: number;
     failed: number;
     skippedNoEmail: number;
+    skippedGuessed?: number;
     errors: string[];
   } | null>(null);
 
@@ -1167,6 +1168,7 @@ export default function CampaignDetailPage() {
               {sendResult.sent} {sendResult.sent !== 1 ? t("campaignDetail", "emailsSentPlural") : t("campaignDetail", "emailsSent")} {sendResult.sent !== 1 ? t("campaignDetail", "sentPlural") : t("campaignDetail", "sent")}
               {sendResult.failed > 0 && `, ${sendResult.failed} ${t("prospects", "failed")}`}
               {sendResult.skippedNoEmail > 0 && `, ${sendResult.skippedNoEmail} ${t("campaignDetail", "withoutEmail")}`}
+              {(sendResult.skippedGuessed ?? 0) > 0 && `, ${sendResult.skippedGuessed} courriel(s) deviné(s) non vérifié(s) ignoré(s)`}
             </p>
             {sendResult.errors.length > 0 && (
               <ul className="mt-1 space-y-0.5 text-xs opacity-80">
