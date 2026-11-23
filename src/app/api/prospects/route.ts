@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { splitCommaList } from "@/lib/discovery";
+import { splitCommaList, websiteKey } from "@/lib/discovery";
 import { prisma } from "@/lib/db";
 import { calculateLeadScore } from "@/lib/lead-scoring";
 import { DAILY_DISCOVERY_LIMIT } from "@/lib/config";
@@ -328,8 +328,8 @@ export async function POST(request: NextRequest) {
     // Deduplicate prospects by email, company name+city, and phone number
     if (body._action === "deduplicate") {
       const workspaceId = await getWorkspaceId();
-      const whereClause: Record<string, unknown> = { archivedAt: null };
-      if (workspaceId) whereClause.workspaceId = workspaceId;
+      // Seulement CET espace de travail (aucun lien entre les comptes)
+      const whereClause: Record<string, unknown> = { archivedAt: null, workspaceId: workspaceId ?? null };
 
       const all = await prisma.prospect.findMany({
         where: whereClause,
@@ -377,6 +377,19 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // 4. Même site web (domaine) = même entreprise, même inscrite dans une autre ville
+      const seenSites = new Map<string, string>();
+      for (const p of all) {
+        if (toDeleteSet.has(p.id)) continue;
+        const siteKey = websiteKey(p.website);
+        if (!siteKey) continue;
+        if (seenSites.has(siteKey)) {
+          toDeleteSet.add(p.id);
+        } else {
+          seenSites.set(siteKey, p.id);
+        }
+      }
+
       const toDelete = Array.from(toDeleteSet);
 
       // Collect info of prospects to delete before removing them
@@ -409,6 +422,7 @@ export async function POST(request: NextRequest) {
 
       if (totalArchived > 0) {
         await logActivity({
+          workspaceId: workspaceId ?? undefined,
           action: "prospect_deduplicated",
           type: "success",
           title: "Doublons supprimés",
