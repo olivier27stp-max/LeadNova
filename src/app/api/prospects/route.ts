@@ -747,8 +747,27 @@ export async function PATCH(request: NextRequest) {
     // Fetch current prospect to detect status change
     const current = await prisma.prospect.findUnique({
       where: { id },
-      select: { status: true, workspaceId: true },
+      select: { status: true, workspaceId: true, email: true },
     });
+    // Seulement un prospect de CET espace de travail
+    const wsId = await getWorkspaceId();
+    if (!current || (current.workspaceId ?? null) !== (wsId ?? null)) {
+      return NextResponse.json({ error: "Prospect introuvable" }, { status: 404 });
+    }
+
+    // Tag « deviné » : modifiable à la main ; un courriel tapé à la main n'est plus « deviné »
+    if (typeof data.emailGuessed === "boolean") allowed.emailGuessed = data.emailGuessed;
+    const newEmail = typeof allowed.email === "string" ? (allowed.email as string).trim() : undefined;
+    if (newEmail !== undefined) {
+      allowed.email = newEmail || null;
+      if (newEmail.toLowerCase() !== (current.email ?? "").toLowerCase()) {
+        if (!("emailGuessed" in allowed)) allowed.emailGuessed = false;
+        // L'ancienne vérification ne s'applique plus au nouveau courriel
+        allowed.emailStatus = null;
+        allowed.emailVerifiedAt = null;
+      }
+      if (!newEmail) allowed.emailGuessed = false;
+    }
 
     const updated = await prisma.prospect.update({
       where: { id },

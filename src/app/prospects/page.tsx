@@ -453,6 +453,7 @@ export default function ProspectsPage() {
   // Edit mode
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Record<string, string | number>>({});
+  const [editEmailGuessed, setEditEmailGuessed] = useState(false);
 
   // Discover & Enrich
   const [discoverTarget, setDiscoverTarget] = useState(100);
@@ -1356,6 +1357,7 @@ export default function ProspectsPage() {
   function startEditing() {
     if (!selectedProspect) return;
     setEditing(true);
+    setEditEmailGuessed(!!selectedProspect.emailGuessed);
     setEditData({
       companyName: selectedProspect.companyName || "",
       industry: selectedProspect.industry || "",
@@ -1379,7 +1381,7 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selectedProspect.id, ...editData }),
+        body: JSON.stringify({ id: selectedProspect.id, ...editData, emailGuessed: editData.email ? editEmailGuessed : false }),
       });
       if (!res.ok) throw new Error("Update failed");
       const updated = await res.json();
@@ -3127,7 +3129,18 @@ export default function ProspectsPage() {
                       </div>
                       <div>
                         <label className="text-xs text-foreground-muted uppercase">Email</label>
-                        <input type="email" value={editData.email || ""} onChange={(e) => setEditData({ ...editData, email: e.target.value })} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
+                        <input type="email" value={editData.email || ""} onChange={(e) => { setEditData({ ...editData, email: e.target.value }); setEditEmailGuessed(false); }} className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground" />
+                        {editData.email ? (
+                          <label className="mt-1.5 flex items-center gap-2 text-xs text-foreground-secondary cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editEmailGuessed}
+                              onChange={(e) => setEditEmailGuessed(e.target.checked)}
+                              className="w-3.5 h-3.5 rounded border-border-strong"
+                            />
+                            Courriel deviné (pas confirmé) — décoche si tu sais qu&apos;il est bon
+                          </label>
+                        ) : null}
                       </div>
                       <div>
                         <label className="text-xs text-foreground-muted uppercase">{t("prospects", "phone")}</label>
