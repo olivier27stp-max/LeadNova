@@ -9,6 +9,7 @@ import ProspectInsights from "@/components/prospects/ProspectInsights";
 import { useEnrichment } from "@/components/EnrichmentProvider";
 import { useTranslation } from "@/components/LanguageProvider";
 import { cn } from "@/lib/utils";
+import { TAG_COLOR_CLASSES, parseProspectTags, type ProspectTag } from "@/lib/prospect-tags";
 
 // ---------- Types ----------
 interface ProspectListItem {
@@ -24,6 +25,7 @@ interface ProspectListItem {
   contactType: string | null;
   industry: string | null;
   emailGuessed: boolean;
+  tags?: string[];
   reviewCount: number | null;
   companyNameNeedsReview?: boolean;
   contactFormStatus?: string | null;
@@ -268,8 +270,10 @@ const ProspectRow = memo(function ProspectRow({
   onDragStart,
   onCampaignChange,
   hiddenColumns,
+  tagDefs,
 }: {
   hiddenColumns: string;
+  tagDefs: ProspectTag[];
   prospect: ProspectListItem;
   rowIndex: number;
   actionLoading: string | null;
@@ -310,6 +314,9 @@ const ProspectRow = memo(function ProspectRow({
             <span className="text-[10px] bg-warning-subtle text-warning px-1.5 py-0.5 rounded shrink-0 font-medium" title="Nom à vérifier">Review</span>
           )}
           <FormBadge status={prospect.contactFormStatus} provider={prospect.contactFormProvider} crm={prospect.competitorCrm} />
+          {tagDefs.filter((tg) => prospect.tags?.includes(tg.id)).map((tg) => (
+            <span key={tg.id} className={cn("text-[10px] px-1.5 py-0.5 rounded-full shrink-0 font-medium", TAG_COLOR_CLASSES[tg.color])}>{tg.name}</span>
+          ))}
         </div>
         {prospect.ownerName ? (
           <p className="text-xs text-foreground-secondary truncate" title={`${prospect.ownerRole || "Propriétaire"} — confiance ${prospect.ownerConfidence === "high" ? "élevée" : "moyenne"}`}>
@@ -410,6 +417,8 @@ export default function ProspectsPage() {
   const [engagementFilter, setEngagementFilter] = useState(""); // "3" | "5" | "7" | hot
   const [callbackFilter, setCallbackFilter] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState(""); // found | not_found | pending
+  const [tagFilter, setTagFilter] = useState(""); // identifiant d'un tag
+  const [tagDefs, setTagDefs] = useState<ProspectTag[]>([]);
   const [ownerStats, setOwnerStats] = useState<{ found: number; notFound: number; remaining: number } | null>(null);
   const [ownerRun, setOwnerRun] = useState<{ processed: number; found: number; total: number } | null>(null);
   const ownerStopRef = useRef(false);
@@ -454,6 +463,7 @@ export default function ProspectsPage() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Record<string, string | number>>({});
   const [editEmailGuessed, setEditEmailGuessed] = useState(false);
+  const [editTags, setEditTags] = useState<string[]>([]);
 
   // Discover & Enrich
   const [discoverTarget, setDiscoverTarget] = useState(100);
@@ -545,7 +555,7 @@ export default function ProspectsPage() {
   // Clear selection when search or filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, minChanceFilter, engagementFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly]);
+  }, [searchQuery, statusFilter, sourceFilter, contactTypeFilter, cityFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, tagFilter, minChanceFilter, engagementFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly]);
 
   // Debounce search for server fetch only (local filter uses searchQuery directly)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -575,6 +585,7 @@ export default function ProspectsPage() {
     if (minScoreFilter) params.set("minScore", minScoreFilter);
     if (reviewsFilter) params.set("reviews", reviewsFilter);
     if (ownerFilter) params.set("owner", ownerFilter);
+    if (tagFilter) params.set("tag", tagFilter);
     if (ageFilter) params.set("age", ageFilter);
     if (/^\d{4}$/.test(yearFrom)) params.set("yearFrom", yearFrom);
     if (/^\d{4}$/.test(yearTo)) params.set("yearTo", yearTo);
@@ -605,7 +616,7 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly, debouncedSearch, sortBy, sortOrder]);
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, tagFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly, debouncedSearch, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchProspects();
@@ -699,6 +710,7 @@ export default function ProspectsPage() {
         if (data?.targeting?.keywords) setTargetingKeywords(((v: string[]) => v.flatMap((x) => String(x).split(/[,;\n]/)).map((x) => x.trim()).filter(Boolean))(data.targeting.keywords));
         if (data?.targeting?.searchQueries) setTargetingQueries(data.targeting.searchQueries);
         setTargetingAge(typeof data?.targeting?.companyAge === "string" ? data.targeting.companyAge : "");
+        setTagDefs(parseProspectTags(data?.prospectTags));
       })
       .catch(() => {});
     fetch("/api/cities?list=provinces")
@@ -1358,6 +1370,7 @@ export default function ProspectsPage() {
     if (!selectedProspect) return;
     setEditing(true);
     setEditEmailGuessed(!!selectedProspect.emailGuessed);
+    setEditTags(selectedProspect.tags ?? []);
     setEditData({
       companyName: selectedProspect.companyName || "",
       industry: selectedProspect.industry || "",
@@ -1381,7 +1394,7 @@ export default function ProspectsPage() {
       const res = await fetch("/api/prospects", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selectedProspect.id, ...editData, emailGuessed: editData.email ? editEmailGuessed : false }),
+        body: JSON.stringify({ id: selectedProspect.id, ...editData, emailGuessed: editData.email ? editEmailGuessed : false, tags: editTags }),
       });
       if (!res.ok) throw new Error("Update failed");
       const updated = await res.json();
@@ -1649,7 +1662,7 @@ export default function ProspectsPage() {
   }
 
   // Filter reset
-  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || minChanceFilter || engagementFilter || callbackFilter || ageFilter || yearFrom || yearTo || ageSureOnly);
+  const hasSegmentFilters = !!(formFilter || industryGroupFilter || crmFilter || reachFilter || minScoreFilter || reviewsFilter || ownerFilter || tagFilter || minChanceFilter || engagementFilter || callbackFilter || ageFilter || yearFrom || yearTo || ageSureOnly);
   const hasFilters = statusFilter || cityFilter || sourceFilter || contactTypeFilter || campaignFilter || hasSegmentFilters || debouncedSearch || searchQuery;
 
   // Répartition A / B des résultats affichés (selon le formulaire de contact)
@@ -1671,6 +1684,7 @@ export default function ProspectsPage() {
     setMinScoreFilter("");
     setReviewsFilter("");
     setOwnerFilter("");
+    setTagFilter("");
     setMinChanceFilter("");
     setEngagementFilter("");
     setCallbackFilter(false);
@@ -2607,6 +2621,17 @@ export default function ProspectsPage() {
           <option value="not_found">Non trouvé{ownerStats ? ` (${ownerStats.notFound})` : ""}</option>
           <option value="pending">Pas encore cherché</option>
         </select>
+        {tagDefs.length > 0 && (
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className={cn("border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground", tagFilter && "border-primary text-primary")}
+            title="Tags créés dans Paramètres → Prospects"
+          >
+            <option value="">Tag : tous</option>
+            {tagDefs.map((tg) => <option key={tg.id} value={tg.id}>{tg.name}</option>)}
+          </select>
+        )}
         <select
           value={ageFilter}
           onChange={(e) => setAgeFilter(e.target.value)}
@@ -3028,6 +3053,7 @@ export default function ProspectsPage() {
                   onEmail={handleEmailClick}
                   onCampaignChange={handleCampaignChange}
                   hiddenColumns={hiddenColumns}
+                  tagDefs={tagDefs}
                 />
               ))
             )}
@@ -3178,6 +3204,29 @@ export default function ProspectsPage() {
                           {CONTACT_TYPE_OPTIONS.map((ct) => <option key={ct} value={ct}>{t("contactType", ct as "prospect")}</option>)}
                         </select>
                       </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-foreground-muted uppercase">Tags</label>
+                      {tagDefs.length === 0 ? (
+                        <p className="text-xs text-foreground-muted mt-1">Aucun tag. Crée-les dans Paramètres → Prospects → Tags.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {tagDefs.map((tg) => {
+                            const on = editTags.includes(tg.id);
+                            return (
+                              <button
+                                key={tg.id}
+                                type="button"
+                                onClick={() => setEditTags(on ? editTags.filter((x) => x !== tg.id) : [...editTags, tg.id])}
+                                className={cn("text-xs px-2.5 py-1 rounded-full font-medium border transition-opacity", TAG_COLOR_CLASSES[tg.color], on ? "border-current" : "border-transparent opacity-40 hover:opacity-70")}
+                                aria-pressed={on}
+                              >
+                                {on ? "✓ " : ""}{tg.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="text-xs text-foreground-muted uppercase">{t("prospects", "notes")}</label>

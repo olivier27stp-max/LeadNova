@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
     const yearFrom = parseInt(searchParams.get("yearFrom") || "", 10); // immatriculée en ou après
     const yearTo = parseInt(searchParams.get("yearTo") || "", 10); // immatriculée en ou avant
     const sureOnly = searchParams.get("ageSure") === "1"; // exclut l'indice « nom de domaine »
+    const tag = searchParams.get("tag"); // identifiant d'un tag (Paramètres → Prospects → Tags)
     const search = searchParams.get("search");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 5000);
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = { archivedAt: null };
     if (workspaceId) where.workspaceId = workspaceId;
     if (status) where.status = status;
+    if (tag) where.tags = { has: tag };
     if (city) where.city = { equals: city, mode: "insensitive" };
     if (source) where.source = source;
     if (contactType) where.contactType = contactType;
@@ -212,6 +214,7 @@ export async function GET(request: NextRequest) {
         ownerCheckedAt: true,
         siteAnalyzedAt: true,
         registrationYear: true,
+        tags: true,
         registrationDate: true,
         registrationSource: true,
         registrationEvidence: true,
@@ -676,8 +679,9 @@ export async function POST(request: NextRequest) {
 
       let cleared = 0;
       for (const city of citiesToClear) {
+        // Seulement CET espace de travail
         const r = await prisma.prospect.updateMany({
-          where: { city },
+          where: { city, workspaceId: (await getWorkspaceId()) ?? null },
           data: { city: null },
         });
         cleared += r.count;
@@ -693,7 +697,7 @@ export async function POST(request: NextRequest) {
           emailActivities: { orderBy: { sentAt: "desc" }, take: 5 },
         },
       });
-      if (!prospect) {
+      if (!prospect || (prospect.workspaceId ?? null) !== ((await getWorkspaceId()) ?? null)) {
         return NextResponse.json({ error: "Prospect not found" }, { status: 404 });
       }
       return NextResponse.json({ ...prospect, conversion: conversionChance(prospect), engagement: engagementScore(prospect) });
@@ -753,6 +757,11 @@ export async function PATCH(request: NextRequest) {
     const wsId = await getWorkspaceId();
     if (!current || (current.workspaceId ?? null) !== (wsId ?? null)) {
       return NextResponse.json({ error: "Prospect introuvable" }, { status: 404 });
+    }
+
+    // Tags : liste d'identifiants (texte court), sans doublon
+    if (Array.isArray(data.tags)) {
+      allowed.tags = Array.from(new Set((data.tags as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 64))).slice(0, 50);
     }
 
     // Tag « deviné » : modifiable à la main ; un courriel tapé à la main n'est plus « deviné »
