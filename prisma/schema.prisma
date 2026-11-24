@@ -189,6 +189,8 @@ model Prospect {
   registrationUrl           String?
   registrationConfidence    String?   // high | medium | low
   registrationCheckedAt     DateTime?
+  // Identifiants des tags (définis dans Paramètres → Prospects → Tags)
+  tags            String[]        @default([])
 
   workspace        Workspace?      @relation(fields: [workspaceId], references: [id])
   emailActivities  EmailActivity[]
@@ -213,6 +215,7 @@ model Prospect {
   @@index([archivedAt])
   @@index([emailStatus])
   @@index([enrichedAt])
+  @@index([tags], type: Gin)
   @@index([contactFormStatus])
   @@index([ownerCheckedAt])
   @@index([siteAnalyzedAt])

@@ -6,6 +6,7 @@ import { useLanguage, useTranslation } from "@/components/LanguageProvider";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import AiAssistButton from "@/components/AiAssistButton";
+import ProspectTagsSettings from "@/components/ProspectTagsSettings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -3269,6 +3270,7 @@ export default function SettingsPage() {
             transition={{ duration: 0.2 }}
             className="space-y-6"
           >
+            <ProspectTagsSettings />
             <SectionCard
               title={t("settings", "prospectsTitle")}
               description={t("settings", "prospectsDesc")}
