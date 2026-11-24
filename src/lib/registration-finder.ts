@@ -75,16 +75,31 @@ async function domainCreationDate(website: string | null): Promise<{ date: Date;
   // Domaine enregistrable (exemple.ca, exemple.com, exemple.qc.ca)
   const parts = host.split(".");
   const domain = parts.slice(-(parts.length >= 3 && parts[parts.length - 2] === "qc" ? 3 : 2)).join(".");
-  try {
-    const res = await fetch(`https://rdap.org/domain/${domain}`, { signal: AbortSignal.timeout(8000), redirect: "follow" });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { events?: Array<{ eventAction?: string; eventDate?: string }> };
-    const reg = data.events?.find((e) => e.eventAction === "registration")?.eventDate;
-    const date = reg ? new Date(reg) : null;
-    return date && !isNaN(date.getTime()) ? { date, domain } : null;
-  } catch {
-    return null;
+  // Registre officiel en direct (.ca → CIRA, .com/.net → Verisign) : rdap.org limite le débit
+  // et refusait presque toutes les requêtes venant du serveur. rdap.org reste en secours.
+  const tld = domain.split(".").pop();
+  const direct =
+    tld === "ca" ? `https://rdap.ca.fury.ca/rdap/domain/${domain}`
+    : tld === "com" || tld === "net" ? `https://rdap.verisign.com/${tld}/v1/domain/${domain}`
+    : null;
+  for (const url of [direct, `https://rdap.org/domain/${domain}`]) {
+    if (!url) continue;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000), redirect: "follow", headers: { Accept: "application/rdap+json" } });
+        if (res.status === 429 && attempt === 0) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+        if (!res.ok) break;
+        const data = (await res.json()) as { events?: Array<{ eventAction?: string; eventDate?: string }> };
+        const reg = data.events?.find((e) => e.eventAction === "registration")?.eventDate;
+        const date = reg ? new Date(reg) : null;
+        if (date && !isNaN(date.getTime())) return { date, domain };
+        break;
+      } catch {
+        break;
+      }
+    }
   }
+  return null;
 }
 
 // ─── Étape gratuite : l'année écrite sur le site ───
