@@ -44,25 +44,57 @@ export async function POST(request: NextRequest) {
     // Helper: add discovered prospects to a campaign
     async function addProspectsToCampaign(batchId: string, campaignId: string) {
       if (!campaignId) return 0;
+      // Avant : toute erreur était prise pour un doublon et ignorée → 0 ajouté sans aucune trace
       try {
+        const campaign = await prisma.campaign.findFirst({
+          where: { id: campaignId, workspaceId: workspaceId ?? null },
+          select: { id: true, number: true, name: true },
+        });
+        if (!campaign) {
+          console.error(`[discover] campagne ${campaignId} introuvable dans le compte ${workspaceId}`);
+          await logActivity({
+            workspaceId: workspaceId ?? undefined,
+            action: "discovery_error",
+            type: "error",
+            title: "Découverte : campagne introuvable",
+            details: "Les nouveaux prospects n'ont pas pu être ajoutés à la campagne choisie (supprimée ?)",
+            metadata: { campaign_id: campaignId, batch_id: batchId },
+          });
+          return 0;
+        }
         const prospects = await prisma.prospect.findMany({
           where: { importBatchId: batchId, workspaceId: workspaceId ?? null, archivedAt: null },
           select: { id: true },
         });
         if (prospects.length === 0) return 0;
-        let added = 0;
-        for (const p of prospects) {
-          try {
-            await prisma.campaignContact.create({
-              data: { campaignId, prospectId: p.id },
-            });
-            added++;
-          } catch {
-            // Duplicate — already in campaign, skip
-          }
-        }
-        return added;
-      } catch { return 0; }
+        const { count } = await prisma.campaignContact.createMany({
+          data: prospects.map((p) => ({ campaignId: campaign.id, prospectId: p.id })),
+          skipDuplicates: true,
+        });
+        await logActivity({
+          workspaceId: workspaceId ?? undefined,
+          action: "campaign_contacts_added",
+          type: "success",
+          title: `Découverte : ${count} prospect(s) ajouté(s) à la campagne`,
+          details: `#${campaign.number} ${campaign.name}`,
+          relatedEntityType: "campaign",
+          relatedEntityId: campaign.id,
+          importBatchId: batchId,
+          metadata: { campaign_id: campaign.id, batch_id: batchId, added: count, batch_size: prospects.length },
+        });
+        return count;
+      } catch (error) {
+        console.error("[discover] ajout à la campagne échoué:", error);
+        await logActivity({
+          workspaceId: workspaceId ?? undefined,
+          action: "discovery_error",
+          type: "error",
+          title: "Découverte : ajout à la campagne échoué",
+          details: error instanceof Error ? error.message : "Erreur inconnue",
+          metadata: { campaign_id: campaignId, batch_id: batchId },
+        });
+        return 0;
+      }
     }
 
     // Ajoute les nouveaux prospects du lot à la campagne choisie, côté serveur (même si la page est fermée).
@@ -273,6 +305,7 @@ export async function POST(request: NextRequest) {
             city: "all",
             rounds,
             cancelled: wasCancelled,
+            campaign_id: campaignId ?? null,
           },
         });
 
@@ -346,6 +379,7 @@ export async function POST(request: NextRequest) {
           queries_skipped: result.diagnostics.queriesSkipped ?? 0,
           errors: result.diagnostics.errors.slice(0, 5),
           industry: industry || undefined,
+          campaign_id: campaignId ?? null,
         },
       });
 
