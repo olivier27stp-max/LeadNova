@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { discoverProspects, loadTargetingSettings, clearQueryLog } from "@/lib/discovery";
 import { getDiscoveryProgress, setDiscoveryProgress, updateDiscoveryProgress, requestCancelDiscovery, isCancelRequested } from "@/lib/discovery-progress";
 import { logActivity, generateBatchId } from "@/lib/activity";
+import { runAgeTargetingForBatch } from "@/lib/age-targeting";
 import { getWorkspaceContext } from "@/lib/workspace";
 import { prisma } from "@/lib/db";
 
@@ -62,6 +63,31 @@ export async function POST(request: NextRequest) {
         }
         return added;
       } catch { return 0; }
+    }
+
+    // Ajoute les nouveaux prospects du lot à la campagne choisie, côté serveur (même si la page est fermée).
+    // Ciblage par âge : cherche d'abord leur année, puis n'ajoute que ceux qui ont l'âge voulu.
+    async function addToCampaignAfterDiscovery(newCount: number): Promise<{ addedToCampaign: number; ageMatched: number | null }> {
+      if (!campaignId || newCount === 0) return { addedToCampaign: 0, ageMatched: null };
+      if (!targeting.companyAge || !workspaceId) {
+        return { addedToCampaign: await addProspectsToCampaign(batchId, campaignId), ageMatched: null };
+      }
+      updateDiscoveryProgress(workspaceId, { filterPhase: "Recherche de l'année des nouveaux prospects..." });
+      try {
+        const res = await runAgeTargetingForBatch({
+          workspaceId,
+          batchId,
+          campaignId,
+          companyAge: targeting.companyAge,
+          onProgress: (done, total) =>
+            updateDiscoveryProgress(workspaceId, { filterPhase: `Recherche de l'année des nouveaux prospects... (${done}/${total})` }),
+          isCancelled: () => isCancelRequested(workspaceId),
+        });
+        return { addedToCampaign: res?.added ?? 0, ageMatched: res?.matched ?? null };
+      } catch (error) {
+        console.error("[discover] ciblage par âge échoué:", error);
+        return { addedToCampaign: 0, ageMatched: null };
+      }
     }
 
     // Helper: increment discovery usage counter
@@ -254,10 +280,7 @@ export async function POST(request: NextRequest) {
         if (totalNew > 0) await incrementDiscoveryUsage(totalNew);
 
         // Add to campaign if specified
-        let addedToCampaign = 0;
-        if (campaignId && totalNew > 0 && !targeting.companyAge) {
-          addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
-        }
+        const { addedToCampaign, ageMatched } = await addToCampaignAfterDiscovery(totalNew);
 
         return {
           message: wasCancelled
@@ -270,6 +293,7 @@ export async function POST(request: NextRequest) {
           rounds,
           cancelled: wasCancelled,
           addedToCampaign,
+          ageMatched,
           batchId: totalNew > 0 ? batchId : null,
           companyAge: targeting.companyAge ?? null,
           diagnostics: {
@@ -329,16 +353,14 @@ export async function POST(request: NextRequest) {
       if (result.new > 0) await incrementDiscoveryUsage(result.new);
 
       // Add to campaign if specified
-      let addedToCampaign = 0;
-      if (campaignId && result.new > 0 && !targeting.companyAge) {
-        addedToCampaign = await addProspectsToCampaign(batchId, campaignId);
-      }
+      const { addedToCampaign, ageMatched } = await addToCampaignAfterDiscovery(result.new);
 
       return {
         message: `Discovery complete for ${city}`,
         ...result,
         target: maxToFind,
         addedToCampaign,
+        ageMatched,
         batchId: result.new > 0 ? batchId : null,
         companyAge: targeting.companyAge ?? null,
         warning,

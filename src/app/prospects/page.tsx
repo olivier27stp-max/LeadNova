@@ -914,7 +914,7 @@ export default function ProspectsPage() {
       }
       // La recherche tourne en arrière-plan sur le serveur : attendre sa fin et lire le résultat
       let data: {
-        total?: number; found?: number; new?: number; filteredOut?: number; rounds?: number; cancelled?: boolean;
+        total?: number; found?: number; new?: number; filteredOut?: number; rounds?: number; cancelled?: boolean; addedToCampaign?: number; ageMatched?: number | null;
         batchId?: string | null; companyAge?: string | null; diagnostics?: unknown;
       } = {};
       for (;;) {
@@ -953,9 +953,16 @@ export default function ProspectsPage() {
               : `Aucun résultat sur Google Maps (${diag?.queriesAttempted ?? 0} recherche(s)). Vérifie dans Paramètres → Ciblage que chaque ville et chaque mot-clé est une entrée séparée.`
         );
       }
-      // Ciblage par âge : l'IA (mode économique) date les nouveaux prospects, puis ajoute à la campagne ceux qui correspondent
-      if (data.companyAge && data.batchId) {
-        void runRegistrationSearch(undefined, { batchId: data.batchId, campaignId: discoverCampaignId || undefined, total: data.new || 0 });
+      // Le serveur a déjà ajouté les nouveaux prospects à la campagne (ciblage par âge compris) : on le dit
+      if (discoverCampaignId && (data.new || 0) > 0) {
+        const added = Number(data.addedToCampaign) || 0;
+        const name = campaigns.find((c) => c.id === discoverCampaignId);
+        const label = name ? `#${name.number} — ${name.name}` : "la campagne";
+        alert(
+          data.companyAge && data.ageMatched != null
+            ? `Ciblage par âge : ${data.ageMatched} des ${data.new} nouveaux prospects ont l'âge voulu ; ${added} ajouté(s) à ${label}. Les autres restent dans Prospects (filtre « Âge »).`
+            : `${added} nouveau(x) prospect(s) ajouté(s) à ${label}.`
+        );
       }
     } catch (error) {
       stopProgressPolling();
