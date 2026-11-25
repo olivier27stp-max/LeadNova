@@ -10,13 +10,78 @@ async function getWorkspaceId() {
   return getActiveWorkspaceId(user.id);
 }
 
-export async function GET() {
+type OverviewRow = {
+  id: string;
+  contacts: bigint; with_email: bigint; with_phone: bigint; not_enriched: bigint;
+  sent: bigint; contacted: bigint; opened: bigint; replied: bigint; positive: bigint; bounced: bigint;
+  pending_sends: bigint;
+};
+
+// Aperçu par campagne (page Campagnes) : une seule requête agrégée pour toutes les campagnes du compte
+async function campaignOverviews(workspaceId: string | null) {
+  const map = new Map<string, Record<string, number>>();
+  if (!workspaceId) return map;
+  const rows = await prisma.$queryRaw<OverviewRow[]>`
+    SELECT c.id,
+      COALESCE(ct.contacts, 0) AS contacts,
+      COALESCE(ct.with_email, 0) AS with_email,
+      COALESCE(ct.with_phone, 0) AS with_phone,
+      COALESCE(ct.not_enriched, 0) AS not_enriched,
+      COALESCE(ea.sent, 0) AS sent,
+      COALESCE(ea.contacted, 0) AS contacted,
+      COALESCE(ea.opened, 0) AS opened,
+      COALESCE(ea.replied, 0) AS replied,
+      COALESCE(ea.positive, 0) AS positive,
+      COALESCE(ea.bounced, 0) AS bounced,
+      COALESCE(se.pending, 0) AS pending_sends
+    FROM campaigns c
+    LEFT JOIN (
+      SELECT cc."campaignId",
+        COUNT(*) AS contacts,
+        COUNT(*) FILTER (WHERE p.email IS NOT NULL AND p.email <> '' AND NOT p."emailGuessed") AS with_email,
+        COUNT(*) FILTER (WHERE p.phone IS NOT NULL AND p.phone <> '') AS with_phone,
+        COUNT(*) FILTER (WHERE p."enrichedAt" IS NULL) AS not_enriched
+      FROM campaign_contacts cc
+      JOIN prospects p ON p.id = cc."prospectId" AND p."archivedAt" IS NULL
+      GROUP BY cc."campaignId"
+    ) ct ON ct."campaignId" = c.id
+    LEFT JOIN (
+      SELECT "campaignId",
+        COUNT(*) AS sent,
+        COUNT(DISTINCT "prospectId") AS contacted,
+        COUNT(DISTINCT "prospectId") FILTER (WHERE "openedAt" IS NOT NULL) AS opened,
+        COUNT(DISTINCT "prospectId") FILTER (WHERE "replyReceived") AS replied,
+        COUNT(DISTINCT "prospectId") FILTER (WHERE "replySentiment" = 'positive') AS positive,
+        COUNT(DISTINCT "prospectId") FILTER (WHERE bounce) AS bounced
+      FROM email_activity
+      WHERE "campaignId" IS NOT NULL
+      GROUP BY "campaignId"
+    ) ea ON ea."campaignId" = c.id
+    LEFT JOIN (
+      SELECT "campaignId", COUNT(*) AS pending
+      FROM scheduled_emails
+      WHERE status = 'PENDING' AND "campaignId" IS NOT NULL
+      GROUP BY "campaignId"
+    ) se ON se."campaignId" = c.id
+    WHERE c."workspaceId" = ${workspaceId}
+  `;
+  for (const { id, ...counts } of rows) {
+    map.set(id, Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, Number(v)])));
+  }
+  return map;
+}
+
+export async function GET(request: NextRequest) {
   try {
     const workspaceId = await getWorkspaceId();
     const campaigns = await prisma.campaign.findMany({
       where: { workspaceId: workspaceId ?? null },
       orderBy: { createdAt: "desc" },
     });
+    if (request.nextUrl.searchParams.get("overview") === "1") {
+      const overviews = await campaignOverviews(workspaceId ?? null);
+      return NextResponse.json(campaigns.map((c) => ({ ...c, overview: overviews.get(c.id) ?? null })));
+    }
     return NextResponse.json(campaigns);
   } catch (error) {
     console.error("Campaigns fetch error:", error);
