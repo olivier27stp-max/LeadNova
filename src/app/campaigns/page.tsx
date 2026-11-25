@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
 import { Plus, Play, Pause, ShieldBan, Trash2, Megaphone, Inbox, Mail } from "lucide-react";
@@ -126,17 +126,25 @@ export default function CampaignsPage() {
     fetchStats(period);
   }
 
+  // Verrou synchrone : double-clic ou Entrée répétée arrivent avant le prochain rendu
+  const creatingCampaign = useRef(false);
   async function createCampaign() {
-    if (!newCampaignName.trim()) return;
-    const res = await fetch("/api/campaigns", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newCampaignName }),
-    });
-    const campaign = await res.json();
-    setCampaigns([campaign, ...campaigns]);
-    setNewCampaignName("");
-    setShowNewCampaign(false);
+    if (!newCampaignName.trim() || creatingCampaign.current) return;
+    creatingCampaign.current = true;
+    try {
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCampaignName }),
+      });
+      if (!res.ok) return;
+      const campaign = await res.json();
+      setCampaigns((prev) => (prev.some((c) => c.id === campaign.id) ? prev : [campaign, ...prev]));
+      setNewCampaignName("");
+      setShowNewCampaign(false);
+    } finally {
+      creatingCampaign.current = false;
+    }
   }
 
   async function toggleCampaignStatus(campaign: Campaign) {
@@ -202,7 +210,7 @@ export default function CampaignsPage() {
                 value={newCampaignName}
                 onChange={(e) => setNewCampaignName(e.target.value)}
                 placeholder={t("campaigns", "campaignNamePlaceholder")}
-                onKeyDown={(e) => e.key === "Enter" && createCampaign()}
+                onKeyDown={(e) => e.key === "Enter" && !e.repeat && !e.nativeEvent.isComposing && createCampaign()}
                 className="flex-1"
               />
               <Button onClick={createCampaign} variant="success">

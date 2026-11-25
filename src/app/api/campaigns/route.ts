@@ -32,25 +32,52 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const workspaceId = await getWorkspaceId();
 
-    // Auto-assign next sequential number
-    const lastCampaign = await prisma.campaign.findFirst({
-      where: { workspaceId: workspaceId ?? null },
-      orderBy: { number: "desc" },
-      select: { number: true },
-    });
-    const nextNumber = (lastCampaign?.number ?? 0) + 1;
+    // Anti-doublon : même nom dans le même compte créé il y a moins de 15 s
+    // (double-clic, Entrée répétée, requête renvoyée) → on renvoie celle qui existe déjà
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) {
+      return NextResponse.json({ error: "Nom de campagne requis" }, { status: 400 });
+    }
+    // Verrou par compte (libéré à la fin de la transaction) : deux requêtes simultanées
+    // passent l'une après l'autre, la 2e voit la campagne de la 1re et la renvoie.
+    const { campaign, duplicate } = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"campaign-create:" + (workspaceId ?? "none")}))`;
 
-    const campaign = await prisma.campaign.create({
-      data: {
-        name: body.name,
-        number: nextNumber,
-        workspaceId: workspaceId ?? undefined,
-        maxPerDay: body.maxPerDay || 30,
-        delayMinSeconds: body.delayMinSeconds || 120,
-        delayMaxSeconds: body.delayMaxSeconds || 300,
-        requireApproval: body.requireApproval ?? true,
-      },
+      const recentSame = await tx.campaign.findFirst({
+        where: {
+          workspaceId: workspaceId ?? null,
+          name,
+          createdAt: { gte: new Date(Date.now() - 15_000) },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (recentSame) return { campaign: recentSame, duplicate: true };
+
+      // Auto-assign next sequential number
+      const lastCampaign = await tx.campaign.findFirst({
+        where: { workspaceId: workspaceId ?? null },
+        orderBy: { number: "desc" },
+        select: { number: true },
+      });
+      const nextNumber = (lastCampaign?.number ?? 0) + 1;
+
+      const created = await tx.campaign.create({
+        data: {
+          name,
+          number: nextNumber,
+          workspaceId: workspaceId ?? undefined,
+          maxPerDay: body.maxPerDay || 30,
+          delayMinSeconds: body.delayMinSeconds || 120,
+          delayMaxSeconds: body.delayMaxSeconds || 300,
+          requireApproval: body.requireApproval ?? true,
+        },
+      });
+      return { campaign: created, duplicate: false };
     });
+
+    if (duplicate) {
+      return NextResponse.json(campaign, { status: 200 });
+    }
 
     await logActivity({
       action: "campaign_created",
