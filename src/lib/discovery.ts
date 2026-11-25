@@ -372,6 +372,11 @@ function getCityCoords(city: string): { lat: number; lng: number } | null {
 }
 
 const SEARCH_RADIUS_METERS = 30000; // 30km — covers surrounding towns
+/** Résultats demandés à Outscraper par recherche (chacun est facturé). Au-delà de 20, surtout des
+ *  entreprises loin de la ville ou hors sujet. */
+const OUTSCRAPER_RESULTS_PER_QUERY = 20;
+/** Sous ce nombre d'entreprises nouvelles par recherche, les mots-clés suivants de la ville sont sautés. */
+const MIN_NEW_COMPANIES_PER_QUERY = 3;
 const MAX_PLACES_PAGES = 3; // 3 × 20 = 60 résultats max par requête (limite de Google)
 
 /** Ajoute « , Québec » (région CA) sauf si la requête nomme déjà Québec / QC — sinon « Saint-Georges » ou « Alma » peut tomber hors province. */
@@ -429,7 +434,7 @@ async function searchViaOutscraper(query: string, city: string, apiKey: string, 
   const searchQuery = queryHasCity ? withProvince(query, region) : withProvince(`${query}, ${city}`, region);
   const params = new URLSearchParams({
     query: searchQuery,
-    limit: "40",
+    limit: String(OUTSCRAPER_RESULTS_PER_QUERY),
     async: "false",
     language: lang,
     region,
@@ -645,39 +650,77 @@ export async function discoverProspects(
   const CONCURRENCY = isOutscraper ? 4 : 1;
   const succeededQueries: string[] = [];
   let stopAll = false;
-  let nextIndex = 0;
   let done = 0;
-  const worker = async () => {
-    while (!stopAll && nextIndex < effectiveQueries.length) {
-      if (isCancelRequested(workspaceId)) { stopAll = true; break; }
-      if (isOutscraper && allResults.length >= maxNew * 2) { stopAll = true; break; }
-      const query = effectiveQueries[nextIndex++];
-      queriesRun++;
-      try {
-        const results = await untilCancelled(searchPlaces(query, city, settings.region), () => isCancelRequested(workspaceId));
-        succeededQueries.push(query);
-        if (results.length > 0) queriesWithResults++;
-        allResults.push(
-          ...results.map((r) => ({
-            ...r,
-            // Garder la ville réelle donnée par Outscraper (ex. une ville voisine) au lieu de la ville cherchée
-            city: r.city ? normalizeCityName(r.city) : normalizedCity,
-            industry: industry || r.industry,
-            _searchQuery: query,
-          }))
-        );
-      } catch (error) {
-        if (error instanceof CancelledError) { stopAll = true; break; }
-        const message = error instanceof Error ? error.message : "Unknown error";
-        errors.push(`${query}: ${message}`);
-        console.error(`Discovery error for query "${query}":`, error);
-        if (message.includes("402") || message.includes("403") || message.includes("429")) stopAll = true;
-      }
+
+  // Entreprise jamais vue (ni dans la liste, ni plus tôt dans cette découverte) ?
+  // Sert à arrêter les recherches d'une ville quand les mots-clés suivants ne ramènent plus
+  // que les mêmes entreprises : chaque résultat est facturé, même en double.
+  const runNames = new Set<string>();
+  const runPhones = new Set<string>();
+  const runSites = new Set<string>();
+  const isFreshCompany = (r: SearchResult): boolean => {
+    const name = r.companyName.toLowerCase().trim();
+    const nameKey = `${name}|${normalizeCityName(r.city || city).toLowerCase().trim()}`;
+    const phone = (r.phone || "").replace(/\D/g, "");
+    const site = websiteKey(r.website);
+    const known =
+      runNames.has(name) ||
+      existingNames.has(nameKey) ||
+      (phone.length >= 7 && (runPhones.has(phone) || existingPhones.has(phone))) ||
+      (!!site && (runSites.has(site) || existingSites.has(site)));
+    runNames.add(name);
+    if (phone.length >= 7) runPhones.add(phone);
+    if (site) runSites.add(site);
+    return !known;
+  };
+
+  /** Lance une recherche ; renvoie [résultats reçus, entreprises nouvelles]. */
+  const runQuery = async (query: string): Promise<[number, number]> => {
+    queriesRun++;
+    try {
+      const results = await untilCancelled(searchPlaces(query, city, settings.region), () => isCancelRequested(workspaceId));
+      succeededQueries.push(query);
+      if (results.length > 0) queriesWithResults++;
+      const mapped = results.map((r) => ({
+        ...r,
+        // Garder la ville réelle donnée par Outscraper (ex. une ville voisine) au lieu de la ville cherchée
+        city: r.city ? normalizeCityName(r.city) : normalizedCity,
+        industry: industry || r.industry,
+        _searchQuery: query,
+      }));
+      allResults.push(...mapped);
+      return [mapped.length, mapped.filter(isFreshCompany).length];
+    } catch (error) {
+      if (error instanceof CancelledError) { stopAll = true; return [0, 0]; }
+      const message = error instanceof Error ? error.message : "Unknown error";
+      errors.push(`${query}: ${message}`);
+      console.error(`Discovery error for query "${query}":`, error);
+      if (message.includes("402") || message.includes("403") || message.includes("429")) stopAll = true;
+      return [0, 0];
+    } finally {
       done++;
       updateDiscoveryProgress(workspaceId, { filterPhase: `Recherches Google Maps... (${done}/${effectiveQueries.length})` });
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, effectiveQueries.length) }, () => worker()));
+
+  // La première recherche (premier mot-clé du Ciblage) part seule, puis les suivantes par vagues.
+  // Une vague qui reçoit des résultats mais presque rien de nouveau = ville épuisée → on arrête.
+  let nextIndex = 0;
+  let queriesAvoided = 0;
+  while (!stopAll && nextIndex < effectiveQueries.length) {
+    if (isCancelRequested(workspaceId)) break;
+    if (isOutscraper && allResults.length >= maxNew * 2) break;
+    const wave = effectiveQueries.slice(nextIndex, nextIndex + (nextIndex === 0 ? 1 : CONCURRENCY));
+    nextIndex += wave.length;
+    const counts = await Promise.all(wave.map(runQuery));
+    const received = counts.reduce((sum, [n]) => sum + n, 0);
+    const fresh = counts.reduce((sum, [, f]) => sum + f, 0);
+    if (received > 0 && fresh < MIN_NEW_COMPANIES_PER_QUERY * wave.length && nextIndex < effectiveQueries.length) {
+      queriesAvoided = effectiveQueries.length - nextIndex;
+      console.log(`[discovery] ${city} : ${fresh} entreprise(s) nouvelle(s) sur ${received} résultats → ${queriesAvoided} recherche(s) évitée(s)`);
+      break;
+    }
+  }
   // Seules les recherches réussies vont dans la mémoire (une erreur sera retentée la prochaine fois)
   await rememberQueries(workspaceId, succeededQueries);
 
@@ -1029,6 +1072,8 @@ export async function discoverProspects(
     verification_site: filtered.length - afterAIRelevance.length,
     nom_invalide: afterAIRelevance.length - afterLocalFilter.length + invalidByAi,
     objectif_atteint: Math.max(0, afterLocalFilter.length - processedCount - invalidByAi),
+    // Pas des résultats : recherches non lancées parce que la ville ne donnait plus rien de nouveau
+    recherches_evitees: queriesAvoided,
   };
   console.log(`[discovery] ${city} — écartés par étape:`, JSON.stringify(drops));
 
