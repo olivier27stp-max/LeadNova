@@ -3936,6 +3936,26 @@ export default function SettingsPage() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+                {settings.targeting.keywords.length > 0 && (
+                  <div className="flex justify-end mb-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const n = settings.targeting.keywords.length;
+                        if (!confirm(`Supprimer les ${n} mot${n > 1 ? "s" : ""}-clé${n > 1 ? "s" : ""} ? (n'oubliez pas d'enregistrer)`)) return;
+                        setSettings({
+                          ...settings,
+                          targeting: { ...settings.targeting, keywords: [] },
+                        });
+                        setHasUnsaved(true);
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-danger hover:text-danger/80"
+                    >
+                      <X className="size-3.5" />
+                      Tout supprimer ({settings.targeting.keywords.length})
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {settings.targeting.keywords.length === 0 ? (
                     <p className="text-sm text-muted italic">
