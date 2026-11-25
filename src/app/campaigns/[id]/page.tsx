@@ -118,6 +118,29 @@ export default function CampaignDetailPage() {
   const { t, locale } = useTranslation();
   const campaignId = params.id as string;
 
+  // Suppression de la campagne (les prospects restent ; l'historique des courriels est gardé)
+  const [deletingCampaign, setDeletingCampaign] = useState(false);
+  async function handleDeleteCampaign() {
+    if (deletingCampaign) return;
+    const n = campaign?.contacts?.length ?? 0;
+    const label = campaign ? `« ${campaign.name} »` : "cette campagne";
+    if (!confirm(
+      `Supprimer la campagne ${label} ?\n\n` +
+      `${n} prospect${n > 1 ? "s" : ""} ${n > 1 ? "seront retirés" : "sera retiré"} de la campagne (${n > 1 ? "ils restent" : "il reste"} dans Prospects). ` +
+      `Les envois planifiés pas encore partis seront annulés. L'historique des courriels déjà envoyés est gardé.\n\nCette action est irréversible.`
+    )) return;
+    setDeletingCampaign(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      router.push("/campaigns");
+    } catch (error) {
+      alert(`Suppression impossible : ${error instanceof Error ? error.message : "erreur"}`);
+      setDeletingCampaign(false);
+    }
+  }
+
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -1235,6 +1258,15 @@ export default function CampaignDetailPage() {
               {t("common", "back")}
             </Button>
           </Link>
+          <Button
+            variant="danger-ghost"
+            onClick={handleDeleteCampaign}
+            disabled={deletingCampaign}
+            title="Supprimer cette campagne"
+          >
+            <Trash2 />
+            {deletingCampaign ? "Suppression..." : "Supprimer"}
+          </Button>
           <Button
             variant={campaign.status === "ACTIVE" ? "secondary" : "success"}
             onClick={handleToggleStatus}
