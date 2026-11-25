@@ -163,10 +163,10 @@ export async function GET(request: NextRequest) {
       : { [orderByField]: sortOrder };
 
     // Sequential queries (connection_limit=1 on local Prisma Postgres)
-    const total = await prisma.prospect.count({ where });
     const scrapedToday = await prisma.prospect.count({
       where: {
         archivedAt: null,
+        workspaceId: workspaceId ?? null,
         source: {
           in: ["google_search", "duckduckgo_search"],
         },
@@ -178,6 +178,7 @@ export async function GET(request: NextRequest) {
     const enrichedToday = await prisma.prospect.count({
       where: {
         archivedAt: null,
+        workspaceId: workspaceId ?? null,
         // enrichedAt marque aussi une tentative sans résultat (statut resté NEW)
         status: { not: "NEW" },
         enrichedAt: {
@@ -256,6 +257,9 @@ export async function GET(request: NextRequest) {
         },
       },
     });
+
+    // Tout tient dans la page demandée : le total est connu sans requête de plus
+    const total = page === 1 && prospects.length < limit ? prospects.length : await prisma.prospect.count({ where });
 
     // Flatten campaign data for frontend
     const flatProspects = prospects.map(({ campaignContacts, ...rest }) => ({
