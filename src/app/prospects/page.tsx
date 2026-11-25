@@ -77,6 +77,7 @@ interface CampaignOption {
   id: string;
   number: number;
   name: string;
+  count?: number;
 }
 
 interface ProspectDetail extends ProspectListItem {
@@ -123,6 +124,11 @@ const CONTACT_TYPE_LABELS: Record<string, string> = {
 };
 
 const LOAD_ALL_LIMIT = 5000;
+const LAST_CAMPAIGN_KEY = "leadnova.prospects.lastCampaign";
+function readLastCampaignChoice(): string | null {
+  if (typeof window === "undefined") return null;
+  try { return localStorage.getItem(LAST_CAMPAIGN_KEY); } catch { return null; }
+}
 const RENDER_STEP = 100;
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -401,6 +407,11 @@ export default function ProspectsPage() {
   const [dailyDiscoveryLimit, setDailyDiscoveryLimit] = useState(50);
   const [loading, setLoading] = useState(true);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  // En arrivant sur la page : on demande d'abord quelle campagne afficher, rien n'est chargé avant
+  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
+  const [campaignChosen, setCampaignChosen] = useState(false);
+  const campaignChosenRef = useRef(false);
+  const [lastCampaignChoice] = useState(readLastCampaignChoice);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("");
@@ -612,6 +623,7 @@ export default function ProspectsPage() {
   }, []);
 
   const fetchProspects = useCallback(async () => {
+    if (!campaignChosenRef.current) return; // la campagne n'est pas encore choisie
     const key = buildListParams();
     const cached = listCache.current.get(key);
     if (cached) {
@@ -655,7 +667,7 @@ export default function ProspectsPage() {
   const prefetchRun = useRef(0);
   const prefetchCampaignLists = useCallback(async (campaignIds: string[]) => {
     const run = ++prefetchRun.current;
-    for (const cid of ["", "none", ...campaignIds]) {
+    for (const cid of [...campaignIds, "none", ""]) {
       if (prefetchRun.current !== run) return; // filtres changés : on repart avec les nouveaux
       const key = buildListParams(cid);
       if (listCache.current.has(key)) continue;
@@ -667,24 +679,36 @@ export default function ProspectsPage() {
   }, [buildListParams]);
 
   useEffect(() => {
-    fetchProspects();
-  }, [fetchProspects]);
+    if (campaignChosen) fetchProspects();
+  }, [fetchProspects, campaignChosen]);
 
+  function chooseCampaign(value: string) {
+    try { localStorage.setItem(LAST_CAMPAIGN_KEY, value); } catch { /* navigation privée */ }
+    campaignChosenRef.current = true;
+    setCampaignFilter(value);
+    setCampaignChosen(true);
+  }
+
+  // Préchargement : dès l'arrivée (pendant que la question est affichée, la dernière campagne choisie
+  // d'abord), sinon après le chargement de la liste affichée
   useEffect(() => {
-    if (loading || campaigns.length === 0) return;
-    const t = setTimeout(() => { void prefetchCampaignLists(campaigns.map((c) => c.id)); }, 800);
+    if ((campaignChosen && loading) || campaigns.length === 0) return;
+    const ids = campaigns.map((c) => c.id);
+    const first = !campaignChosen && lastCampaignChoice && ids.includes(lastCampaignChoice) ? [lastCampaignChoice] : [];
+    const t = setTimeout(() => { void prefetchCampaignLists([...first, ...ids.filter((id) => !first.includes(id))]); }, campaignChosen ? 800 : 0);
     return () => clearTimeout(t);
-  }, [loading, campaigns, prefetchCampaignLists]);
+  }, [loading, campaigns, prefetchCampaignLists, campaignChosen, lastCampaignChoice]);
 
   // Fetch campaigns for dropdown
   useEffect(() => {
-    fetch("/api/campaigns")
+    fetch("/api/campaigns?overview=1")
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: CampaignOption[]) => {
+      .then((data: (CampaignOption & { overview?: { contacts?: number } | null })[]) => {
         const list = Array.isArray(data) ? data : [];
-        setCampaigns(list.map((c) => ({ id: c.id, number: c.number, name: c.name })).sort((a, b) => a.number - b.number));
+        setCampaigns(list.map((c) => ({ id: c.id, number: c.number, name: c.name, count: c.overview?.contacts })).sort((a, b) => a.number - b.number));
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setCampaignsLoaded(true));
   }, []);
 
   // Assign campaign to prospect
@@ -3551,6 +3575,51 @@ export default function ProspectsPage() {
           </div>
         </div>
       )}
+      {/* Question à l'arrivée : quelle campagne afficher ? */}
+      {!campaignChosen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md p-5">
+            <h2 className="text-lg font-semibold text-foreground mb-1">Quelle campagne veux-tu afficher ?</h2>
+            <p className="text-sm text-foreground-muted mb-4">Tu pourras changer ensuite avec le filtre « Campagne ».</p>
+            {!campaignsLoaded ? (
+              <p className="text-sm text-foreground-muted py-6 text-center">Chargement des campagnes…</p>
+            ) : (
+              <div className="flex flex-col gap-1.5 max-h-[60vh] overflow-y-auto">
+                {[
+                  ...campaigns.map((c) => ({
+                    value: c.id,
+                    label: `#${c.number} — ${c.name}`,
+                    hint: c.count != null ? `${c.count} prospect${c.count > 1 ? "s" : ""}` : "",
+                  })),
+                  { value: "", label: "Toutes les campagnes", hint: "tous les prospects" },
+                  { value: "none", label: "Aucune campagne", hint: "prospects sans campagne" },
+                ].map((opt) => {
+                  const isLast = lastCampaignChoice === opt.value;
+                  return (
+                    <button
+                      key={opt.value || "all"}
+                      autoFocus={isLast}
+                      onClick={() => chooseCampaign(opt.value)}
+                      className={cn(
+                        "flex items-center justify-between gap-3 text-left px-3 py-2.5 rounded-md border text-sm transition-colors",
+                        isLast
+                          ? "border-primary bg-primary-subtle text-foreground"
+                          : "border-border hover:bg-card-hover text-foreground"
+                      )}
+                    >
+                      <span className="truncate font-medium">{opt.label}</span>
+                      <span className="shrink-0 text-xs text-foreground-muted">
+                        {isLast ? "dernier choix · " : ""}{opt.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Nouvelle campagne à partir de la sélection */}
       {newCampaignModal && (
         <div
