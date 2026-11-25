@@ -1380,11 +1380,15 @@ export default function ProspectsPage() {
       }
   >(null);
 
+  // Verrou synchrone : un double-clic (ou Entrée + clic) arrive avant que « saving » soit rendu
+  const newCampaignBusy = useRef(false);
+
   async function handleCreateCampaignFromSelection() {
-    if (newCampaignModal?.step !== "name") return;
+    if (newCampaignModal?.step !== "name" || newCampaignBusy.current) return;
     const name = newCampaignModal.name.trim();
     const ids = Array.from(selectedIds);
     if (!name || ids.length === 0) return;
+    newCampaignBusy.current = true;
     setNewCampaignModal({ ...newCampaignModal, saving: true, error: undefined });
     try {
       const res = await fetch("/api/campaigns", {
@@ -1416,6 +1420,8 @@ export default function ProspectsPage() {
       });
     } catch {
       setNewCampaignModal((m) => (m?.step === "name" ? { ...m, saving: false, error: "Erreur lors de la création de la campagne" } : m));
+    } finally {
+      newCampaignBusy.current = false;
     }
   }
 
