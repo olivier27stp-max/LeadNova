@@ -123,6 +123,7 @@ const CONTACT_TYPE_LABELS: Record<string, string> = {
 };
 
 const LOAD_ALL_LIMIT = 5000;
+const RENDER_STEP = 100;
 const CURRENT_YEAR = new Date().getFullYear();
 
 // Colonnes de la liste : l'utilisateur choisit celles qu'il affiche (mémorisé dans ce navigateur).
@@ -568,15 +569,20 @@ export default function ProspectsPage() {
 
   // Fetch prospects
   const hasLoadedOnce = useRef(false);
-  const fetchProspects = useCallback(async () => {
-    // Only show skeleton on initial load, not during enrichment refreshes
-    if (!hasLoadedOnce.current) setLoading(true);
+  // Listes déjà chargées (clé = paramètres de la requête) : on les réaffiche tout de suite,
+  // puis on rafraîchit en arrière-plan. Une requête devenue inutile est annulée.
+  type ProspectsResponse = { prospects?: ProspectListItem[]; total?: number; scrapedToday?: number; enrichedToday?: number; dailyDiscoveryLimit?: number };
+  const listCache = useRef(new Map<string, ProspectsResponse>());
+  const listAbort = useRef<AbortController | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const buildListParams = useCallback((campaignOverride?: string) => {
     const params = new URLSearchParams({ page: "1", limit: String(LOAD_ALL_LIMIT) });
+    const camp = campaignOverride ?? campaignFilter;
     if (statusFilter) params.set("status", statusFilter);
     if (sourceFilter) params.set("source", sourceFilter);
     if (contactTypeFilter) params.set("contactType", contactTypeFilter);
-    if (campaignFilter && campaignFilter !== "none") params.set("campaignId", campaignFilter);
-    if (campaignFilter === "none") params.set("campaignId", "none");
+    if (camp) params.set("campaignId", camp);
     if (formFilter) params.set("formStatus", formFilter);
     if (industryGroupFilter) params.set("industryGroup", industryGroupFilter);
     if (crmFilter) params.set("competitorCrm", crmFilter);
@@ -594,33 +600,81 @@ export default function ProspectsPage() {
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (sortBy) params.set("sortBy", sortBy);
     if (sortOrder) params.set("sortOrder", sortOrder);
+    return params.toString();
+  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, tagFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly, debouncedSearch, sortBy, sortOrder]);
+
+  const applyListData = useCallback((data: ProspectsResponse) => {
+    setProspects(data.prospects || []);
+    setTotal(data.total || 0);
+    if (data.scrapedToday !== undefined) setScrapedToday(data.scrapedToday);
+    if (data.enrichedToday !== undefined) setEnrichedToday(data.enrichedToday);
+    if (data.dailyDiscoveryLimit !== undefined) setDailyDiscoveryLimit(data.dailyDiscoveryLimit);
+  }, []);
+
+  const fetchProspects = useCallback(async () => {
+    const key = buildListParams();
+    const cached = listCache.current.get(key);
+    if (cached) {
+      applyListData(cached); // affichage immédiat, la version fraîche suit
+      setLoading(false);
+    } else if (!hasLoadedOnce.current) {
+      setLoading(true); // squelette seulement au tout premier chargement
+    }
+    listAbort.current?.abort();
+    const controller = new AbortController();
+    listAbort.current = controller;
+    setRefreshing(true);
 
     try {
-      let res = await fetch(`/api/prospects?${params}`);
+      let res = await fetch(`/api/prospects?${key}`, { signal: controller.signal });
       // Retry once on 500 (transient DB connection errors)
       if (res.status === 500) {
         await new Promise((r) => setTimeout(r, 1000));
-        res = await fetch(`/api/prospects?${params}`);
+        res = await fetch(`/api/prospects?${key}`, { signal: controller.signal });
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setProspects(data.prospects || []);
-      setTotal(data.total || 0);
-      if (data.scrapedToday !== undefined) setScrapedToday(data.scrapedToday);
-      if (data.enrichedToday !== undefined) setEnrichedToday(data.enrichedToday);
-      if (data.dailyDiscoveryLimit !== undefined) setDailyDiscoveryLimit(data.dailyDiscoveryLimit);
+      const data: ProspectsResponse = await res.json();
+      listCache.current.set(key, data);
+      if (listAbort.current !== controller) return; // une liste plus récente a été demandée
+      applyListData(data);
       hasLoadedOnce.current = true;
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error("Failed to fetch prospects:", error);
       // Don't clear existing data on error — keep showing what we have
     } finally {
-      setLoading(false);
+      if (listAbort.current === controller) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [statusFilter, sourceFilter, contactTypeFilter, campaignFilter, formFilter, industryGroupFilter, crmFilter, reachFilter, minScoreFilter, reviewsFilter, ownerFilter, tagFilter, callbackFilter, ageFilter, yearFrom, yearTo, ageSureOnly, debouncedSearch, sortBy, sortOrder]);
+  }, [buildListParams, applyListData]);
+
+  // Précharge en arrière-plan la liste de chaque campagne (avec les autres filtres actuels),
+  // pour que changer de campagne dans le filtre soit instantané. Une à la fois.
+  const prefetchRun = useRef(0);
+  const prefetchCampaignLists = useCallback(async (campaignIds: string[]) => {
+    const run = ++prefetchRun.current;
+    for (const cid of ["", "none", ...campaignIds]) {
+      if (prefetchRun.current !== run) return; // filtres changés : on repart avec les nouveaux
+      const key = buildListParams(cid);
+      if (listCache.current.has(key)) continue;
+      try {
+        const res = await fetch(`/api/prospects?${key}`);
+        if (res.ok) listCache.current.set(key, await res.json());
+      } catch { /* préchargement : on ignore */ }
+    }
+  }, [buildListParams]);
 
   useEffect(() => {
     fetchProspects();
   }, [fetchProspects]);
+
+  useEffect(() => {
+    if (loading || campaigns.length === 0) return;
+    const t = setTimeout(() => { void prefetchCampaignLists(campaigns.map((c) => c.id)); }, 800);
+    return () => clearTimeout(t);
+  }, [loading, campaigns, prefetchCampaignLists]);
 
   // Fetch campaigns for dropdown
   useEffect(() => {
@@ -700,6 +754,30 @@ export default function ProspectsPage() {
       return false;
     });
   }, [prospects, searchQuery, cityFilter, minChanceFilter, engagementFilter, sortBy, sortOrder]);
+
+  // Affichage progressif : dessiner 1 000 lignes d'un coup rendait chaque changement de liste lent.
+  // On montre les premières lignes tout de suite, la suite arrive en défilant.
+  // (Ctrl+F ouvert : toutes les lignes, la recherche dans la page parcourt le tableau affiché.)
+  const [renderLimit, setRenderLimit] = useState(RENDER_STEP);
+  const [renderListKey, setRenderListKey] = useState("");
+  const currentListKey = `${campaignFilter}|${statusFilter}|${sourceFilter}|${contactTypeFilter}|${formFilter}|${industryGroupFilter}|${crmFilter}|${reachFilter}|${minScoreFilter}|${reviewsFilter}|${ownerFilter}|${tagFilter}|${ageFilter}|${yearFrom}|${yearTo}|${ageSureOnly}|${callbackFilter}|${cityFilter}|${minChanceFilter}|${engagementFilter}|${searchQuery}|${sortBy}|${sortOrder}`;
+  if (renderListKey !== currentListKey) {
+    setRenderListKey(currentListKey);
+    setRenderLimit(RENDER_STEP);
+  }
+  const renderedProspects = useMemo(
+    () => (showFindBar ? displayProspects : displayProspects.slice(0, renderLimit)),
+    [displayProspects, renderLimit, showFindBar]
+  );
+  const moreRowsObserver = useRef<IntersectionObserver | null>(null);
+  const moreRowsRef = useCallback((node: HTMLTableRowElement | null) => {
+    moreRowsObserver.current?.disconnect();
+    if (!node) return;
+    moreRowsObserver.current = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setRenderLimit((n) => n + RENDER_STEP);
+    }, { rootMargin: "600px" });
+    moreRowsObserver.current.observe(node);
+  }, []);
 
   // Fetch targeting cities from settings + provinces list
   useEffect(() => {
@@ -3133,7 +3211,7 @@ export default function ProspectsPage() {
                 </td>
               </tr>
             ) : (
-              displayProspects.map((p, i) => (
+              renderedProspects.map((p, i) => (
                 <ProspectRow
                   key={p.id}
                   prospect={p}
@@ -3152,6 +3230,15 @@ export default function ProspectsPage() {
                 />
               ))
             )}
+            {!loading && renderedProspects.length < displayProspects.length && (
+              <tr ref={moreRowsRef}>
+                <td colSpan={3 + visibleColumns.length} className="text-center py-3 text-xs text-foreground-muted">
+                  <button onClick={() => setRenderLimit((n) => n + RENDER_STEP)} className="hover:text-foreground">
+                    Afficher plus ({displayProspects.length - renderedProspects.length} de plus)
+                  </button>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -3161,6 +3248,7 @@ export default function ProspectsPage() {
         <div className="mt-4 text-center">
           <p className="text-sm text-foreground-muted">
             {displayProspects.length} {displayProspects.length > 1 ? t("prospects", "totalCountPlural") : t("prospects", "totalCount")} {t("prospects", "displayed")} {total}
+            {refreshing && <span className="ml-2 text-xs">· mise à jour…</span>}
           </p>
         </div>
       )}
