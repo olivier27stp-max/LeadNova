@@ -4,6 +4,7 @@ import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
 import { logActivity } from "./activity";
 import { FormDetectionAccumulator } from "./form-detection";
+import { websiteKey } from "./discovery";
 
 // Yield DB connection between prospects so other requests can get through
 // (critical for connection_limit=1 local Prisma Postgres)
@@ -86,6 +87,9 @@ const CONTACT_LINK_KEYWORDS = [
   "mentions-legales", "legal", "info", "support",
 ];
 
+// Pages « soumission », « rendez-vous », « réservation »… : souvent le seul endroit où le courriel est écrit
+const REQUEST_LINK_RE = /soumission|devis|estimation|estime|quote|estimate|rendez-vous|rendezvous|\brdv\b|prendre-rdv|reserv|booking|book-?now|appointment|planifier|demande|request/i;
+
 // ─── False positive domains / extensions to filter out ──
 const EMAIL_BLACKLIST_PATTERNS = [
   "example.com", "sentry.io", "wixpress.com", "wordpress.org",
@@ -152,17 +156,41 @@ export async function fetchPage(url: string, timeoutMs = 15000): Promise<string 
 }
 
 // ─── Deobfuscate emails ─────────────────────────────────
-function deobfuscateEmails(text: string): string[] {
-  const results: string[] = [];
+/** Protection Cloudflare : data-cfemail="<hex>" ou /cdn-cgi/l/email-protection#<hex> (XOR avec le 1er octet). */
+function decodeCloudflareEmails(html: string): string[] {
+  const out: string[] = [];
+  const re = /(?:data-cfemail="|email-protection#)([0-9a-fA-F]{6,})/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    try {
+      const hex = m[1];
+      const key = parseInt(hex.slice(0, 2), 16);
+      let email = "";
+      for (let i = 2; i < hex.length; i += 2) email += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+      if (email.includes("@")) out.push(email.toLowerCase());
+    } catch { /* hex invalide */ }
+  }
+  return out;
+}
 
-  // Decode HTML entities first
-  const decoded = text
-    .replace(/&#64;/g, "@")
-    .replace(/&#46;/g, ".")
+/** Décode TOUTES les entités numériques (WordPress antispambot encode chaque lettre au hasard) + échappements JS/URL. */
+function decodeEncodedText(text: string): string {
+  return text
+    .replace(/&#(\d{1,6});?/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
     .replace(/&commat;/g, "@")
     .replace(/&period;/g, ".")
-    .replace(/&#x40;/g, "@")
-    .replace(/&#x2e;/g, ".");
+    .replace(/&amp;/g, "&")
+    .replace(/\\u0040/gi, "@")
+    .replace(/\\x40/gi, "@")
+    .replace(/%40/g, "@");
+}
+
+function deobfuscateEmails(text: string): string[] {
+  const results: string[] = [...decodeCloudflareEmails(text)];
+
+  // Decode HTML entities first
+  const decoded = decodeEncodedText(text);
 
   // Find patterns like "name [at] domain [dot] com"
   const obfuscatedPattern = /([a-zA-Z0-9._%+-]+)\s*[\[({]\s*(?:at|@|arobase|chez)\s*[\])}]\s*([a-zA-Z0-9.-]+)\s*[\[({]\s*(?:dot|point|\.)\s*[\])}]\s*([a-zA-Z]{2,})/gi;
@@ -220,6 +248,36 @@ function extractFooterContactEmails(html: string): string[] {
 // ─── Extract emails (comprehensive) ─────────────────────
 // Returns deduplicated emails. Also populates the optional mailtoEmails set
 // so callers can boost the score of emails found in mailto: links or footer/contact sections.
+const BLOCK_SELECTOR = "p, div, li, ul, ol, td, th, tr, table, br, h1, h2, h3, h4, h5, h6, section, article, header, footer, nav, aside, address, form, label, button, dt, dd, blockquote";
+
+// Extensions courantes : sert à couper une extension collée au mot suivant dans le texte visible
+const KNOWN_TLDS = new Set([
+  "ca", "com", "net", "org", "info", "biz", "co", "io", "me", "pro", "us", "fr", "be", "ch", "uk", "eu",
+  "quebec", "qc", "online", "site", "store", "shop", "tech", "app", "dev", "xyz", "ltd", "inc", "services",
+  "solutions", "construction", "immo", "immobilier", "realestate", "cleaning", "group", "agency", "media",
+  "design", "studio", "consulting", "expert", "build", "homes", "house", "auto", "travel", "health", "care",
+]);
+
+/**
+ * « info@site.caNous » / « info@site.comtel » → « info@site.ca » / « info@site.com ».
+ * Garde l'extension si elle est connue ; sinon prend la plus longue extension connue qui la commence ;
+ * sinon rejette l'adresse (null) plutôt que d'enregistrer un courriel faux.
+ */
+function trimGluedTld(email: string): string | null {
+  const at = email.lastIndexOf("@");
+  const dot = email.lastIndexOf(".");
+  if (at < 0 || dot < at) return null;
+  let tld = email.slice(dot + 1);
+  const upper = tld.search(/(?<=[a-z])[A-Z]/); // « caNous » : la majuscule marque le début du mot suivant
+  if (upper > 0) tld = tld.slice(0, upper);
+  tld = tld.toLowerCase();
+  const head = email.slice(0, dot + 1);
+  if (KNOWN_TLDS.has(tld)) return head + tld;
+  let best = "";
+  for (const known of KNOWN_TLDS) if (tld.startsWith(known) && known.length > best.length) best = known;
+  return best ? head + best : null;
+}
+
 function extractEmails(html: string, mailtoEmails?: Set<string>): string[] {
   const found: string[] = [];
 
@@ -237,10 +295,16 @@ function extractEmails(html: string, mailtoEmails?: Set<string>): string[] {
   // 2) Deobfuscated emails
   found.push(...deobfuscateEmails(html));
 
-  // 3) mailto: links (most reliable source)
+  // 3) mailto: links (most reliable source) — aussi après décodage des entités (mailto:&#105;&#110;…)
+  //    et adresses protégées par Cloudflare (publiées volontairement, donc même confiance)
   const mailtoRegex = /mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
+  for (const cfEmail of decodeCloudflareEmails(html)) {
+    found.push(cfEmail);
+    if (mailtoEmails) mailtoEmails.add(cfEmail);
+  }
+  const htmlForMailto = html + "\n" + decodeEncodedText(html);
   let match;
-  while ((match = mailtoRegex.exec(html)) !== null) {
+  while ((match = mailtoRegex.exec(htmlForMailto)) !== null) {
     const email = match[1].toLowerCase().trim();
     found.push(email);
     if (mailtoEmails) mailtoEmails.add(email);
@@ -269,8 +333,23 @@ function extractEmails(html: string, mailtoEmails?: Set<string>): string[] {
     if (email && email.includes("@")) found.push(email);
   });
 
-  // Filter & deduplicate
-  return [...new Set(found.map((e) => e.toLowerCase().trim()))].filter(isValidEmail);
+  // 7) Texte visible : une adresse coupée par des balises (info<span>@</span>site.ca)
+  //    ou écrite « info (at) site (point) ca » n'apparaît pas dans le HTML brut.
+  //    Les blocs sont séparés (sinon « info@site.ca » + « Nous joindre » donnerait « info@site.canous ») ;
+  //    les balises en ligne (span, a, strong) restent collées pour recoller l'adresse coupée.
+  $("script, style, noscript").remove();
+  $(BLOCK_SELECTOR).after("\n");
+  const visibleText = decodeEncodedText($("body").text() || $.root().text());
+  for (const e of [...(visibleText.match(EMAIL_REGEX) || []), ...deobfuscateEmails(visibleText)]) {
+    const fixed = trimGluedTld(e);
+    if (fixed) found.push(fixed);
+  }
+
+  // Filter & deduplicate — chaque candidat est réduit à la partie qui est vraiment une adresse :
+  // « "email": "â ï»¿info@site.com" » (JSON-LD avec caractères parasites) → info@site.com,
+  // « sac@site.com?subject=… » (mailto avec paramètres) → sac@site.com
+  const clean = found.flatMap((e) => e.toLowerCase().trim().match(EMAIL_REGEX) ?? []);
+  return [...new Set(clean)].filter(isValidEmail);
 }
 
 // ─── Email validation ───────────────────────────────────
@@ -382,16 +461,17 @@ function extractPhones(html: string): string[] {
 function findRelevantLinks(
   $: cheerio.CheerioAPI,
   baseUrl: string
-): { contactUrls: string[]; otherUrls: string[] } {
+): { contactUrls: string[]; otherUrls: string[]; requestUrls: string[] } {
   const contactUrls: string[] = [];
   const otherUrls: string[] = [];
+  const requestUrls: string[] = [];
   const seen = new Set<string>();
 
   let baseHost: string;
   try {
     baseHost = new URL(baseUrl).hostname;
   } catch {
-    return { contactUrls, otherUrls };
+    return { contactUrls, otherUrls, requestUrls };
   }
 
   $("a[href]").each((_, el) => {
@@ -420,12 +500,15 @@ function findRelevantLinks(
       } else {
         otherUrls.push(clean);
       }
+      // Bouton « Obtenir une soumission » / « Prendre rendez-vous » : d'après l'adresse ou le texte du lien
+      const linkText = $(el).text().replace(/\s+/g, " ").trim().toLowerCase();
+      if (REQUEST_LINK_RE.test(path) || REQUEST_LINK_RE.test(linkText)) requestUrls.push(clean);
     } catch {
       // Skip invalid URLs
     }
   });
 
-  return { contactUrls, otherUrls };
+  return { contactUrls, otherUrls, requestUrls };
 }
 
 // ─── Try to find sitemap and extract contact URLs ───────
@@ -1419,6 +1502,7 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
 
   let discoveredContactUrls: string[] = [];
   let discoveredOtherUrls: string[] = [];
+  let discoveredRequestUrls: string[] = [];
 
   if (homeHtml) {
     formDetector.add(homeHtml);
@@ -1437,6 +1521,7 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
     const links = findRelevantLinks($, baseUrl);
     discoveredContactUrls = links.contactUrls;
     discoveredOtherUrls = links.otherUrls;
+    discoveredRequestUrls = links.requestUrls;
   }
 
   // ── Step 2: Contact page IMMEDIATELY (most valuable after homepage footer) ──
@@ -1466,6 +1551,17 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
     }
   }
 
+  // ── Step 2c: Pages soumission / rendez-vous / réservation ──
+  // Toujours pas de courriel : ces pages (liens ou boutons de l'accueil) en affichent souvent un.
+  // Elles servent aussi à détecter le formulaire (étape 3a).
+  if (allEmails.length === 0) {
+    for (const url of discoveredRequestUrls.slice(0, 3)) {
+      if (pagesScanned >= MAX_PAGES_PER_PROSPECT) break;
+      await processPage(url);
+      if (allEmails.length > 0) break;
+    }
+  }
+
   // ── Step 3: Try https if http failed (or vice versa) ──
   if (!homeHtml) {
     const altProtocol = baseUrl.startsWith("https://")
@@ -1480,6 +1576,8 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
       const links = findRelevantLinks($, altProtocol);
       discoveredContactUrls = links.contactUrls;
       discoveredOtherUrls = links.otherUrls;
+      discoveredRequestUrls = links.requestUrls;
+    discoveredRequestUrls = links.requestUrls;
     }
   }
 
@@ -1487,16 +1585,19 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
   // Les étapes précédentes s'arrêtent dès qu'on a courriel + téléphone + ville (souvent dans le
   // pied de page). On visite quand même la page contact / soumission pour savoir s'il y a un formulaire.
   if (!formDetector.hasForm) {
-    const formCandidates = [
+    const formCandidates = [...new Set([
       ...discoveredContactUrls,
+      ...discoveredRequestUrls,
       ...discoveredOtherUrls.filter((u) => /soumission|devis|estimation|quote|estimate|booking|reserv|rendez-vous|request|demande/i.test(u)),
-    ]
+    ])]
       .filter((u) => !visitedUrls.has(u))
       .slice(0, 3);
     for (const url of formCandidates) {
       visitedUrls.add(url);
       const html = await fetchPage(url);
       formDetector.add(html);
+      // Avant : page lue seulement pour le formulaire ; un courriel écrit dessus était ignoré
+      if (html) allEmails.push(...extractEmails(html, mailtoEmails));
       if (html && !contactPageUrl && discoveredContactUrls.includes(url)) contactPageUrl = url;
       if (formDetector.hasForm) break;
     }
@@ -1580,7 +1681,10 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
   let emailGuessed = false;
   const hasRealEmails = allEmails.length > 0;
   const isValidDomain = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/.test(companyDomain);
-  if (!hasRealEmails && isValidDomain) {
+  // Pas de devinette sur un site partagé (annuaire, réseau social, hébergeur de sous-sites) :
+  // info@411habitation.com ou info@xyz.wixsite.com n'est pas le courriel de l'entreprise.
+  const ownDomain = !!websiteKey(companyDomain);
+  if (!hasRealEmails && isValidDomain && ownDomain) {
     const guesses = [
       `info@${companyDomain}`,
       `contact@${companyDomain}`,
