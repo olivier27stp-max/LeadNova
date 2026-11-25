@@ -173,7 +173,7 @@ const INDUSTRY_EXCLUSIONS: Array<{ keywords: string[]; exclude: string[]; unless
 ];
 
 /** Check if a result is irrelevant based on the search keyword vs company name/category/website mismatch */
-export function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string, website?: string, mainCategory?: string): boolean {
+export function isIrrelevantResult(companyName: string, searchKeyword: string, googleCategory?: string, website?: string, mainCategory?: string, targetKeywords: string[] = []): boolean {
   const nameLower = companyName.toLowerCase();
   const kwLower = searchKeyword.toLowerCase();
   const catLower = (googleCategory || "").toLowerCase();
@@ -199,13 +199,17 @@ export function isIrrelevantResult(companyName: string, searchKeyword: string, g
   // Extract core service words from the keyword (remove city names and common words)
   if (catLower && catLower.length > 2) {
     const STOP_WORDS = new Set(["de", "du", "des", "le", "la", "les", "et", "en", "à", "au", "aux", "un", "une", "près", "région", "the", "and", "in", "of", "for"]);
-    const kwWords = kwLower
-      .split(/\s+/)
-      .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+    // Mots de la recherche ET de tous les mots-clés du Ciblage : un « Couvreur » trouvé par la
+    // recherche « toit plat » est pertinent si « couvreur » fait partie des mots-clés. Sans accents.
+    const kwWords = [kwLower, ...targetKeywords.map((k) => k.toLowerCase())]
+      .flatMap((k) => k.split(/[\s,]+/))
+      .filter((w) => w.length > 2 && !STOP_WORDS.has(w))
+      .map(foldText);
+    const catF = foldText(catLower), nameF = foldText(nameLower), siteF = foldText(siteLower);
 
     // Check if at least one keyword word appears in the category, company name, or website
     const hasRelevantMatch = kwWords.some((w) =>
-      catLower.includes(w) || nameLower.includes(w) || siteLower.includes(w)
+      catF.includes(w) || nameF.includes(w) || siteF.includes(w)
     );
 
     // If no keyword word matches the category or name, it's likely irrelevant
@@ -296,6 +300,8 @@ interface DiscoveryDiagnostics {
   /** Recherches sautées parce que déjà faites il y a moins de 30 jours */
   queriesSkipped?: number;
   errors: string[];
+  /** Résultats écartés à chaque étape (pour savoir où partent les résultats payés) */
+  drops?: Record<string, number>;
 }
 
 export interface DiscoveryOutcome {
@@ -719,7 +725,7 @@ export async function discoverProspects(
   updateDiscoveryProgress(workspaceId, { filterPhase: "Filtrage par industrie..." });
   const afterRelevance = afterExistingDeduped.filter((r) => {
     if (!r._searchQuery) return true;
-    const irrelevant = isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website, r.mainCategory);
+    const irrelevant = isIrrelevantResult(r.companyName, r._searchQuery, r.googleCategory, r.website, r.mainCategory, settings.keywords);
     if (irrelevant) {
       totalFilteredOut++;
       updateDiscoveryProgress(workspaceId, { filteredOut: totalFilteredOut });
@@ -733,15 +739,16 @@ export async function discoverProspects(
   const afterCategoryFilter = afterRelevance.filter((r) => {
     if (!r.googleCategory) return true; // No category data — keep and let other filters handle it
 
-    const catLower = r.googleCategory.toLowerCase();
-    const queryLower = (r._searchQuery || "").toLowerCase();
+    const catLower = foldText(r.googleCategory);
+    // La recherche qui a trouvé l'entreprise + tous les mots-clés du Ciblage (sans accents)
+    const queryLower = foldText([r._searchQuery || "", ...settings.keywords].join(", "));
 
     // Extract the core service keyword (strip city, region words, FR filler)
     const SERVICE_STOP_WORDS = new Set([
       "de", "du", "des", "le", "la", "les", "et", "en", "à", "au", "aux", "un", "une",
       "près", "region", "région", "the", "and", "in", "of", "for", "near",
       // City names shouldn't be used for matching
-      ...((r.city || "").toLowerCase().split(/[\s,]+/)),
+      ...(foldText(r.city || "").split(/[\s,]+/)),
     ]);
     const queryWords = queryLower.split(/[\s,]+/).filter(w => w.length > 2 && !SERVICE_STOP_WORDS.has(w));
 
@@ -760,7 +767,7 @@ export async function discoverProspects(
       "window": ["glass", "vitre", "fenêtre"],
       "gutter": ["eavestrough", "gouttière", "downspout"],
       "fence": ["fencing", "clôture", "gate"],
-      "roof": ["roofing", "couvreur", "shingle"],
+      "roof": ["roofing", "couvreur", "shingle", "toit", "toiture", "bardeau", "membrane", "elastomere", "ferblant"],
       "paving": ["paver", "asphalt", "concrete", "driveway", "pavé"],
       "siding": ["revêtement", "exterior", "cladding"],
       "renovation": ["remodel", "contractor", "construction", "rénovation"],
@@ -775,15 +782,12 @@ export async function discoverProspects(
     };
 
     // For each query word, check if any synonym matches the category
-    const hasSynonymMatch = queryWords.some(w => {
-      for (const [, synonyms] of Object.entries(CATEGORY_SYNONYMS)) {
-        if (synonyms.some(s => w.includes(s) || s.includes(w))) {
-          // Found a synonym group for this query word — check if category matches any synonym
-          return synonyms.some(s => catLower.includes(s));
-        }
-      }
-      return false;
-    });
+    // Tous les groupes de synonymes liés au mot (avant : on s'arrêtait au premier groupe trouvé)
+    const hasSynonymMatch = queryWords.some(w =>
+      Object.values(CATEGORY_SYNONYMS).some((synonyms) =>
+        synonyms.some(s => w.includes(s) || s.includes(w)) && synonyms.some(s => catLower.includes(s))
+      )
+    );
 
     if (hasSynonymMatch) return true;
 
@@ -884,7 +888,7 @@ export async function discoverProspects(
   const afterLocalFilter = localChecked.filter(({ local }) => local.isValid || local.needsReview);
 
   // #1: Load AI validation cache from DB to avoid re-validating known names
-  let aiCache = new Map<string, { isValid: boolean; cleanName: string; confidence: number; needsReview: boolean }>();
+  const aiCache = new Map<string, { isValid: boolean; cleanName: string; confidence: number; needsReview: boolean }>();
   try {
     const cacheRows = await prisma.prospect.findMany({
       where: { companyNameConfidence: { not: null }, ...(workspaceId ? { workspaceId } : {}) },
@@ -919,7 +923,7 @@ export async function discoverProspects(
   }
 
   // Batch AI validation only for entries that truly need it
-  let aiTokensSaved = afterLocalFilter.length - needsAIValidation.length;
+  const aiTokensSaved = afterLocalFilter.length - needsAIValidation.length;
   if (needsAIValidation.length > 0) {
     try {
       const aiInputs = needsAIValidation.map(({ result }) => ({
@@ -945,12 +949,13 @@ export async function discoverProspects(
   updateDiscoveryProgress(workspaceId, { filterPhase: "Sauvegarde des prospects..." });
   let newCount = 0;
   let processedCount = 0; // total processed (new + existing) — used to enforce target limit
+  let invalidByAi = 0;
 
   for (const { result, local } of afterLocalFilter) {
     if (processedCount >= maxNew || isCancelRequested(workspaceId)) break;
 
     // Skip entries marked invalid by AI
-    if (!local.isValid && !local.needsReview) continue;
+    if (!local.isValid && !local.needsReview) { invalidByAi++; continue; }
 
     const finalName = local.cleanName || result.companyName;
 
@@ -1013,6 +1018,20 @@ export async function discoverProspects(
     console.log(`[discovery] Skipped ${skippedExisting} already-existing prospects (saved API tokens)`);
   }
 
+  const drops: Record<string, number> = {
+    doublons_recherches: allResults.length - unique.length,
+    deja_dans_liste: unique.length - afterExisting.length,
+    meme_tel_ou_site: afterExisting.length - afterExistingDeduped.length,
+    industrie: afterExistingDeduped.length - afterRelevance.length,
+    categorie_google: afterRelevance.length - afterCategoryFilter.length,
+    mots_bloques: afterCategoryFilter.length - afterBlocked.length,
+    nombre_avis: afterBlocked.length - filtered.length,
+    verification_site: filtered.length - afterAIRelevance.length,
+    nom_invalide: afterAIRelevance.length - afterLocalFilter.length + invalidByAi,
+    objectif_atteint: Math.max(0, afterLocalFilter.length - processedCount - invalidByAi),
+  };
+  console.log(`[discovery] ${city} — écartés par étape:`, JSON.stringify(drops));
+
   return {
     found: unique.length,
     new: newCount,
@@ -1023,6 +1042,7 @@ export async function discoverProspects(
       queriesFailed: queryErrorCount,
       queriesSkipped,
       errors,
+      drops,
     },
   };
 }
