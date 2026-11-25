@@ -79,6 +79,14 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 export default function JobProgressBar({ data, onStop, onDismiss }: JobProgressBarProps) {
   const { type, status, title, stepLabel, processed, total, startedAt, currentStep, totalSteps, stepUnit, secondaryLabel, error } = data;
 
+  // Retour immédiat au clic sur « Arrêter » ; remis à zéro pour une nouvelle tâche
+  const [stopping, setStopping] = useState(false);
+  const [stoppingFor, setStoppingFor] = useState(startedAt);
+  if (stoppingFor !== startedAt) {
+    setStoppingFor(startedAt);
+    setStopping(false);
+  }
+
   // ETA state (persisted across renders via refs for smoothing)
   const smoothedRateRef = useRef<number | null>(null);
   const sampleCountRef = useRef(0);
@@ -195,10 +203,11 @@ export default function JobProgressBar({ data, onStop, onDismiss }: JobProgressB
           {/* Stop / Dismiss */}
           {status === "running" && onStop ? (
             <button
-              onClick={onStop}
-              className="text-xs bg-danger-subtle text-danger px-2 py-1 rounded hover:bg-danger/10 transition-colors"
+              onClick={() => { setStopping(true); onStop(); }}
+              disabled={stopping}
+              className="text-xs bg-danger-subtle text-danger px-2 py-1 rounded hover:bg-danger/10 transition-colors disabled:opacity-60"
             >
-              Arrêter
+              {stopping ? "Arrêt en cours…" : "Arrêter"}
             </button>
           ) : status !== "running" && onDismiss ? (
             <button onClick={onDismiss} className="text-foreground-muted hover:text-foreground text-sm">

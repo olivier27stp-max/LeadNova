@@ -1,3 +1,4 @@
+import { untilCancelled, CancelledError } from "./cancellable";
 import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
 import { Prisma } from "@/generated/prisma/client";
@@ -647,7 +648,7 @@ export async function discoverProspects(
       const query = effectiveQueries[nextIndex++];
       queriesRun++;
       try {
-        const results = await searchPlaces(query, city, settings.region);
+        const results = await untilCancelled(searchPlaces(query, city, settings.region), () => isCancelRequested(workspaceId));
         succeededQueries.push(query);
         if (results.length > 0) queriesWithResults++;
         allResults.push(
@@ -660,6 +661,7 @@ export async function discoverProspects(
           }))
         );
       } catch (error) {
+        if (error instanceof CancelledError) { stopAll = true; break; }
         const message = error instanceof Error ? error.message : "Unknown error";
         errors.push(`${query}: ${message}`);
         console.error(`Discovery error for query "${query}":`, error);
@@ -835,7 +837,7 @@ export async function discoverProspects(
       updateDiscoveryProgress(workspaceId, { filterPhase: `Vérification des sites web... (${i + 1}/${withWebsite.length})` });
       const batch = withWebsite.slice(i, i + RELEVANCE_BATCH_SIZE);
       try {
-        const results = await checkRelevanceBatch(
+        const results = await untilCancelled(checkRelevanceBatch(
           batch.map((r) => ({
             companyName: r.companyName,
             website: r.website,
@@ -843,7 +845,7 @@ export async function discoverProspects(
             searchKeyword: r._searchQuery!,
           })),
           relevanceConfig
-        );
+        ), () => isCancelRequested(workspaceId));
         for (let j = 0; j < batch.length; j++) {
           if (results[j]?.relevant !== false) {
             afterAIRelevance.push(batch[j]);
@@ -854,6 +856,7 @@ export async function discoverProspects(
           }
         }
       } catch (error) {
+        if (error instanceof CancelledError) break;
         console.error("[discovery] AI relevance check failed, keeping all:", error);
         afterAIRelevance.push(...batch);
       }

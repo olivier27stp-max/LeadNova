@@ -1,3 +1,4 @@
+import { untilCancelled, CancelledError } from "./cancellable";
 import * as cheerio from "cheerio";
 import { prisma } from "./db";
 import { calculateLeadScore } from "./lead-scoring";
@@ -1785,7 +1786,7 @@ export async function enrichByIds(
     if (isCancelEnrichRequested(workspaceId)) break;
     updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
     try {
-      const result = await enrichWithTimeout(prospect.id);
+      const result = await untilCancelled(enrichWithTimeout(prospect.id), () => isCancelEnrichRequested(workspaceId));
       const foundSomething = !result.noData && !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
       if (foundSomething) {
         enriched++;
@@ -1795,6 +1796,7 @@ export async function enrichByIds(
         failed++;
       }
     } catch (error) {
+      if (error instanceof CancelledError) break;
       failed++;
       const msg = error instanceof Error ? error.message : "unknown";
       console.error(`[enrichByIds] Failed for ${prospect.companyName}: ${msg}`);
@@ -2066,7 +2068,7 @@ export async function enrichBatch(
     if (isCancelEnrichRequested(workspaceId)) break;
     updateEnrichProgress({ currentProspect: prospect.companyName }, workspaceId);
     try {
-      const result = await enrichWithTimeout(prospect.id);
+      const result = await untilCancelled(enrichWithTimeout(prospect.id), () => isCancelEnrichRequested(workspaceId));
       const foundSomething = !result.noData && !!(result.email || result.phone || result.city || result.linkedinUrl || result.contactPageUrl);
       if (foundSomething) {
         enriched++;
@@ -2076,6 +2078,7 @@ export async function enrichBatch(
         failed++;
       }
     } catch (error) {
+      if (error instanceof CancelledError) break;
       failed++;
       const msg = error instanceof Error ? error.message : "unknown";
       console.error(`[enrichBatch] Failed for ${prospect.companyName}: ${msg}`);
