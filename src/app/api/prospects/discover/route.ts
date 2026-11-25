@@ -231,6 +231,7 @@ export async function POST(request: NextRequest) {
         let totalQueriesFailed = 0;
         let totalQueriesSkipped = 0;
         const allErrors: string[] = [];
+        const allDrops: Record<string, number> = {};
         let rounds = 0;
         // Avec Outscraper, un 2e tour relance exactement les mêmes requêtes (coût en double, mêmes résultats)
         const maxRounds = process.env.OUTSCRAPER_API_KEY ? 1 : 20;
@@ -256,6 +257,7 @@ export async function POST(request: NextRequest) {
             totalQueriesFailed += result.diagnostics.queriesFailed;
             totalQueriesSkipped += result.diagnostics.queriesSkipped ?? 0;
             allErrors.push(...result.diagnostics.errors);
+            for (const [k, v] of Object.entries(result.diagnostics.drops ?? {})) allDrops[k] = (allDrops[k] ?? 0) + v;
 
             updateDiscoveryProgress(workspaceId, { found: totalFound, newCount: totalNew, completedCities: (getDiscoveryProgress(workspaceId)?.completedCities || 0) + 1 });
           }
@@ -306,6 +308,7 @@ export async function POST(request: NextRequest) {
             rounds,
             cancelled: wasCancelled,
             campaign_id: campaignId ?? null,
+            filter_drops: allDrops,
           },
         });
 
@@ -380,6 +383,7 @@ export async function POST(request: NextRequest) {
           errors: result.diagnostics.errors.slice(0, 5),
           industry: industry || undefined,
           campaign_id: campaignId ?? null,
+          filter_drops: result.diagnostics.drops ?? {},
         },
       });
 

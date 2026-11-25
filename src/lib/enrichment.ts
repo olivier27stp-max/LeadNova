@@ -1657,7 +1657,10 @@ async function enrichProspectCore(prospectId: string, deadline?: number): Promis
 
   // ── Step 7: Google Maps + Web search fallback ──────────
   if (!hasEverything()) {
-    const mapsResult = await searchGoogleMaps(prospect.companyName, prospect.city || foundCity || undefined);
+    // Maps (Outscraper, payant) ne donne que ville et téléphone : inutile quand seul le courriel manque.
+    const mapsResult = !foundCity || !foundPhone
+      ? await searchGoogleMaps(prospect.companyName, prospect.city || foundCity || undefined)
+      : null;
     if (mapsResult) {
       if (!foundCity && mapsResult.city) foundCity = normalizeCity(mapsResult.city);
       if (!foundPhone && mapsResult.phone) foundPhone = mapsResult.phone;

@@ -160,6 +160,18 @@ function hasNegativeContext(text: string, keywordWords: string[]): { found: bool
 }
 
 /** Check a single prospect's relevance */
+function foldForMatch(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+/** Mot ou expression entière, sans accents (« bâtiment » ne trouve pas « bâtiments » dans un autre mot). */
+function containsWholePhraseFolded(text: string, phrase: string): boolean {
+  const p = foldForMatch(phrase).trim();
+  if (!p) return false;
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u").test(foldForMatch(text));
+}
+
 function checkSingleRelevance(
   input: RelevanceInput,
   siteText: string,
@@ -218,13 +230,17 @@ function checkSingleRelevance(
   const allPositiveKeywords = [...config.positiveKeywords, ...englishServiceKeywords];
 
   // ─── Step 1: Check blocked keywords (explicit user exclusions) ───
+  // Nom de l'entreprise, catégorie Google et adresse du site seulement, en mot entier.
+  // Avant : n'importe où dans le texte du site, en sous-chaîne → « bâtiment » rejetait presque tous
+  // les entrepreneurs québécois (« Régie du bâtiment du Québec » / licence RBQ affichée sur le site).
+  const identityText = `${input.companyName} ${input.googleCategory || ""}`;
   for (const blocked of config.blockedKeywords) {
-    const blockedLower = blocked.toLowerCase();
-    if (allText.includes(blockedLower)) {
+    if (containsWholePhraseFolded(identityText, blocked)) {
       return { relevant: false, reason: `Mot bloqué trouvé: "${blocked}"` };
     }
     // Also check URL
-    if (urlLower.includes(blockedLower.replace(/\s+/g, ""))) {
+    const blockedSlug = foldForMatch(blocked).replace(/[^a-z0-9]+/g, "");
+    if (blockedSlug.length >= 5 && foldForMatch(urlLower).replace(/[^a-z0-9]+/g, "").includes(blockedSlug)) {
       return { relevant: false, reason: `Mot bloqué dans l'URL: "${blocked}"` };
     }
   }
