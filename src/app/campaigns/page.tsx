@@ -25,6 +25,50 @@ interface Campaign {
   lastSentAt: string | null;
   requireApproval: boolean;
   createdAt: string;
+  overview?: CampaignOverview | null;
+}
+
+interface CampaignOverview {
+  contacts: number;
+  with_email: number;
+  with_phone: number;
+  not_enriched: number;
+  sent: number;
+  contacted: number;
+  opened: number;
+  replied: number;
+  positive: number;
+  bounced: number;
+  pending_sends: number;
+}
+
+function pct(n: number, of: number) {
+  return of > 0 ? `${Math.round((n / of) * 100)} %` : "—";
+}
+
+// Aperçu d'une campagne : prospects (joignables, à enrichir) puis résultats des envois
+function CampaignOverviewStrip({ o }: { o: CampaignOverview }) {
+  const item = (label: string, value: string | number, title: string, tone = "") => (
+    <span title={title} className={`inline-flex items-baseline gap-1 ${tone}`}>
+      <span className="font-semibold text-foreground tabular-nums">{value}</span>
+      <span>{label}</span>
+    </span>
+  );
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground-muted">
+      {item(o.contacts > 1 ? "prospects" : "prospect", o.contacts, "Prospects dans la campagne")}
+      {item("courriels fiables", o.with_email, "Prospects avec un courriel trouvé (pas deviné)")}
+      {item("tél.", o.with_phone, "Prospects avec un numéro de téléphone")}
+      {o.not_enriched > 0 && item("à enrichir", o.not_enriched, "Prospects jamais enrichis : pas encore de courriel cherché", "text-warning")}
+      <span className="h-3 w-px bg-border" aria-hidden />
+      {item("contactés", o.contacted, `${o.sent} courriel(s) envoyé(s), relances comprises`)}
+      {item("ouverts", pct(o.opened, o.contacted), `${o.opened} prospect(s) ont ouvert au moins un courriel`)}
+      {item(o.replied > 1 ? "réponses" : "réponse", o.replied, `${o.positive} positive(s)`)}
+      {o.positive > 0 && item(o.positive > 1 ? "positives" : "positive", o.positive, "Réponses positives", "text-success")}
+      {o.bounced > 0 && item("rebonds", o.bounced, "Courriels revenus (adresse invalide)", "text-danger")}
+      {o.pending_sends > 0 && item(o.pending_sends > 1 ? "envois planifiés" : "envoi planifié", o.pending_sends, "Envois planifiés pas encore partis", "text-primary")}
+    </div>
+  );
 }
 
 type StatsPeriod = "day" | "week" | "month";
@@ -103,7 +147,7 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/campaigns").then((r) => {
+      fetch("/api/campaigns?overview=1").then((r) => {
         if (!r.ok) return [];
         return r.json().then((d) => (Array.isArray(d) ? d : []));
       }),
@@ -285,6 +329,7 @@ export default function CampaignsPage() {
                           {stats?.byCampaign[c.id] || 0} {t("campaigns", "emailsSent")}
                         </span>
                       </p>
+                      {c.overview && <CampaignOverviewStrip o={c.overview} />}
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-4">
                       <Badge variant={STATUS_VARIANT[c.status] || "default"}>
