@@ -456,7 +456,72 @@ export async function POST(request: NextRequest) {
           // Skip errors (invalid IDs, etc.)
         }
       }
-      return NextResponse.json({ assigned });
+
+      // Autres campagnes où ces prospects se trouvent déjà (pour proposer de les en retirer)
+      const otherLinks = await prisma.campaignContact.findMany({
+        where: { prospectId: { in: ids }, campaignId: { not: targetCampaignId } },
+        select: { campaign: { select: { id: true, number: true, name: true } } },
+      });
+      const byCampaign = new Map<string, { id: string; number: number; name: string; count: number }>();
+      for (const { campaign } of otherLinks) {
+        const entry = byCampaign.get(campaign.id) ?? { ...campaign, count: 0 };
+        entry.count++;
+        byCampaign.set(campaign.id, entry);
+      }
+      const otherCampaigns = [...byCampaign.values()].sort((a, b) => a.number - b.number);
+
+      return NextResponse.json({ assigned, otherCampaigns });
+    }
+
+    // Retire des prospects d'une ou plusieurs campagnes (ex. après les avoir mis dans une nouvelle).
+    // L'historique des courriels déjà envoyés reste ; seuls les envois planifiés pas encore partis sont mis à jour.
+    if (body._action === "bulkRemoveFromCampaigns") {
+      const { ids, campaignIds } = body;
+      if (!Array.isArray(ids) || !Array.isArray(campaignIds) || ids.length === 0 || campaignIds.length === 0) {
+        return NextResponse.json({ error: "ids and campaignIds required" }, { status: 400 });
+      }
+      const workspaceId = await getWorkspaceId();
+      const campaigns = await prisma.campaign.findMany({
+        where: { id: { in: campaignIds }, workspaceId: workspaceId ?? null },
+        select: { id: true, number: true, name: true },
+      });
+      const allowedIds = campaigns.map((c) => c.id);
+      if (allowedIds.length === 0) {
+        return NextResponse.json({ error: "Campagne introuvable" }, { status: 404 });
+      }
+
+      const removed = await prisma.campaignContact.deleteMany({
+        where: { campaignId: { in: allowedIds }, prospectId: { in: ids } },
+      });
+
+      // Envois planifiés de ces campagnes : retirer ces prospects de la liste figée au moment de planifier
+      const removedSet = new Set<string>(ids);
+      const pending = await prisma.scheduledEmail.findMany({
+        where: { campaignId: { in: allowedIds }, status: "PENDING" },
+        select: { id: true, snapshotProspectIds: true },
+      });
+      for (const se of pending) {
+        if (!se.snapshotProspectIds.some((pid) => removedSet.has(pid))) continue;
+        const remaining = se.snapshotProspectIds.filter((pid) => !removedSet.has(pid));
+        // Liste vide = le traitement prendrait TOUS les contacts de la campagne : on annule plutôt l'envoi
+        await prisma.scheduledEmail.update({
+          where: { id: se.id },
+          data: remaining.length > 0
+            ? { snapshotProspectIds: remaining }
+            : { status: "CANCELLED", error: "Tous les destinataires ont été retirés de la campagne" },
+        });
+      }
+
+      await logActivity({
+        action: "campaign_contacts_removed",
+        type: "info",
+        title: "Prospects retirés de campagne",
+        details: `${removed.count} retrait${removed.count > 1 ? "s" : ""} — ${campaigns.map((c) => `#${c.number} ${c.name}`).join(", ")}`,
+        workspaceId: workspaceId ?? undefined,
+        metadata: { campaign_ids: allowedIds, prospect_count: ids.length, removed: removed.count },
+      });
+
+      return NextResponse.json({ removed: removed.count });
     }
 
     // Clean up prospects that don't match targeting keywords (with website scraping)
