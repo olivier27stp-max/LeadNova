@@ -1365,6 +1365,87 @@ export default function ProspectsPage() {
     }
   }
 
+  // Nouvelle campagne à partir de la sélection, puis question : garder dans les anciennes campagnes ?
+  const [newCampaignModal, setNewCampaignModal] = useState<
+    | null
+    | { step: "name"; name: string; saving: boolean; error?: string }
+    | {
+        step: "ask";
+        campaign: CampaignOption;
+        ids: string[];
+        assigned: number;
+        others: (CampaignOption & { count: number })[];
+        saving: boolean;
+        error?: string;
+      }
+  >(null);
+
+  // Verrou synchrone : un double-clic (ou Entrée + clic) arrive avant que « saving » soit rendu
+  const newCampaignBusy = useRef(false);
+
+  async function handleCreateCampaignFromSelection() {
+    if (newCampaignModal?.step !== "name" || newCampaignBusy.current) return;
+    const name = newCampaignModal.name.trim();
+    const ids = Array.from(selectedIds);
+    if (!name || ids.length === 0) return;
+    newCampaignBusy.current = true;
+    setNewCampaignModal({ ...newCampaignModal, saving: true, error: undefined });
+    try {
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error("create");
+      const created = await res.json();
+      const campaign: CampaignOption = { id: created.id, number: created.number, name: created.name };
+      setCampaigns((prev) => [...prev, campaign].sort((a, b) => a.number - b.number));
+
+      const assignRes = await fetch("/api/prospects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ _action: "bulkAssignCampaign", ids, campaignId: campaign.id }),
+      });
+      if (!assignRes.ok) throw new Error("assign");
+      const data = await assignRes.json();
+      setSelectedIds(new Set());
+      fetchProspects();
+      setNewCampaignModal({
+        step: "ask",
+        campaign,
+        ids,
+        assigned: data.assigned ?? 0,
+        others: Array.isArray(data.otherCampaigns) ? data.otherCampaigns : [],
+        saving: false,
+      });
+    } catch {
+      setNewCampaignModal((m) => (m?.step === "name" ? { ...m, saving: false, error: "Erreur lors de la création de la campagne" } : m));
+    } finally {
+      newCampaignBusy.current = false;
+    }
+  }
+
+  async function handleRemoveFromOldCampaigns() {
+    if (newCampaignModal?.step !== "ask") return;
+    setNewCampaignModal({ ...newCampaignModal, saving: true, error: undefined });
+    try {
+      const res = await fetch("/api/prospects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          _action: "bulkRemoveFromCampaigns",
+          ids: newCampaignModal.ids,
+          campaignIds: newCampaignModal.others.map((c) => c.id),
+        }),
+      });
+      if (!res.ok) throw new Error("remove");
+      setNewCampaignModal(null);
+      fetchProspects();
+    } catch {
+      setNewCampaignModal((m) => (m?.step === "ask" ? { ...m, saving: false, error: "Erreur lors du retrait des anciennes campagnes" } : m));
+    }
+  }
+
   // Edit prospect
   function startEditing() {
     if (!selectedProspect) return;
@@ -2864,6 +2945,13 @@ export default function ProspectsPage() {
             >
               {actionLoading === "bulk-campaign" ? "..." : "Assigner"}
             </button>
+            <button
+              onClick={() => setNewCampaignModal({ step: "name", name: "", saving: false })}
+              className="text-sm bg-primary text-white px-3 py-1.5 rounded-md hover:bg-primary-hover"
+              title="Crée une nouvelle campagne avec les prospects sélectionnés"
+            >
+              Nouvelle campagne
+            </button>
           </div>
           <button
             onClick={() => setSelectedIds(new Set())}
@@ -3368,6 +3456,110 @@ export default function ProspectsPage() {
           </div>
         </div>
       )}
+      {/* Nouvelle campagne à partir de la sélection */}
+      {newCampaignModal && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+          onClick={() => { if (!newCampaignModal.saving) setNewCampaignModal(null); }}
+        >
+          <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            {newCampaignModal.step === "name" ? (
+              <form onSubmit={(e) => { e.preventDefault(); void handleCreateCampaignFromSelection(); }}>
+                <h2 className="text-lg font-semibold text-foreground mb-1">Nouvelle campagne</h2>
+                <p className="text-sm text-foreground-muted mb-4">
+                  {selectedIds.size} prospect{selectedIds.size > 1 ? "s" : ""} sélectionné{selectedIds.size > 1 ? "s" : ""} {selectedIds.size > 1 ? "seront ajoutés" : "sera ajouté"} à la nouvelle campagne.
+                </p>
+                <label className="block text-xs font-semibold text-foreground-muted mb-1.5 uppercase tracking-wide">Nom de la campagne</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newCampaignModal.name}
+                  onChange={(e) => setNewCampaignModal({ ...newCampaignModal, name: e.target.value })}
+                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+                  placeholder="Ex. : Paysagistes Laval — relance"
+                />
+                {newCampaignModal.error && <p className="text-sm text-danger mt-2">{newCampaignModal.error}</p>}
+                <div className="flex justify-end gap-2 mt-5">
+                  <button
+                    type="button"
+                    onClick={() => setNewCampaignModal(null)}
+                    disabled={newCampaignModal.saving}
+                    className="text-sm px-4 py-2 rounded-md border border-border text-foreground-secondary hover:bg-background-subtle disabled:opacity-50"
+                  >
+                    {t("common", "cancel")}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!newCampaignModal.name.trim() || newCampaignModal.saving || selectedIds.size === 0}
+                    className="text-sm bg-primary text-white px-4 py-2 rounded-md font-medium hover:bg-primary-hover disabled:opacity-50"
+                  >
+                    {newCampaignModal.saving ? "Création..." : "Créer la campagne"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div>
+                <h2 className="text-lg font-semibold text-foreground mb-1">
+                  Campagne #{newCampaignModal.campaign.number} créée
+                </h2>
+                <p className="text-sm text-foreground-muted mb-4">
+                  {newCampaignModal.assigned} prospect{newCampaignModal.assigned > 1 ? "s" : ""} ajouté{newCampaignModal.assigned > 1 ? "s" : ""} à « {newCampaignModal.campaign.name} ».
+                </p>
+                {newCampaignModal.others.length > 0 ? (
+                  <>
+                    <p className="text-sm font-medium text-foreground mb-2">
+                      Certains de ces prospects sont déjà dans une autre campagne. Voulez-vous les y garder ?
+                    </p>
+                    <ul className="text-sm text-foreground-secondary mb-4 space-y-1 max-h-40 overflow-y-auto">
+                      {newCampaignModal.others.map((c) => (
+                        <li key={c.id} className="flex justify-between gap-3 px-3 py-1.5 bg-background-muted rounded">
+                          <span className="truncate">#{c.number} — {c.name}</span>
+                          <span className="text-foreground-muted shrink-0">{c.count} prospect{c.count > 1 ? "s" : ""}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] text-foreground-muted mb-4">
+                      Retirer : ils ne recevront plus les envois ni les relances de l&apos;ancienne campagne. L&apos;historique des courriels déjà envoyés est conservé.
+                    </p>
+                    {newCampaignModal.error && <p className="text-sm text-danger mb-3">{newCampaignModal.error}</p>}
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => void handleRemoveFromOldCampaigns()}
+                        disabled={newCampaignModal.saving}
+                        className="text-sm bg-primary text-white px-4 py-2 rounded-md font-medium hover:bg-primary-hover disabled:opacity-50"
+                      >
+                        {newCampaignModal.saving ? "..." : "Les retirer de l'ancienne campagne"}
+                      </button>
+                      <button
+                        onClick={() => setNewCampaignModal(null)}
+                        disabled={newCampaignModal.saving}
+                        className="text-sm px-4 py-2 rounded-md border border-border text-foreground hover:bg-background-subtle disabled:opacity-50"
+                      >
+                        Les garder aussi dans l&apos;ancienne campagne
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setNewCampaignModal(null)}
+                      className="text-sm px-4 py-2 rounded-md border border-border text-foreground-secondary hover:bg-background-subtle"
+                    >
+                      Fermer
+                    </button>
+                  </div>
+                )}
+                <div className="mt-3 text-center">
+                  <Link href={`/campaigns/${newCampaignModal.campaign.id}`} className="text-sm text-primary hover:underline">
+                    Ouvrir la campagne pour écrire le message →
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Import Modal */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={closeImportModal}>
