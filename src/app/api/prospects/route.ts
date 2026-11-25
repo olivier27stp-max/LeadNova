@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { calculateLeadScore } from "@/lib/lead-scoring";
 import { DAILY_DISCOVERY_LIMIT } from "@/lib/config";
 import { logActivity } from "@/lib/activity";
+import { untilCancelled, CancelledError } from "@/lib/cancellable";
 import { getSessionUser } from "@/lib/session";
 import { getActiveWorkspaceId } from "@/lib/workspace";
 import { industryValuesForGroup } from "@/lib/industry-groups";
@@ -510,7 +511,7 @@ export async function POST(request: NextRequest) {
         });
 
         try {
-          const results = await checkRelevanceBatch(
+          const results = await untilCancelled(checkRelevanceBatch(
             batch.map((p) => ({
               companyName: p.companyName,
               website: p.website || undefined,
@@ -518,7 +519,7 @@ export async function POST(request: NextRequest) {
               searchKeyword: keywords[0],
             })),
             relevanceConfig
-          );
+          ), isCleanupCancelRequested);
           for (let j = 0; j < batch.length; j++) {
             if (results[j]?.relevant === false) {
               irrelevantIds.push(batch[j].id);
@@ -526,6 +527,7 @@ export async function POST(request: NextRequest) {
             }
           }
         } catch (err) {
+          if (err instanceof CancelledError) break;
           console.error(`[cleanup] Batch ${i} error:`, err);
         }
       }
