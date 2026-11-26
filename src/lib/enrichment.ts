@@ -1278,11 +1278,15 @@ async function findFallbackProspectData(prospect: {
   address: string | null;
   email: string | null;
   emailGuessed: boolean;
+  googleMapsUrl?: string | null;
 }) {
   const updateData: Record<string, unknown> = {};
 
-  console.log(`[enrich:fallback] ${prospect.companyName} — searching Google Maps + Web...`);
-  const mapsResult = await searchGoogleMaps(prospect.companyName, prospect.city || undefined);
+  // Prospect trouvé par la découverte (il a déjà sa fiche Google Maps) : relancer Google Maps
+  // (Outscraper, payant) redonnerait la même fiche, sans site web. On passe directement au web.
+  const alreadyFromMaps = !!prospect.googleMapsUrl;
+  console.log(`[enrich:fallback] ${prospect.companyName} — searching ${alreadyFromMaps ? "Web (fiche Maps déjà connue)" : "Google Maps + Web"}...`);
+  const mapsResult = alreadyFromMaps ? null : await searchGoogleMaps(prospect.companyName, prospect.city || undefined);
   console.log(`[enrich:fallback] ${prospect.companyName} — Maps result: ${mapsResult ? `website=${mapsResult.website || "NONE"}, phone=${mapsResult.phone || "NONE"}, city=${mapsResult.city || "NONE"}` : "NULL (API failed or no result)"}`);
   if (mapsResult) {
     if (mapsResult.website && isValidWebsiteCandidate(mapsResult.website)) {
