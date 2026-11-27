@@ -141,6 +141,7 @@ export async function GET() {
     // Merge with defaults to ensure new keys are present
     const stored = record.data as Record<string, unknown>;
     const merged = deepMerge(DEFAULT_SETTINGS, stored);
+    delete merged.slack; // secret Slack : seulement via /api/settings/slack (admins)
     // Decrypt sensitive fields before sending to client
     decryptSensitiveFields(merged);
     return NextResponse.json(merged);
@@ -164,6 +165,8 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
+    // Slack : seulement via /api/settings/slack (admins, URL validée et chiffrée)
+    delete body.slack;
 
     // Get existing settings for this workspace
     const existing = await prisma.appSettings.findUnique({
@@ -195,7 +198,8 @@ export async function PATCH(request: NextRequest) {
     });
 
     // Decrypt before returning to client
-    const responseData = record.data as Record<string, unknown>;
+    const responseData = { ...(record.data as Record<string, unknown>) };
+    delete responseData.slack;
     decryptSensitiveFields(responseData);
     return NextResponse.json(responseData);
   } catch (error) {

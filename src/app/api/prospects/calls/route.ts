@@ -6,6 +6,7 @@ import {
   CALL_OUTCOMES, CALL_WHO, CURRENT_TOOLS, OBJECTIONS, LOST_REASONS, CONNECTED_OUTCOMES,
 } from "@/lib/call-options";
 import { advanceSalesStage, isSalesStage, setSalesStage } from "@/lib/sales-pipeline";
+import { enqueueManualPositiveNotification } from "@/lib/slack-notifications";
 
 function pick<T extends Record<string, string>>(options: T, value: unknown): keyof T | null {
   return typeof value === "string" && value in options ? (value as keyof T) : null;
@@ -134,6 +135,11 @@ export async function PATCH(request: NextRequest) {
       lostReasonLabel: lostReason ? LOST_REASONS[lostReason] : null,
       userId: ctx.userId,
     });
+
+    // Glissé à la main dans « Réponse positive » → notification Slack (une fois par prospect et par campagne)
+    if (salesStage === "POSITIVE_REPLY" && prospect.salesStage !== "POSITIVE_REPLY") {
+      await enqueueManualPositiveNotification({ workspaceId: ctx.workspaceId, prospectId: prospect.id });
+    }
 
     return NextResponse.json(updated);
   } catch (error) {
