@@ -143,7 +143,7 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
 
     const lock = await client.getMailboxLock("INBOX");
     const bounceUids: number[] = [];
-    const replyToClassify: Array<{ uid: number; activityId: string; prospectId: string }> = [];
+    const replyToClassify: Array<{ uid: number; activityId: string; prospectId: string; messageId: string | null; subject: string; from: string }> = [];
     try {
       // ── Pass 1: scan envelopes for replies & collect bounce UIDs ──
       const messages = client.fetch(
@@ -180,7 +180,14 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
 
         for (const activity of matched) {
           if (!activity.replyReceived) {
-            replyToClassify.push({ uid: msg.uid, activityId: activity.id, prospectId: activity.prospectId });
+            replyToClassify.push({
+              uid: msg.uid,
+              activityId: activity.id,
+              prospectId: activity.prospectId,
+              messageId: envelope.messageId || null,
+              subject,
+              from: fromAddr,
+            });
             await prisma.emailActivity.update({
               where: { id: activity.id },
               data: { replyReceived: true },
@@ -225,7 +232,11 @@ export async function pollImapForUpdates(workspaceId: string): Promise<{
         try {
           const fetched = await client.fetchOne(String(r.uid), { source: true }, { uid: true });
           const rawSource = fetched ? (fetched as unknown as { source?: Buffer }).source : undefined;
-          await recordReplyClassification(r.activityId, r.prospectId, rawSource ? rawSource.toString() : "", workspaceId);
+          await recordReplyClassification(r.activityId, r.prospectId, rawSource ? rawSource.toString() : "", workspaceId, {
+            messageId: r.messageId,
+            subject: r.subject,
+            from: r.from,
+          });
         } catch (err) {
           console.error("[imap] reply classification failed:", err);
         }
