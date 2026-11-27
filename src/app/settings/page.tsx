@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import AiAssistButton from "@/components/AiAssistButton";
 import ProspectTagsSettings from "@/components/ProspectTagsSettings";
+import SlackNotificationsSettings from "@/components/SlackNotificationsSettings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -3759,6 +3760,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             </SectionCard>
+            <SlackNotificationsSettings />
           </motion.div>
         );
 

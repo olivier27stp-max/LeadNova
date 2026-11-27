@@ -273,9 +273,6 @@ export async function pollGmailForUpdates(workspaceId: string): Promise<{ replie
         where: { id: activity.id },
         data: { replyReceived: true },
       });
-      // Ton de la réponse (positive / négative / absence / désabonnement)
-      await recordReplyClassification(activity.id, activity.prospect.id, full.data.snippet || "", workspaceId);
-
       // Update prospect status to REPLIED if not already beyond that
       if (activity.prospect.status !== "QUALIFIED") {
         await prisma.prospect.update({
@@ -283,6 +280,12 @@ export async function pollGmailForUpdates(workspaceId: string): Promise<{ replie
           data: { status: "REPLIED" },
         });
       }
+
+      // Ton de la réponse (après le statut REPLIED : un désabonnement ou un rebond le remplace)
+      await recordReplyClassification(activity.id, activity.prospect.id, full.data.snippet || "", workspaceId, {
+        messageId: msg.id,
+        from: senderEmail,
+      });
 
       // Auto-add to funnel "New Replies" stage
       try {

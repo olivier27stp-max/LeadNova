@@ -358,7 +358,7 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       where: { campaignId: campaign.id },
       include: {
         prospect: {
-          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true, emailGuessed: true, emailStatus: true },
+          select: { id: true, companyName: true, email: true, city: true, status: true, contactFormProvider: true, ownerFirstName: true, ownerConfidence: true, emailGuessed: true, emailStatus: true, lastReplySentiment: true },
         },
       },
     });
@@ -371,6 +371,8 @@ export async function processAutoFollowUps(): Promise<{ sent: number; errors: st
       const prospect = cc.prospect;
       if (!prospect.email) continue;
       if (prospect.status === "BOUNCED") continue;
+      // Réponse positive (passe au pipeline) ou désabonnement : plus de relance, même si « arrêter si réponse » est décoché
+      if (prospect.lastReplySentiment === "positive" || prospect.lastReplySentiment === "unsubscribe") continue;
       if (isUnverifiedGuess(prospect)) {
         skippedGuessed++;
         continue;

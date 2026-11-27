@@ -46,3 +46,8 @@ export function decrypt(value: string): string {
 export function isEncrypted(value: string): boolean {
   return typeof value === "string" && value.startsWith(PREFIX);
 }
+
+/** true si ENCRYPTION_KEY (64 caractères hex) est configurée : requis pour les secrets qui ne doivent jamais être en clair. */
+export function hasEncryptionKey(): boolean {
+  return getKey() !== null;
+}

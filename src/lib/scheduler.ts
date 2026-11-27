@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { processScheduledEmails } from "./process-scheduled-emails";
 import { processAutoFollowUps } from "./process-scheduled-emails";
 import { pollImapForUpdates } from "./imap-poller";
+import { processSlackQueue } from "./slack-notifications";
 import { prisma } from "./db";
 import { QUEBEC_TZ } from "./quebec-time";
 
@@ -70,5 +71,17 @@ export function startScheduler() {
     }
   }, CRON_OPTIONS);
 
-  console.log("[scheduler] Démarré — emails (1min) + relances (2h) + IMAP (5min)");
+  // Notifications Slack en file — chaque minute, hors de la sync IMAP (une erreur n'y remonte jamais)
+  cron.schedule("* * * * *", async () => {
+    try {
+      const result = await processSlackQueue();
+      if (result.sent > 0 || result.failed > 0) {
+        console.log(`[scheduler] Slack : ${result.sent} envoyée(s), ${result.failed} échec(s)`);
+      }
+    } catch (err) {
+      console.error("[scheduler] Erreur notifications Slack:", err instanceof Error ? err.message : err);
+    }
+  }, CRON_OPTIONS);
+
+  console.log("[scheduler] Démarré — emails (1min) + relances (2h) + IMAP (5min) + Slack (1min)");
 }

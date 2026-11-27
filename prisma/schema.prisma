@@ -66,6 +66,7 @@ model Workspace {
   dismissedFollowUps DismissedFollowUp[]
   funnelStages       FunnelStage[]
   emailAccounts      EmailAccount[]
+  slackNotifications SlackNotification[]
 
   @@map("workspaces")
 }
@@ -247,8 +248,10 @@ model EmailActivity {
   firstClickedAt  DateTime?
   lastClickedAt   DateTime?
   repliedAt       DateTime?
-  replySentiment  String?   // positive | neutral | negative | out_of_office | unsubscribe
+  replySentiment  String?   // positive | neutral | negative | out_of_office | unsubscribe | bounce
   replySnippet    String?
+  replyConfidence Float?    // confiance de la classification (0–1)
+  replyMessageId  String?   // Message-ID (IMAP) ou id Gmail de la réponse classée
 
   prospect        Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -740,4 +743,30 @@ model CallLog {
   @@index([prospectId])
   @@index([workspaceId, createdAt])
   @@map("call_logs")
+}
+
+// File d'envoi des notifications Slack (une ligne = un message). La clé (workspaceId, dedupeKey)
+// garantit l'idempotence : une seule notification par réponse (Message-ID) ou par prospect et campagne.
+model SlackNotification {
+  id          String    @id @default(cuid())
+  workspaceId String
+  dedupeKey   String
+  event       String    // positive_reply | reply | unsubscribe | manual_positive
+  prospectId  String?
+  campaignId  String?
+  activityId  String?
+  status      String    @default("PENDING") // PENDING | SENDING | SENT | FAILED | SKIPPED
+  attempts    Int       @default(0)
+  payload     Json      @default("{}")      // catégorie, confiance, extrait (effacé après l'envoi)
+  lastError   String?
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, dedupeKey])
+  @@index([status, createdAt])
+  @@index([workspaceId, prospectId, campaignId])
+  @@map("slack_notifications")
 }
